@@ -17,7 +17,14 @@ interface Props {
 }
 
 export default function GuestChip({ guestId, context, className }: Props) {
-  const { guests } = useSeating();
+  const {
+    guests,
+    selectedGuestId,
+    selectGuest,
+    clearSelectedGuest,
+    relatedHouseholdGuestIds,
+    relatedGroupGuestIds,
+  } = useSeating();
   const { searchQuery } = useSearch();
   const guest = guests.get(guestId);
 
@@ -29,6 +36,23 @@ export default function GuestChip({ guestId, context, className }: Props) {
   if (!guest) return null;
 
   const style = transform ? { transform: CSS.Translate.toString(transform) } : undefined;
+  const relationClass =
+    selectedGuestId === guestId
+      ? "is-selected"
+      : relatedHouseholdGuestIds.has(guestId)
+        ? "is-related-household"
+        : relatedGroupGuestIds.has(guestId)
+          ? "is-related-group"
+          : null;
+
+  function handleSelectGuest() {
+    if (isDragging) return;
+    if (selectedGuestId === guestId) {
+      clearSelectedGuest();
+    } else {
+      selectGuest(guestId);
+    }
+  }
 
   return (
     <div
@@ -38,6 +62,7 @@ export default function GuestChip({ guestId, context, className }: Props) {
         "guest-chip",
         `guest-chip--${context}`,
         className,
+        relationClass,
         isDragging ? "is-dragging" : null,
         searchQuery.trim() &&
         normalizeForSearch(guest.fullName).includes(normalizeForSearch(searchQuery.trim()))
@@ -47,6 +72,7 @@ export default function GuestChip({ guestId, context, className }: Props) {
         .filter(Boolean)
         .join(" ")}
       title={guest.fullName}
+      onClick={handleSelectGuest}
       {...listeners}
       {...attributes}>
       <span className={`guest-name guest-name--host-${guest.host}`}>{guest.fullName}</span>

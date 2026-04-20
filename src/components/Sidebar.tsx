@@ -14,7 +14,7 @@ function normalizeForSearch(str: string): string {
 }
 
 export default function Sidebar() {
-  const { state, parties, guests } = useSeating();
+  const { state, parties, guests, selectedGuestId } = useSeating();
   const { searchQuery, setSearchQuery } = useSearch();
   const unassignedSet = useMemo(() => new Set(state.unassigned), [state.unassigned]);
   const normalizedQuery = useMemo(() => normalizeForSearch(searchQuery.trim()), [searchQuery]);
@@ -79,6 +79,8 @@ export default function Sidebar() {
   }
 
   const sortedGroups = [...groupedParties.keys()];
+  const selectedGuest = selectedGuestId ? (guests.get(selectedGuestId) ?? null) : null;
+  const selectedGuestParty = selectedGuest ? (parties.get(selectedGuest.partyId) ?? null) : null;
 
   return (
     <aside className="sidebar">
@@ -123,6 +125,32 @@ export default function Sidebar() {
           ))
         )}
       </div>
+      <section
+        className="sidebar-selected-guest"
+        aria-live="polite"
+        aria-label="Selected guest details">
+        {!selectedGuest ? (
+          <p className="sidebar-selected-guest-empty">Select a guest to view details.</p>
+        ) : (
+          <>
+            <p className="sidebar-selected-guest-name">{selectedGuest.fullName}</p>
+            <dl className="sidebar-selected-guest-meta">
+              <div>
+                <dt>Household</dt>
+                <dd>{selectedGuestParty?.household ?? "Unknown"}</dd>
+              </div>
+              <div>
+                <dt>Group</dt>
+                <dd>{selectedGuest.group || "No Group"}</dd>
+              </div>
+              <div>
+                <dt>Host</dt>
+                <dd>{selectedGuest.host.toUpperCase()}</dd>
+              </div>
+            </dl>
+          </>
+        )}
+      </section>
     </aside>
   );
 }

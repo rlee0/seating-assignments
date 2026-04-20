@@ -21,12 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } f
 
 import Sidebar from "./components/Sidebar";
 import TableBoard from "./components/TableBoard";
-import {
-  getDefaultGuestRows,
-  getGuestSourceSignature,
-  parseGuestsFromRows,
-  type ParsedData,
-} from "./data/parseGuests";
+import { getGuestSourceSignature, parseGuestsFromRows, type ParsedData } from "./data/parseGuests";
 import {
   clearPersistedAppState,
   isCompatibleState,
@@ -150,7 +145,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 function getInitialGuestRows(): GuestInputRow[] {
   const sourceSignature = getGuestSourceSignature();
 
-  return loadPersistedGuestRows(sourceSignature) ?? getDefaultGuestRows();
+  return loadPersistedGuestRows(sourceSignature) ?? [];
 }
 
 function parseImportPayload(value: unknown): {
@@ -219,15 +214,36 @@ function SeatingApp({
     parties,
     allGuestIds,
     warnings,
+    clearSelectedGuest,
   } = useSeating();
   const [activeDrag, setActiveDrag] = useState<ActiveDragData | null>(null);
   const [showRemoveHint, setShowRemoveHint] = useState(false);
   const [dragOverlayWidth, setDragOverlayWidth] = useState<number | null>(null);
   const removeHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const removeHintActiveRef = useRef(false);
   const isDraggedGuestSeatedRef = useRef(false);
   const [showWarnings, setShowWarnings] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<"sidebar" | "tables">("sidebar");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  function updateRemoveHint(isVisible: boolean) {
+    removeHintActiveRef.current = isVisible;
+    setShowRemoveHint(isVisible);
+  }
+
+  useEffect(() => {
+    function handleDocumentClick(event: MouseEvent) {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (!target.closest(".guest-chip")) {
+        clearSelectedGuest();
+      }
+    }
+    document.addEventListener("click", handleDocumentClick);
+    return () => {
+      document.removeEventListener("click", handleDocumentClick);
+    };
+  }, [clearSelectedGuest]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -321,6 +337,7 @@ function SeatingApp({
       const data = isActiveDragData(event.active.data.current) ? event.active.data.current : null;
       setActiveDrag(data);
       setDragOverlayWidth(event.active.rect.current.initial?.width ?? null);
+      updateRemoveHint(false);
       if (data?.kind === "guest") {
         isDraggedGuestSeatedRef.current = !state.unassigned.includes(data.guestId);
       } else {
@@ -337,10 +354,10 @@ function SeatingApp({
       removeHintTimerRef.current = null;
     }
     if (event.over) {
-      setShowRemoveHint(false);
+      updateRemoveHint(false);
     } else {
       removeHintTimerRef.current = setTimeout(() => {
-        setShowRemoveHint(true);
+        updateRemoveHint(true);
         removeHintTimerRef.current = null;
       }, 500);
     }
@@ -354,7 +371,7 @@ function SeatingApp({
     isDraggedGuestSeatedRef.current = false;
     setActiveDrag(null);
     setDragOverlayWidth(null);
-    setShowRemoveHint(false);
+    updateRemoveHint(false);
   }, []);
 
   const handleDragEnd = useCallback(
@@ -363,12 +380,12 @@ function SeatingApp({
         clearTimeout(removeHintTimerRef.current);
         removeHintTimerRef.current = null;
       }
-      const willRemove = !over && isDraggedGuestSeatedRef.current;
+      const willRemove = !over && isDraggedGuestSeatedRef.current && removeHintActiveRef.current;
       isDraggedGuestSeatedRef.current = false;
       const data = isActiveDragData(active.data.current) ? active.data.current : null;
       setActiveDrag(null);
       setDragOverlayWidth(null);
-      setShowRemoveHint(false);
+      updateRemoveHint(false);
 
       if (willRemove && data?.kind === "guest") {
         dispatch({ type: "REMOVE_GUESTS", guestIds: [data.guestId] });
@@ -718,7 +735,7 @@ export default function App() {
 
   function handleResetApp() {
     clearPersistedAppState();
-    setGuestRows(getDefaultGuestRows());
+    setGuestRows([]);
     setProviderVersion((value) => value + 1);
   }
 

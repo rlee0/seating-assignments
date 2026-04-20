@@ -1,8 +1,21 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useReducer,
+  useState,
+} from "react";
 import type { PersistedSeatingData, SeatingState } from "../types";
 import { TABLE_CAPACITY } from "../types";
 import { seatingReducer, createInitialState, type SeatingAction } from "./reducer";
-import { isCompatibleState, loadPersistedSeating, MAX_UNDO_HISTORY, savePersistedSeating } from "./localStorage";
+import {
+  isCompatibleState,
+  loadPersistedSeating,
+  MAX_UNDO_HISTORY,
+  savePersistedSeating,
+} from "./localStorage";
 import type { ParsedData } from "../data/parseGuests";
 
 interface SeatingContextValue {
@@ -17,6 +30,11 @@ interface SeatingContextValue {
   parties: ParsedData["parties"];
   allGuestIds: string[];
   warnings: string[];
+  selectedGuestId: string | null;
+  selectGuest: (guestId: string) => void;
+  clearSelectedGuest: () => void;
+  relatedHouseholdGuestIds: Set<string>;
+  relatedGroupGuestIds: Set<string>;
 }
 
 interface HistoryState {
@@ -143,6 +161,7 @@ export function SeatingProvider({
 }) {
   const { guests, parties, allGuestIds, warnings } = parsedData;
   const defaultState = useMemo(() => createInitialState(allGuestIds), [allGuestIds]);
+  const [selectedGuestId, setSelectedGuestId] = useState<string | null>(null);
 
   const [historyState, historyDispatch] = useReducer(
     seatingHistoryReducer,
@@ -194,6 +213,54 @@ export function SeatingProvider({
     savePersistedSeating(historyState.present, historyState.history, historyState.future);
   }, [historyState.future, historyState.history, historyState.present]);
 
+  useEffect(() => {
+    if (selectedGuestId && !guests.has(selectedGuestId)) {
+      setSelectedGuestId(null);
+    }
+  }, [guests, selectedGuestId]);
+
+  const selectedGuest = useMemo(
+    () => (selectedGuestId ? (guests.get(selectedGuestId) ?? null) : null),
+    [guests, selectedGuestId]
+  );
+
+  const relatedHouseholdGuestIds = useMemo(() => {
+    if (!selectedGuest) return new Set<string>();
+
+    const relatedIds = new Set<string>();
+    for (const guest of guests.values()) {
+      if (guest.id === selectedGuest.id) continue;
+      if (guest.partyId === selectedGuest.partyId) {
+        relatedIds.add(guest.id);
+      }
+    }
+
+    return relatedIds;
+  }, [guests, selectedGuest]);
+
+  const relatedGroupGuestIds = useMemo(() => {
+    if (!selectedGuest) return new Set<string>();
+
+    const relatedIds = new Set<string>();
+    for (const guest of guests.values()) {
+      if (guest.id === selectedGuest.id) continue;
+      if (relatedHouseholdGuestIds.has(guest.id)) continue;
+      if (guest.group === selectedGuest.group) {
+        relatedIds.add(guest.id);
+      }
+    }
+
+    return relatedIds;
+  }, [guests, relatedHouseholdGuestIds, selectedGuest]);
+
+  const selectGuest = useCallback((guestId: string) => {
+    setSelectedGuestId(guestId);
+  }, []);
+
+  const clearSelectedGuest = useCallback(() => {
+    setSelectedGuestId(null);
+  }, []);
+
   return (
     <SeatingContext.Provider
       value={{
@@ -212,6 +279,11 @@ export function SeatingProvider({
         parties,
         allGuestIds,
         warnings,
+        selectedGuestId,
+        selectGuest,
+        clearSelectedGuest,
+        relatedHouseholdGuestIds,
+        relatedGroupGuestIds,
       }}>
       {children}
     </SeatingContext.Provider>

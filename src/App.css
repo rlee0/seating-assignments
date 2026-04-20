@@ -239,6 +239,60 @@
   padding: 48px 16px;
 }
 
+.sidebar-selected-guest {
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+  padding: 9px 12px 16px;
+  flex-shrink: 0;
+}
+
+.sidebar-selected-guest-label {
+  margin: 0 0 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.45px;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.sidebar-selected-guest-name {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.sidebar-selected-guest-meta {
+  margin: 7px 0 0;
+  display: grid;
+  gap: 4px;
+}
+
+.sidebar-selected-guest-meta div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.sidebar-selected-guest-meta dt {
+  margin: 0;
+  color: #6b7280;
+}
+
+.sidebar-selected-guest-meta dd {
+  margin: 0;
+  color: #1f2937;
+  font-weight: 500;
+  text-align: right;
+}
+
+.sidebar-selected-guest-empty {
+  margin: 0;
+  font-size: 11px;
+  color: #9ca3af;
+}
+
 .group-section {
   margin-bottom: 8px;
 }
@@ -396,7 +450,6 @@
 }
 
 .guest-chip.is-search-match {
-  border: 1px solid #eab308;
   background: #fefce8;
   --guest-chip-bg: #fefce8;
 }
@@ -413,18 +466,18 @@
 }
 
 .guest-chip--table {
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: #f3f4f6;
   color: #111827;
   width: 100%;
+  box-sizing: border-box;
   min-width: 0;
   min-height: 20px;
-  --guest-chip-bg: #fff;
+  --guest-chip-bg: #f3f4f6;
 }
 
 .guest-chip--table:hover {
-  background: #f9fafb;
-  --guest-chip-bg: #f9fafb;
+  background: #e5e7eb;
+  --guest-chip-bg: #e5e7eb;
 }
 
 .guest-chip--origin-hidden {
@@ -443,10 +496,9 @@
   min-width: 0;
   font-size: 10px;
   line-height: 1.2;
-  padding-right: 6px;
 }
 
-.guest-name::after {
+.guest-chip--table .guest-name::after {
   content: "";
   position: absolute;
   top: 0;
@@ -463,6 +515,83 @@
 
 .guest-name--host-s {
   color: #c0674a;
+}
+
+.guest-chip.is-selected:has(.guest-name--host-r) {
+  background: #2e9e88;
+  box-shadow: none;
+  outline: 1px solid #55d1bb;
+  outline-offset: 1px;
+  --guest-chip-bg: #2e9e88;
+}
+
+.guest-chip.is-selected:has(.guest-name--host-s) {
+  background: #c0674a;
+  box-shadow: none;
+  outline: 1px solid #e18f74;
+  outline-offset: 1px;
+  --guest-chip-bg: #c0674a;
+}
+
+.guest-chip.is-selected .guest-name {
+  color: #fff;
+  font-weight: 600;
+}
+
+.guest-chip.is-related-household:has(.guest-name--host-r) {
+  background: #2e9e88;
+  box-shadow: none;
+  --guest-chip-bg: #2e9e88;
+}
+
+.guest-chip--table.is-related-household:has(.guest-name--host-r) {
+  box-shadow: none;
+}
+
+.guest-chip.is-related-household:has(.guest-name--host-s) {
+  background: #c0674a;
+  box-shadow: none;
+  --guest-chip-bg: #c0674a;
+}
+
+.guest-chip--table.is-related-household:has(.guest-name--host-s) {
+  box-shadow: none;
+}
+
+.guest-chip.is-related-household .guest-name {
+  color: #fff;
+}
+
+.guest-chip--table.is-selected:has(.guest-name--host-r) {
+  box-shadow: none;
+  outline: 1px solid #55d1bb;
+  outline-offset: 1px;
+}
+
+.guest-chip--table.is-selected:has(.guest-name--host-s) {
+  box-shadow: none;
+  outline: 1px solid #e18f74;
+  outline-offset: 1px;
+}
+
+.guest-chip.is-related-group:has(.guest-name--host-r) {
+  background: #d4f0ec;
+  box-shadow: none;
+  --guest-chip-bg: #d4f0ec;
+}
+
+.guest-chip--table.is-related-group:has(.guest-name--host-r) {
+  box-shadow: none;
+}
+
+.guest-chip.is-related-group:has(.guest-name--host-s) {
+  background: #fbe3dc;
+  box-shadow: none;
+  --guest-chip-bg: #fbe3dc;
+}
+
+.guest-chip--table.is-related-group:has(.guest-name--host-s) {
+  box-shadow: none;
 }
 
 /* ─── Table board ─────────────────────────────────────────────────────────── */
@@ -485,8 +614,8 @@
 
 .table-card {
   background: #fff;
-  border: 2px solid #e5e5e5;
-  border-radius: 8px;
+  border: 1px solid #e5e5e5;
+  border-radius: 6px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -529,9 +658,8 @@
 
   .guest-chip--table:hover,
   .guest-chip--table:focus-visible {
-    background: #f8fafc;
-    border-color: #d1d5db;
-    --guest-chip-bg: #f8fafc;
+    background: #e5e7eb;
+    --guest-chip-bg: #e5e7eb;
   }
 
   .table-card:hover,
@@ -539,6 +667,52 @@
     background: #fcfcfd;
     border-color: #cfd4dc;
   }
+}
+
+.guest-chip.is-selected:hover:has(.guest-name--host-r),
+.guest-chip.is-selected:focus-visible:has(.guest-name--host-r) {
+  background: #2e9e88;
+  box-shadow: none;
+  outline: 1px solid #55d1bb;
+  outline-offset: 1px;
+  --guest-chip-bg: #2e9e88;
+}
+
+.guest-chip.is-selected:hover:has(.guest-name--host-s),
+.guest-chip.is-selected:focus-visible:has(.guest-name--host-s) {
+  background: #c0674a;
+  box-shadow: none;
+  outline: 1px solid #e18f74;
+  outline-offset: 1px;
+  --guest-chip-bg: #c0674a;
+}
+
+.guest-chip.is-related-household:hover:has(.guest-name--host-r),
+.guest-chip.is-related-household:focus-visible:has(.guest-name--host-r) {
+  background: #37af9a;
+  box-shadow: none;
+  --guest-chip-bg: #37af9a;
+}
+
+.guest-chip.is-related-household:hover:has(.guest-name--host-s),
+.guest-chip.is-related-household:focus-visible:has(.guest-name--host-s) {
+  background: #d07456;
+  box-shadow: none;
+  --guest-chip-bg: #d07456;
+}
+
+.guest-chip.is-related-group:hover:has(.guest-name--host-r),
+.guest-chip.is-related-group:focus-visible:has(.guest-name--host-r) {
+  background: #bee7e0;
+  box-shadow: none;
+  --guest-chip-bg: #bee7e0;
+}
+
+.guest-chip.is-related-group:hover:has(.guest-name--host-s),
+.guest-chip.is-related-group:focus-visible:has(.guest-name--host-s) {
+  background: #f5d2c6;
+  box-shadow: none;
+  --guest-chip-bg: #f5d2c6;
 }
 
 /* Red border when full and hovered — indicates reject */
@@ -551,12 +725,14 @@
 
 .table-seats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 2px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+  min-width: 0;
 }
 
 .seat-slot {
   position: relative;
+  min-width: 0;
   min-height: 20px;
   border-radius: 3px;
   display: flex;
@@ -576,6 +752,10 @@
 
 .seat-occupied {
   background: transparent;
+  box-sizing: border-box;
+  min-width: 0;
+  padding-inline: 0;
+  overflow: visible;
 }
 
 .seat-occupied.is-over {

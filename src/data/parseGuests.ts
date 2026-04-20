@@ -1,50 +1,12 @@
-import type { Guest, GuestInputRow, Host, Party } from "../types";
+import type { Guest, GuestInputRow, Party } from "../types";
 
-import rawMd from "../../guest-list-cleaned.md?raw";
-
-function hashGuestSource(value: string): string {
-  let hash = 2166136261;
-
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-
-  return (hash >>> 0).toString(36);
-}
-
-export const GUEST_SOURCE_SIGNATURE = hashGuestSource(rawMd);
+export const GUEST_SOURCE_SIGNATURE = "json-import-only-v1";
 
 export interface ParsedData {
   guests: Map<string, Guest>;
   parties: Map<string, Party>;
   allGuestIds: string[];
   warnings: string[];
-}
-
-function parseRawRows(): GuestInputRow[] {
-  const rows: GuestInputRow[] = [];
-  for (const line of rawMd.split("\n")) {
-    const t = line.trim();
-    if (!t.startsWith("|")) continue;
-    const parts = t.split("|").map((p) => p.trim());
-    // parts: ['', host, household, group, tableCol, fullName, '']
-    const hostRaw = parts[1];
-    if (hostRaw !== "Ryan" && hostRaw !== "Stella") continue;
-    const fullName = parts[5];
-    if (!fullName) continue;
-    rows.push({
-      host: (hostRaw === "Ryan" ? "r" : "s") as Host,
-      household: parts[2],
-      group: parts[3],
-      fullName,
-    });
-  }
-  return rows;
-}
-
-export function getDefaultGuestRows(): GuestInputRow[] {
-  return parseRawRows().map((row) => ({ ...row }));
 }
 
 export function getGuestSourceSignature(): string {
