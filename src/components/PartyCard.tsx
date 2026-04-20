@@ -33,11 +33,7 @@ export default function PartyCard({ party }: Props) {
         {...listeners}
         {...attributes}
         title="Drag to move all unassigned members">
-        <span className="party-name">{party.displayName}</span>
-        <span
-          className={`rsvp-dot rsvp-${party.rsvp}`}
-          title={party.rsvp === "r" ? "RSVP confirmed" : "Pending"}
-        />
+        <span className="party-name">{party.household}</span>
       </div>
       <div className="party-members">
         {unassignedGuestIds.map((id) => (

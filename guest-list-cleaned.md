@@ -1,4 +1,4 @@
-| S/R | Table Display Name         | Group            | Table | Full Name             |
+| S/R | Household                  | Group            | Table | Full Name             |
 | --- | -------------------------- | ---------------- | ----- | --------------------- |
 | r   | Aditi + Vikram             | Brown            |       | Aditi Dubey Dashputre |
 | r   | Aditi + Vikram             | Brown            |       | Vikram Dashputre      |
@@ -165,7 +165,6 @@
 | s   | Nae + Jae                  | SF               |       | Jae Lee               |
 | s   | Nae + Jae                  | SF               |       | Nae Won               |
 | s   | Nicole Wagy                | SITELAB          |       | Nicole Wagy           |
-| s   | Patricia Mou               |                  |       | Patricia Mou          |
 | s   | Phill + Jinri's Families   | Stella Family    |       | Jinri Kim             |
 | s   | Phill + Jinri's Families   | Stella Family    |       | Jinri's Mom           |
 | s   | Phill + Jinri's Families   | Stella Family    |       | Nora Kim              |

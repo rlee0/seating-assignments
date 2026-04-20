@@ -1,4 +1,4 @@
-import { GUEST_DATA_STORAGE_KEY, STORAGE_KEY } from "../types";
+import { GUEST_DATA_SOURCE_KEY, GUEST_DATA_STORAGE_KEY, STORAGE_KEY } from "../types";
 import type { GuestInputRow, PersistedSeatingData, SeatingState } from "../types";
 
 export const MAX_UNDO_HISTORY = 30;
@@ -8,14 +8,14 @@ function isGuestInputRow(value: unknown): value is GuestInputRow {
 
   const candidate = value as {
     rsvp?: unknown;
-    displayName?: unknown;
+    household?: unknown;
     group?: unknown;
     fullName?: unknown;
   };
 
   return (
     (candidate.rsvp === "r" || candidate.rsvp === "s") &&
-    typeof candidate.displayName === "string" &&
+    typeof candidate.household === "string" &&
     typeof candidate.group === "string" &&
     typeof candidate.fullName === "string"
   );
@@ -63,8 +63,15 @@ export function parsePersistedSeatingData(value: unknown): PersistedSeatingData 
   return null;
 }
 
-export function loadPersistedGuestRows(): GuestInputRow[] | null {
+export function loadPersistedGuestRows(sourceSignature: string): GuestInputRow[] | null {
   try {
+    const savedSourceSignature = localStorage.getItem(GUEST_DATA_SOURCE_KEY);
+    if (savedSourceSignature !== sourceSignature) {
+      localStorage.removeItem(GUEST_DATA_STORAGE_KEY);
+      localStorage.setItem(GUEST_DATA_SOURCE_KEY, sourceSignature);
+      return null;
+    }
+
     const raw = localStorage.getItem(GUEST_DATA_STORAGE_KEY);
     if (!raw) return null;
 
@@ -82,6 +89,14 @@ export function loadPersistedGuestRows(): GuestInputRow[] | null {
 export function savePersistedGuestRows(rows: GuestInputRow[]): void {
   try {
     localStorage.setItem(GUEST_DATA_STORAGE_KEY, JSON.stringify(rows));
+  } catch {
+    // Ignore quota errors silently
+  }
+}
+
+export function saveGuestDataSourceSignature(sourceSignature: string): void {
+  try {
+    localStorage.setItem(GUEST_DATA_SOURCE_KEY, sourceSignature);
   } catch {
     // Ignore quota errors silently
   }
@@ -113,5 +128,15 @@ export function savePersistedSeating(
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch {
     // Ignore quota errors silently
+  }
+}
+
+export function clearPersistedAppState(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(GUEST_DATA_STORAGE_KEY);
+    localStorage.removeItem(GUEST_DATA_SOURCE_KEY);
+  } catch {
+    // Ignore storage errors silently
   }
 }

@@ -17,15 +17,22 @@ import {
 } from "@dnd-kit/core";
 import { AlertTriangle, Download, Redo2, RotateCcw, Undo2, Upload } from "lucide-react";
 import { SeatingProvider, useSeating } from "./store/SeatingContext";
+import { SearchProvider } from "./store/SearchContext";
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import Sidebar from "./components/Sidebar";
 import TableBoard from "./components/TableBoard";
-import { createInitialState } from "./store/reducer";
-import { getDefaultGuestRows, parseGuestsFromRows, type ParsedData } from "./data/parseGuests";
 import {
+  getDefaultGuestRows,
+  getGuestSourceSignature,
+  parseGuestsFromRows,
+  type ParsedData,
+} from "./data/parseGuests";
+import {
+  clearPersistedAppState,
   loadPersistedGuestRows,
   parsePersistedSeatingData,
+  saveGuestDataSourceSignature,
   savePersistedGuestRows,
   savePersistedSeating,
 } from "./store/localStorage";
@@ -140,7 +147,9 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 function getInitialGuestRows(): GuestInputRow[] {
-  return loadPersistedGuestRows() ?? getDefaultGuestRows();
+  const sourceSignature = getGuestSourceSignature();
+
+  return loadPersistedGuestRows(sourceSignature) ?? getDefaultGuestRows();
 }
 
 function isGuestInputRow(value: unknown): value is GuestInputRow {
@@ -148,14 +157,14 @@ function isGuestInputRow(value: unknown): value is GuestInputRow {
 
   const candidate = value as {
     rsvp?: unknown;
-    displayName?: unknown;
+    household?: unknown;
     group?: unknown;
     fullName?: unknown;
   };
 
   return (
     (candidate.rsvp === "r" || candidate.rsvp === "s") &&
-    typeof candidate.displayName === "string" &&
+    typeof candidate.household === "string" &&
     typeof candidate.group === "string" &&
     typeof candidate.fullName === "string"
   );
@@ -231,9 +240,11 @@ function buildExportFilename(): string {
 function SeatingApp({
   guestRows,
   onImportSnapshot,
+  onReset,
 }: {
   guestRows: GuestInputRow[];
   onImportSnapshot: (nextGuestRows: GuestInputRow[], snapshot: PersistedSeatingData) => void;
+  onReset: () => void;
 }) {
   const {
     state,
@@ -249,7 +260,9 @@ function SeatingApp({
     warnings,
   } = useSeating();
   const [activeDrag, setActiveDrag] = useState<ActiveDragData | null>(null);
-  const [overTargetId, setOverTargetId] = useState<string | null>(null);
+  const [showRemoveHint, setShowRemoveHint] = useState(false);
+  const removeHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isDraggedGuestSeatedRef = useRef(false);
   const [showWarnings, setShowWarnings] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<"sidebar" | "tables">("sidebar");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -325,7 +338,7 @@ function SeatingApp({
         return seatCollisions;
       }
 
-      return closestCenter({
+      return pointerWithin({
         ...args,
         droppableContainers: baseContainers.filter(
           (container) => !String(container.id).startsWith("seat-")
@@ -333,7 +346,7 @@ function SeatingApp({
       });
     }
 
-    return closestCenter({
+    return pointerWithin({
       ...args,
       droppableContainers: baseContainers.filter(
         (container) => !String(container.id).startsWith("seat-")
@@ -341,26 +354,62 @@ function SeatingApp({
     });
   }, []);
 
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    const data = isActiveDragData(event.active.data.current) ? event.active.data.current : null;
-    setActiveDrag(data);
-    setOverTargetId(null);
-  }, []);
+  const handleDragStart = useCallback(
+    (event: DragStartEvent) => {
+      const data = isActiveDragData(event.active.data.current) ? event.active.data.current : null;
+      setActiveDrag(data);
+      if (data?.kind === "guest") {
+        isDraggedGuestSeatedRef.current = !state.unassigned.includes(data.guestId);
+      } else {
+        isDraggedGuestSeatedRef.current = false;
+      }
+    },
+    [state.unassigned]
+  );
 
   const handleDragOver = useCallback((event: DragOverEvent) => {
-    setOverTargetId(event.over ? String(event.over.id) : null);
+    if (!isDraggedGuestSeatedRef.current) return;
+    if (removeHintTimerRef.current !== null) {
+      clearTimeout(removeHintTimerRef.current);
+      removeHintTimerRef.current = null;
+    }
+    if (event.over) {
+      setShowRemoveHint(false);
+    } else {
+      removeHintTimerRef.current = setTimeout(() => {
+        setShowRemoveHint(true);
+        removeHintTimerRef.current = null;
+      }, 500);
+    }
   }, []);
 
   const handleDragCancel = useCallback((_event: DragCancelEvent) => {
+    if (removeHintTimerRef.current !== null) {
+      clearTimeout(removeHintTimerRef.current);
+      removeHintTimerRef.current = null;
+    }
+    isDraggedGuestSeatedRef.current = false;
     setActiveDrag(null);
-    setOverTargetId(null);
+    setShowRemoveHint(false);
   }, []);
 
   const handleDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
+      if (removeHintTimerRef.current !== null) {
+        clearTimeout(removeHintTimerRef.current);
+        removeHintTimerRef.current = null;
+      }
+      const willRemove = !over && isDraggedGuestSeatedRef.current;
+      isDraggedGuestSeatedRef.current = false;
       const data = isActiveDragData(active.data.current) ? active.data.current : null;
       setActiveDrag(null);
-      setOverTargetId(null);
+      setShowRemoveHint(false);
+
+      if (willRemove && data?.kind === "guest") {
+        dispatch({ type: "REMOVE_GUESTS", guestIds: [data.guestId] });
+        return;
+      }
+
       if (!data || !over) return;
       const targetId = String(over.id);
 
@@ -425,10 +474,7 @@ function SeatingApp({
 
   function handleReset() {
     if (window.confirm("Reset all seating assignments? This will clear all table placements.")) {
-      dispatch({
-        type: "RESET",
-        initialState: createInitialState(allGuestIds),
-      });
+      onReset();
     }
   }
 
@@ -547,7 +593,7 @@ function SeatingApp({
 
         <div className={`app-body app-body--${mobilePanel}`}>
           <Sidebar />
-          <TableBoard activeDragKind={activeDrag?.kind ?? null} overTargetId={overTargetId} />
+          <TableBoard activeDragKind={activeDrag?.kind ?? null} />
         </div>
 
         <div className="mobile-tabs">
@@ -565,9 +611,13 @@ function SeatingApp({
 
         <DragOverlay dropAnimation={null}>
           {overlayGuest && (
-            <div className="drag-overlay-chip">
-              <span className={`rsvp-dot rsvp-${overlayGuest.rsvp}`} />
-              {overlayGuest.fullName}
+            <div
+              className={`drag-overlay-chip${showRemoveHint ? " drag-overlay-chip--remove" : ""}`}>
+              <span className="drag-overlay-chip-content">
+                <span className={`rsvp-dot rsvp-${overlayGuest.rsvp}`} />
+                {overlayGuest.fullName}
+              </span>
+              {showRemoveHint && <span className="drag-overlay-remove-badge">× Remove</span>}
             </div>
           )}
           {activeDrag?.kind === "table" && (
@@ -575,7 +625,7 @@ function SeatingApp({
           )}
           {overlayParty && activeDrag?.kind === "party" && (
             <div className="drag-overlay-party">
-              <div className="drag-overlay-party-name">{overlayParty.displayName}</div>
+              <div className="drag-overlay-party-name">{overlayParty.household}</div>
               <div className="drag-overlay-party-count">
                 {overlayGuestIds.length} guest
                 {overlayGuestIds.length !== 1 ? "s" : ""}
@@ -601,21 +651,36 @@ export default function App() {
   const [guestRows, setGuestRows] = useState<GuestInputRow[]>(() => getInitialGuestRows());
   const [providerVersion, setProviderVersion] = useState(0);
   const parsedData = parseGuestsFromRows(guestRows);
+  const sourceSignature = getGuestSourceSignature();
 
   useEffect(() => {
+    saveGuestDataSourceSignature(sourceSignature);
     savePersistedGuestRows(guestRows);
-  }, [guestRows]);
+  }, [guestRows, sourceSignature]);
 
   function handleImportSnapshot(nextGuestRows: GuestInputRow[], snapshot: PersistedSeatingData) {
+    saveGuestDataSourceSignature(sourceSignature);
     savePersistedGuestRows(nextGuestRows);
     savePersistedSeating(snapshot.state, snapshot.history, snapshot.future);
     setGuestRows(nextGuestRows);
     setProviderVersion((value) => value + 1);
   }
 
+  function handleResetApp() {
+    clearPersistedAppState();
+    setGuestRows(getDefaultGuestRows());
+    setProviderVersion((value) => value + 1);
+  }
+
   return (
-    <SeatingProvider key={providerVersion} parsedData={parsedData}>
-      <SeatingApp guestRows={guestRows} onImportSnapshot={handleImportSnapshot} />
-    </SeatingProvider>
+    <SearchProvider>
+      <SeatingProvider key={providerVersion} parsedData={parsedData}>
+        <SeatingApp
+          guestRows={guestRows}
+          onImportSnapshot={handleImportSnapshot}
+          onReset={handleResetApp}
+        />
+      </SeatingProvider>
+    </SearchProvider>
   );
 }

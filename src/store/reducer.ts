@@ -1,6 +1,7 @@
-import { arrayMove } from "@dnd-kit/sortable";
 import type { SeatingState, TableState } from "../types";
 import { TABLE_CAPACITY, TABLE_COUNT } from "../types";
+
+import { arrayMove } from "@dnd-kit/sortable";
 
 type AssignmentMode = "single-table" | "group-overflow";
 
@@ -15,7 +16,6 @@ export type SeatingAction =
   | { type: "REMOVE_GUESTS"; guestIds: string[] }
   | { type: "CLEAR_TABLE"; tableNumber: number }
   | { type: "MOVE_TABLE"; activeTableNumber: number; overTableNumber: number }
-  | { type: "RENAME_TABLE"; tableNumber: number; name: string }
   | { type: "RESET"; initialState: SeatingState };
 
 function createEmptySeatSlots(): Array<string | null> {
@@ -223,13 +223,6 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       if (activeIndex === -1 || overIndex === -1) return state;
 
       return { ...state, tables: arrayMove(state.tables, activeIndex, overIndex) };
-    }
-
-    case "RENAME_TABLE": {
-      const newTables = state.tables.map((table) =>
-        table.tableNumber === action.tableNumber ? { ...table, name: action.name } : table
-      );
-      return { ...state, tables: newTables };
     }
 
     case "RESET":

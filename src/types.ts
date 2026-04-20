@@ -4,7 +4,7 @@ export type RSVPStatus = "r" | "s";
 
 export interface GuestInputRow {
   rsvp: RSVPStatus;
-  displayName: string;
+  household: string;
   group: string;
   fullName: string;
 }
@@ -18,8 +18,8 @@ export interface Guest {
 }
 
 export interface Party {
-  id: string; // slugified Table Display Name, unique
-  displayName: string;
+  id: string; // slugified Household, unique
+  household: string;
   group: string; // primary group (from first member that has one)
   rsvp: RSVPStatus; // 'r' if all members are 'r', else 's'
   guestIds: string[]; // ordered list of Guest ids
@@ -31,11 +31,12 @@ export const TABLE_COUNT = 25;
 export const TABLE_CAPACITY = 8;
 export const STORAGE_KEY = "wedding-seating-v1";
 export const GUEST_DATA_STORAGE_KEY = "wedding-guests-v1";
+export const GUEST_DATA_SOURCE_KEY = "wedding-guests-source-v1";
 export const EXPORT_FORMAT_VERSION = 1;
 
 export interface TableState {
   tableNumber: number; // 1-based
-  name: string; // user-editable label, default "Table N"
+  name: string; // display label, default "Table N"
   guestIds: Array<string | null>; // fixed seat slots in visual order
 }
 

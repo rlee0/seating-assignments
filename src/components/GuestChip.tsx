@@ -1,5 +1,6 @@
 import { CSS } from "@dnd-kit/utilities";
 import { useDraggable } from "@dnd-kit/core";
+import { useSearch } from "../store/SearchContext";
 import { useSeating } from "../store/SeatingContext";
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
 
 export default function GuestChip({ guestId, context }: Props) {
   const { guests } = useSeating();
+  const { searchQuery } = useSearch();
   const guest = guests.get(guestId);
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -24,7 +26,15 @@ export default function GuestChip({ guestId, context }: Props) {
     <div
       ref={setNodeRef}
       style={style}
-      className={["guest-chip", `guest-chip--${context}`, isDragging ? "is-dragging" : null]
+      className={[
+        "guest-chip",
+        `guest-chip--${context}`,
+        isDragging ? "is-dragging" : null,
+        searchQuery.trim() &&
+        guest?.fullName.toLowerCase().includes(searchQuery.trim().toLowerCase())
+          ? "is-search-match"
+          : null,
+      ]
         .filter(Boolean)
         .join(" ")}
       title={guest.fullName}

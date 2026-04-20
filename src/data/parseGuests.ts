@@ -2,6 +2,19 @@ import type { Guest, GuestInputRow, Party, RSVPStatus } from "../types";
 
 import rawMd from "../../guest-list-cleaned.md?raw";
 
+function hashGuestSource(value: string): string {
+  let hash = 2166136261;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(36);
+}
+
+export const GUEST_SOURCE_SIGNATURE = hashGuestSource(rawMd);
+
 export interface ParsedData {
   guests: Map<string, Guest>;
   parties: Map<string, Party>;
@@ -15,14 +28,14 @@ function parseRawRows(): GuestInputRow[] {
     const t = line.trim();
     if (!t.startsWith("|")) continue;
     const parts = t.split("|").map((p) => p.trim());
-    // parts: ['', sr, displayName, group, tableCol, fullName, '']
+    // parts: ['', sr, household, group, tableCol, fullName, '']
     const sr = parts[1];
     if (sr !== "r" && sr !== "s") continue;
     const fullName = parts[5];
     if (!fullName) continue;
     rows.push({
       rsvp: sr as RSVPStatus,
-      displayName: parts[2],
+      household: parts[2],
       group: parts[3],
       fullName,
     });
@@ -34,22 +47,26 @@ export function getDefaultGuestRows(): GuestInputRow[] {
   return parseRawRows().map((row) => ({ ...row }));
 }
 
+export function getGuestSourceSignature(): string {
+  return GUEST_SOURCE_SIGNATURE;
+}
+
 export function parseGuestsFromRows(rawRows: GuestInputRow[]): ParsedData {
   const guests = new Map<string, Guest>();
   const parties = new Map<string, Party>();
   const warnings: string[] = [];
-  const displayNameToPartyId = new Map<string, string>();
+  const householdToPartyId = new Map<string, string>();
 
   rawRows.forEach((row, i) => {
     const guestId = `g${i}`;
 
-    // Get or create a stable party id keyed by display name
+    // Get or create a stable party id keyed by household
     let partyId: string;
-    if (displayNameToPartyId.has(row.displayName)) {
-      partyId = displayNameToPartyId.get(row.displayName)!;
+    if (householdToPartyId.has(row.household)) {
+      partyId = householdToPartyId.get(row.household)!;
     } else {
-      partyId = `p${displayNameToPartyId.size}`;
-      displayNameToPartyId.set(row.displayName, partyId);
+      partyId = `p${householdToPartyId.size}`;
+      householdToPartyId.set(row.household, partyId);
     }
 
     const guest: Guest = {
@@ -64,7 +81,7 @@ export function parseGuestsFromRows(rawRows: GuestInputRow[]): ParsedData {
     if (!parties.has(partyId)) {
       parties.set(partyId, {
         id: partyId,
-        displayName: row.displayName,
+        household: row.household,
         group: row.group || "—",
         rsvp: row.rsvp,
         guestIds: [],
@@ -80,9 +97,9 @@ export function parseGuestsFromRows(rawRows: GuestInputRow[]): ParsedData {
       warnings.push(`"${row.fullName}" has no group assigned`);
     }
 
-    // Warn on mixed-group parties (same display name, different group value)
+    // Warn on mixed-group parties (same household, different group value)
     if (party.group && party.group !== "—" && row.group && party.group !== row.group) {
-      warnings.push(`Party "${row.displayName}": mixed groups ("${party.group}", "${row.group}")`);
+      warnings.push(`Party "${row.household}": mixed groups ("${party.group}", "${row.group}")`);
     }
   });
 

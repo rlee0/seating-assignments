@@ -3,14 +3,12 @@ import GuestChip from "./GuestChip";
 import { TABLE_CAPACITY } from "../types";
 import type { TableState } from "../types";
 import { useDroppable } from "@dnd-kit/core";
-import { useSortable } from "@dnd-kit/sortable";
 import { useSeating } from "../store/SeatingContext";
-import { useState } from "react";
+import { useSortable } from "@dnd-kit/sortable";
 
 interface Props {
   table: TableState;
   activeDragKind: "party" | "guest" | "group" | "table" | null;
-  overTargetId: string | null;
 }
 
 function stopTableDrag(event: React.PointerEvent | React.MouseEvent) {
@@ -48,10 +46,8 @@ function SeatSlot({
   );
 }
 
-export default function TableCard({ table, activeDragKind, overTargetId }: Props) {
+export default function TableCard({ table, activeDragKind }: Props) {
   const { dispatch, guests, parties } = useSeating();
-  const [editing, setEditing] = useState(false);
-  const [editName, setEditName] = useState(table.name);
   const {
     attributes,
     listeners,
@@ -82,20 +78,6 @@ export default function TableCard({ table, activeDragKind, overTargetId }: Props
     return party.guestIds.some((id) => id !== guestId && !seatedGuestIds.includes(id));
   });
 
-  function commitRename() {
-    setEditing(false);
-    const trimmed = editName.trim();
-    if (trimmed && trimmed !== table.name) {
-      dispatch({
-        type: "RENAME_TABLE",
-        tableNumber: table.tableNumber,
-        name: trimmed,
-      });
-    } else {
-      setEditName(table.name);
-    }
-  }
-
   function handleClearTable() {
     if (occupancy === 0) return;
     if (window.confirm(`Clear all guests from ${table.name}? This will keep the table name.`)) {
@@ -105,12 +87,10 @@ export default function TableCard({ table, activeDragKind, overTargetId }: Props
 
   const topRow = seated.slice(0, 4);
   const bottomRow = seated.slice(4, 8);
-  const isTableReorderOver =
-    activeDragKind === "table" && overTargetId === `sortable-table-${table.tableNumber}`;
 
   const cardClass = [
     "table-card",
-    isOver || isTableReorderOver ? "is-over" : null,
+    isOver && activeDragKind !== "table" ? "is-over" : null,
     isFull ? "is-full" : null,
     hasSplitParty ? "has-split" : null,
     isDragging ? "is-dragging" : null,
@@ -146,53 +126,30 @@ export default function TableCard({ table, activeDragKind, overTargetId }: Props
             title="Drag to move table"
             {...listeners}
             {...attributes}>
-            {editing ? (
-              <input
-                className="table-name-input"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                onBlur={commitRename}
-                onPointerDownCapture={stopTableDrag}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") commitRename();
-                  if (e.key === "Escape") {
-                    setEditing(false);
-                    setEditName(table.name);
-                  }
-                }}
-                autoFocus
-              />
-            ) : (
-              <span
-                className="table-name"
-                onDoubleClick={() => setEditing(true)}
-                title="Double-click to rename">
-                {table.name}
-              </span>
-            )}
+            <span className="table-name">{table.name}</span>
             <span className={`table-occupancy${isFull ? " full" : ""}`}>
               {occupancy}/{TABLE_CAPACITY}
             </span>
-            {hasSplitParty && (
-              <span className="split-indicator" title="Party split across tables">
-                <svg viewBox="0 0 16 16" className="split-indicator-icon" aria-hidden="true">
-                  <path
-                    d="M8 2.2L14 13H2L8 2.2z"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.4"
-                  />
-                  <path
-                    d="M8 5.6v3.5"
-                    stroke="currentColor"
-                    strokeWidth="1.4"
-                    strokeLinecap="round"
-                  />
-                  <circle cx="8" cy="11.5" r="0.8" fill="currentColor" />
-                </svg>
-              </span>
-            )}
           </div>
+          {hasSplitParty && (
+            <span className="split-indicator" title="Party split across tables">
+              <svg viewBox="0 0 16 16" className="split-indicator-icon" aria-hidden="true">
+                <path
+                  d="M8 2.2L14 13H2L8 2.2z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                />
+                <path
+                  d="M8 5.6v3.5"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+                <circle cx="8" cy="11.5" r="0.8" fill="currentColor" />
+              </svg>
+            </span>
+          )}
           <button
             type="button"
             className={`table-action table-clear-btn${occupancy === 0 ? " is-hidden" : ""}`}
