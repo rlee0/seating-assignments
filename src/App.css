@@ -7,6 +7,11 @@
   overflow: hidden;
 }
 
+.app--guest-dragging,
+.app--guest-dragging * {
+  cursor: grabbing !important;
+}
+
 /* ─── Header ──────────────────────────────────────────────────────────────── */
 
 .app-header {
@@ -413,6 +418,7 @@
   color: #111827;
   width: 100%;
   min-width: 0;
+  min-height: 20px;
   --guest-chip-bg: #fff;
 }
 
@@ -422,7 +428,9 @@
 }
 
 .guest-chip--origin-hidden {
-  visibility: hidden;
+  position: absolute;
+  inset: 0;
+  opacity: 0;
   pointer-events: none;
 }
 
@@ -548,7 +556,8 @@
 }
 
 .seat-slot {
-  min-height: 26px;
+  position: relative;
+  min-height: 20px;
   border-radius: 3px;
   display: flex;
   align-items: center;
@@ -715,9 +724,24 @@
 }
 
 .drag-overlay-guest-chip {
+  display: inline-flex;
+  width: fit-content;
+  max-width: none;
   padding: 4px 8px;
   border: 1px solid #d1d5db;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+}
+
+.drag-overlay-guest-chip .guest-name {
+  flex: 0 0 auto;
+  min-width: max-content;
+  overflow: visible;
+  white-space: nowrap;
+  padding-right: 0;
+}
+
+.drag-overlay-guest-chip .guest-name::after {
+  display: none;
 }
 
 .drag-overlay-guest-chip--remove {
@@ -725,11 +749,6 @@
   border: 1px solid #fecaca;
   color: #7f1d1d;
   --guest-chip-bg: #fee2e2;
-}
-
-.drag-overlay-remove-badge {
-  font-size: 10px;
-  opacity: 0.8;
 }
 
 .drag-overlay-party {

@@ -503,7 +503,7 @@ function SeatingApp({
       onDragOver={handleDragOver}
       onDragCancel={handleDragCancel}
       onDragEnd={handleDragEnd}>
-      <div className="app">
+      <div className={`app${activeDrag?.kind === "guest" ? " app--guest-dragging" : ""}`}>
         <header className="app-header">
           <h1>Seating Assignments</h1>
           <div className="app-stats">
@@ -598,7 +598,6 @@ function SeatingApp({
                   {overlayGuest.fullName}
                 </span>
               </span>
-              {showRemoveHint && <span className="drag-overlay-remove-badge">× Remove</span>}
             </div>
           )}
           {overlayTable && activeDrag?.kind === "table" && (
