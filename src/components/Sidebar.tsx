@@ -125,32 +125,28 @@ export default function Sidebar() {
           ))
         )}
       </div>
-      <section
-        className="sidebar-selected-guest"
-        aria-live="polite"
-        aria-label="Selected guest details">
-        {!selectedGuest ? (
-          <p className="sidebar-selected-guest-empty">Select a guest to view details.</p>
-        ) : (
-          <>
-            <p className="sidebar-selected-guest-name">{selectedGuest.fullName}</p>
-            <dl className="sidebar-selected-guest-meta">
-              <div>
-                <dt>Household</dt>
-                <dd>{selectedGuestParty?.household ?? "Unknown"}</dd>
-              </div>
-              <div>
-                <dt>Group</dt>
-                <dd>{selectedGuest.group || "No Group"}</dd>
-              </div>
-              <div>
-                <dt>Host</dt>
-                <dd>{selectedGuest.host === "r" ? "Ryan" : "Stella"}</dd>
-              </div>
-            </dl>
-          </>
-        )}
-      </section>
+      {selectedGuest && (
+        <section
+          className="sidebar-selected-guest"
+          aria-live="polite"
+          aria-label="Selected guest details">
+          <p className="sidebar-selected-guest-name">{selectedGuest.fullName}</p>
+          <dl className="sidebar-selected-guest-meta">
+            <div>
+              <dt>Household</dt>
+              <dd>{selectedGuestParty?.household ?? "Unknown"}</dd>
+            </div>
+            <div>
+              <dt>Group</dt>
+              <dd>{selectedGuest.group || "No Group"}</dd>
+            </div>
+            <div>
+              <dt>Host</dt>
+              <dd>{selectedGuest.host === "r" ? "Ryan" : "Stella"}</dd>
+            </div>
+          </dl>
+        </section>
+      )}
     </aside>
   );
 }
