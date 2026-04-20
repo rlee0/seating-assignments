@@ -195,7 +195,7 @@
   border: 1px solid #d4d4d8;
   border-radius: 6px;
   background: #fff;
-  color: #111827;
+  color: #1a1a1a;
   font-size: 12px;
   line-height: 1.4;
   padding: 7px 9px 7px 28px;
@@ -259,7 +259,7 @@
   margin: 0;
   font-size: 12px;
   font-weight: 600;
-  color: #111827;
+  color: #1a1a1a;
 }
 
 .sidebar-selected-guest-meta {
@@ -469,7 +469,8 @@
 .guest-chip--table {
   background: #f3f4f6;
   color: #374151;
-  width: 100%;
+  width: fit-content;
+  max-width: 100%;
   box-sizing: border-box;
   min-width: 0;
   min-height: 20px;
@@ -499,7 +500,7 @@
   line-height: 1.2;
 }
 
-.guest-chip--table .guest-name::after {
+.guest-chip--table .guest-name.is-truncated::after {
   content: "";
   position: absolute;
   top: 0;
@@ -584,7 +585,7 @@
 }
 
 .guest-chip--table.is-selected .guest-name {
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .guest-chip.is-related-group:has(.guest-name--host-r) {
@@ -741,8 +742,7 @@
 /* ─── Seat rows ───────────────────────────────────────────────────────────── */
 
 .table-seats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: flex;
   gap: 3px;
   min-width: 0;
 }
@@ -758,8 +758,13 @@
 }
 
 .seat-empty {
+  flex: 1 1 0;
   background: #f9fafb;
   border: 1px dashed #d1d5db;
+}
+
+.table-seats:has(.seat-occupied) .seat-empty {
+  flex: 1 1 22px;
 }
 
 .seat-empty.is-over {
@@ -768,6 +773,7 @@
 }
 
 .seat-occupied {
+  flex: 0 1 auto;
   background: transparent;
   box-sizing: border-box;
   min-width: 0;

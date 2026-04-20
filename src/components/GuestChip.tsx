@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+
 import { CSS } from "@dnd-kit/utilities";
 import { useDraggable } from "@dnd-kit/core";
 import { useSearch } from "../store/SearchContext";
@@ -26,6 +28,8 @@ export default function GuestChip({ guestId, context, className }: Props) {
     relatedGroupGuestIds,
   } = useSeating();
   const { searchQuery } = useSearch();
+  const guestNameRef = useRef<HTMLSpanElement | null>(null);
+  const [isNameTruncated, setIsNameTruncated] = useState(false);
   const guest = guests.get(guestId);
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -34,6 +38,31 @@ export default function GuestChip({ guestId, context, className }: Props) {
   });
 
   if (!guest) return null;
+
+  useEffect(() => {
+    if (context !== "table") {
+      setIsNameTruncated(false);
+      return;
+    }
+
+    const node = guestNameRef.current;
+    if (!node) return;
+
+    const updateIsTruncated = () => {
+      setIsNameTruncated(node.scrollWidth > node.clientWidth + 1);
+    };
+
+    updateIsTruncated();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const resizeObserver = new ResizeObserver(updateIsTruncated);
+      resizeObserver.observe(node);
+      return () => resizeObserver.disconnect();
+    }
+
+    window.addEventListener("resize", updateIsTruncated);
+    return () => window.removeEventListener("resize", updateIsTruncated);
+  }, [context, guest.fullName, selectedGuestId]);
 
   const style = transform ? { transform: CSS.Translate.toString(transform) } : undefined;
   const relationClass =
@@ -75,7 +104,17 @@ export default function GuestChip({ guestId, context, className }: Props) {
       onClick={handleSelectGuest}
       {...listeners}
       {...attributes}>
-      <span className={`guest-name guest-name--host-${guest.host}`}>{guest.fullName}</span>
+      <span
+        ref={guestNameRef}
+        className={[
+          "guest-name",
+          `guest-name--host-${guest.host}`,
+          context === "table" && isNameTruncated ? "is-truncated" : null,
+        ]
+          .filter(Boolean)
+          .join(" ")}>
+        {guest.fullName}
+      </span>
     </div>
   );
 }

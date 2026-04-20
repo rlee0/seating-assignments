@@ -12,8 +12,11 @@ body {
     "Segoe UI",
     sans-serif;
   font-size: 13px;
+  line-height: 1.5;
   background: #fcfdfe;
   color: #1a1a1a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 ::-webkit-scrollbar {
