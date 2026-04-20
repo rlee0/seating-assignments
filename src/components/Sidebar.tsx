@@ -145,7 +145,7 @@ export default function Sidebar() {
               </div>
               <div>
                 <dt>Host</dt>
-                <dd>{selectedGuest.host.toUpperCase()}</dd>
+                <dd>{selectedGuest.host === "r" ? "Ryan" : "Stella"}</dd>
               </div>
             </dl>
           </>
