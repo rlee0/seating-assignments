@@ -130,7 +130,7 @@ export default function TableCard({ table, activeDragKind }: Props) {
             </span>
           </div>
           {hasSplitParty && (
-            <span className="split-indicator" title="Party split across tables">
+            <span className="split-indicator" title="Household split across tables">
               <svg viewBox="0 0 16 16" className="split-indicator-icon" aria-hidden="true">
                 <path
                   d="M8 2.2L14 13H2L8 2.2z"

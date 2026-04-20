@@ -136,6 +136,12 @@
   background: #fafafa;
   border-right: 1px solid #e5e5e5;
   overflow: hidden;
+  overflow-x: clip;
+  overscroll-behavior-x: none;
+}
+
+.sidebar > * {
+  min-width: 0;
 }
 
 .sidebar-header {
@@ -190,8 +196,11 @@
 .sidebar-dropzone {
   flex: 1;
   overflow-y: auto;
+  overflow-x: clip;
   padding: 6px 8px 12px;
   transition: background 0.12s;
+  overscroll-behavior-x: none;
+  touch-action: pan-y;
 }
 
 .sidebar-dropzone.is-over {
@@ -239,7 +248,7 @@
 }
 
 .group-card.is-dragging {
-  opacity: 0.35;
+  opacity: 0;
   cursor: grabbing;
 }
 
@@ -288,7 +297,7 @@
 }
 
 .party-card.is-dragging {
-  opacity: 0.35;
+  opacity: 0;
   cursor: grabbing;
 }
 
@@ -707,6 +716,20 @@
 .drag-overlay-group-count {
   font-size: 11px;
   opacity: 0.65;
+}
+
+.drag-overlay-group-card {
+  margin: 0;
+  min-width: 140px;
+  pointer-events: none;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.22);
+}
+
+.drag-overlay-party-card {
+  margin: 0;
+  min-width: 160px;
+  pointer-events: none;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.22);
 }
 
 /* ─── Mobile tab bar ──────────────────────────────────────────────────────── */

@@ -1,5 +1,7 @@
+import { useCallback, useEffect, useRef } from "react";
+
 import GroupCard from "./GroupCard";
-import PartyCard from "./PartyCard";
+import HouseholdCard from "./HouseholdCard";
 import { useDroppable } from "@dnd-kit/core";
 import { useSearch } from "../store/SearchContext";
 import { useSeating } from "../store/SeatingContext";
@@ -11,6 +13,33 @@ export default function Sidebar() {
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
   const { setNodeRef, isOver } = useDroppable({ id: "unassigned" });
+  const dropzoneRef = useRef<HTMLDivElement | null>(null);
+
+  const setDropzoneRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      setNodeRef(node);
+      dropzoneRef.current = node;
+    },
+    [setNodeRef]
+  );
+
+  useEffect(() => {
+    const element = dropzoneRef.current;
+    if (!element) return;
+
+    const lockHorizontalScroll = () => {
+      if (element.scrollLeft !== 0) {
+        element.scrollLeft = 0;
+      }
+    };
+
+    lockHorizontalScroll();
+    element.addEventListener("scroll", lockHorizontalScroll, { passive: true });
+
+    return () => {
+      element.removeEventListener("scroll", lockHorizontalScroll);
+    };
+  }, []);
 
   // Show parties that still have at least one unassigned member
   const partiesWithUnassigned = [...parties.values()].filter((party) => {
@@ -61,7 +90,7 @@ export default function Sidebar() {
         />
       </div>
       <div
-        ref={setNodeRef}
+        ref={setDropzoneRef}
         className={["sidebar-dropzone", isOver ? "is-over" : null].filter(Boolean).join(" ")}>
         {state.unassigned.length === 0 ? (
           <div className="sidebar-empty">All guests are seated ✓</div>
@@ -73,7 +102,7 @@ export default function Sidebar() {
               <GroupCard groupName={groupName} guestIds={groupedGuestIds.get(groupName) ?? []} />
               <div className="group-party-list">
                 {groupedParties.get(groupName)?.map((party) => (
-                  <PartyCard key={party.id} party={party} />
+                  <HouseholdCard key={party.id} party={party} />
                 ))}
               </div>
             </div>

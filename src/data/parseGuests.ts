@@ -97,9 +97,11 @@ export function parseGuestsFromRows(rawRows: GuestInputRow[]): ParsedData {
       warnings.push(`"${row.fullName}" has no group assigned`);
     }
 
-    // Warn on mixed-group parties (same household, different group value)
+    // Warn on mixed-group households (same household, different group value)
     if (party.group && party.group !== "—" && row.group && party.group !== row.group) {
-      warnings.push(`Party "${row.household}": mixed groups ("${party.group}", "${row.group}")`);
+      warnings.push(
+        `Household "${row.household}": mixed groups ("${party.group}", "${row.group}")`
+      );
     }
   });
 

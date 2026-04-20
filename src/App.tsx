@@ -624,20 +624,18 @@ function SeatingApp({
             <div className="drag-overlay-table">{activeDrag.name}</div>
           )}
           {overlayParty && activeDrag?.kind === "party" && (
-            <div className="drag-overlay-party">
-              <div className="drag-overlay-party-name">{overlayParty.household}</div>
-              <div className="drag-overlay-party-count">
-                {overlayGuestIds.length} guest
-                {overlayGuestIds.length !== 1 ? "s" : ""}
+            <div className="party-card drag-overlay-party-card">
+              <div className="party-card-header">
+                <span className="party-name">{overlayParty.household}</span>
+                <span className="group-count">{overlayGuestIds.length}</span>
               </div>
             </div>
           )}
           {activeDrag?.kind === "group" && (
-            <div className="drag-overlay-group">
-              <div className="drag-overlay-group-name">{activeDrag.groupName || "No Group"}</div>
-              <div className="drag-overlay-group-count">
-                {overlayGuestIds.length} guest
-                {overlayGuestIds.length !== 1 ? "s" : ""}
+            <div className="group-card drag-overlay-group-card">
+              <div className="group-card-header">
+                <span className="group-name">{activeDrag.groupName || "No Group"}</span>
+                <span className="group-count">{overlayGuestIds.length}</span>
               </div>
             </div>
           )}
