@@ -7,17 +7,17 @@ import { useSearch } from "../store/SearchContext";
 import { useSeating } from "../store/SeatingContext";
 
 function normalizeForSearch(str: string): string {
-  return str.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+  return str
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
 }
 
 export default function Sidebar() {
   const { state, parties, guests } = useSeating();
   const { searchQuery, setSearchQuery } = useSearch();
   const unassignedSet = useMemo(() => new Set(state.unassigned), [state.unassigned]);
-  const normalizedQuery = useMemo(
-    () => normalizeForSearch(searchQuery.trim()),
-    [searchQuery]
-  );
+  const normalizedQuery = useMemo(() => normalizeForSearch(searchQuery.trim()), [searchQuery]);
 
   const { setNodeRef, isOver } = useDroppable({ id: "unassigned" });
   const dropzoneRef = useRef<HTMLDivElement | null>(null);
@@ -83,14 +83,25 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-search-row">
-        <input
-          type="search"
-          className="sidebar-search-input"
-          placeholder="Search guests, tables, groups"
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          aria-label="Search unassigned guests, tables, and groups"
-        />
+        <div className="sidebar-search-wrap">
+          <svg
+            className="sidebar-search-icon"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 20 20"
+            fill="none"
+            aria-hidden="true">
+            <circle cx="8.5" cy="8.5" r="5" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M13 13l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+          <input
+            type="search"
+            className="sidebar-search-input"
+            placeholder="Search guests, tables, groups"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            aria-label="Search unassigned guests, tables, and groups"
+          />
+        </div>
       </div>
       <div
         ref={setDropzoneRef}

@@ -169,6 +169,22 @@
   flex-shrink: 0;
 }
 
+.sidebar-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-search-icon {
+  position: absolute;
+  left: 8px;
+  width: 14px;
+  height: 14px;
+  color: #9ca3af;
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
 .sidebar-search-input {
   width: 100%;
   border: 1px solid #d4d4d8;
@@ -177,7 +193,7 @@
   color: #111827;
   font-size: 12px;
   line-height: 1.4;
-  padding: 7px 9px;
+  padding: 7px 9px 7px 28px;
   outline: none;
 }
 
