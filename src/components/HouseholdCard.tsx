@@ -22,13 +22,11 @@ export default function HouseholdCard({ party }: Props) {
   return (
     <div
       ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      title="Drag to move all unassigned members"
       className={["party-card", isDragging ? "is-dragging" : null].filter(Boolean).join(" ")}>
-      {/* Drag handle is the header row */}
-      <div
-        className="party-card-header"
-        {...listeners}
-        {...attributes}
-        title="Drag to move all unassigned members">
+      <div className="party-card-header">
         <span className="party-name">{party.household}</span>
       </div>
       <div className="party-members">

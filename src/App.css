@@ -294,10 +294,16 @@
   border-radius: 6px;
   margin-bottom: 5px;
   overflow: hidden;
+  cursor: grab;
+  user-select: none;
 }
 
 .party-card.is-dragging {
   opacity: 0;
+  cursor: grabbing;
+}
+
+.party-card:active {
   cursor: grabbing;
 }
 
@@ -634,30 +640,23 @@
 
 /* ─── Drag overlay ────────────────────────────────────────────────────────── */
 
-.drag-overlay-chip {
+.drag-overlay-guest-wrap {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  background: #1f2937;
-  color: #fff;
-  padding: 5px 10px;
-  border-radius: 4px;
-  font-size: 12px;
   pointer-events: none;
-  white-space: nowrap;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
-  transition: background 0.15s ease;
 }
 
-.drag-overlay-chip-content {
-  display: flex;
-  align-items: center;
-  gap: 5px;
+.drag-overlay-guest-chip {
+  padding: 4px 8px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
 }
 
-.drag-overlay-chip--remove {
-  background: #991b1b;
+.drag-overlay-guest-chip--remove {
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+  color: #7f1d1d;
 }
 
 .drag-overlay-remove-badge {
@@ -727,7 +726,6 @@
 
 .drag-overlay-party-card {
   margin: 0;
-  min-width: 160px;
   pointer-events: none;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.22);
 }

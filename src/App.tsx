@@ -261,6 +261,7 @@ function SeatingApp({
   } = useSeating();
   const [activeDrag, setActiveDrag] = useState<ActiveDragData | null>(null);
   const [showRemoveHint, setShowRemoveHint] = useState(false);
+  const [dragOverlayWidth, setDragOverlayWidth] = useState<number | null>(null);
   const removeHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isDraggedGuestSeatedRef = useRef(false);
   const [showWarnings, setShowWarnings] = useState(false);
@@ -358,6 +359,7 @@ function SeatingApp({
     (event: DragStartEvent) => {
       const data = isActiveDragData(event.active.data.current) ? event.active.data.current : null;
       setActiveDrag(data);
+      setDragOverlayWidth(event.active.rect.current.initial?.width ?? null);
       if (data?.kind === "guest") {
         isDraggedGuestSeatedRef.current = !state.unassigned.includes(data.guestId);
       } else {
@@ -390,6 +392,7 @@ function SeatingApp({
     }
     isDraggedGuestSeatedRef.current = false;
     setActiveDrag(null);
+    setDragOverlayWidth(null);
     setShowRemoveHint(false);
   }, []);
 
@@ -403,6 +406,7 @@ function SeatingApp({
       isDraggedGuestSeatedRef.current = false;
       const data = isActiveDragData(active.data.current) ? active.data.current : null;
       setActiveDrag(null);
+      setDragOverlayWidth(null);
       setShowRemoveHint(false);
 
       if (willRemove && data?.kind === "guest") {
@@ -611,11 +615,18 @@ function SeatingApp({
 
         <DragOverlay dropAnimation={null}>
           {overlayGuest && (
-            <div
-              className={`drag-overlay-chip${showRemoveHint ? " drag-overlay-chip--remove" : ""}`}>
-              <span className="drag-overlay-chip-content">
+            <div className="drag-overlay-guest-wrap">
+              <span
+                className={[
+                  "guest-chip",
+                  "guest-chip--sidebar",
+                  "drag-overlay-guest-chip",
+                  showRemoveHint ? "drag-overlay-guest-chip--remove" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" ")}>
                 <span className={`rsvp-dot rsvp-${overlayGuest.rsvp}`} />
-                {overlayGuest.fullName}
+                <span className="guest-name">{overlayGuest.fullName}</span>
               </span>
               {showRemoveHint && <span className="drag-overlay-remove-badge">× Remove</span>}
             </div>
@@ -624,10 +635,24 @@ function SeatingApp({
             <div className="drag-overlay-table">{activeDrag.name}</div>
           )}
           {overlayParty && activeDrag?.kind === "party" && (
-            <div className="party-card drag-overlay-party-card">
+            <div
+              className="party-card drag-overlay-party-card"
+              style={dragOverlayWidth ? { width: `${dragOverlayWidth}px` } : undefined}>
               <div className="party-card-header">
                 <span className="party-name">{overlayParty.household}</span>
-                <span className="group-count">{overlayGuestIds.length}</span>
+              </div>
+              <div className="party-members">
+                {overlayGuestIds.map((id) => {
+                  const guest = guests.get(id);
+                  if (!guest) return null;
+
+                  return (
+                    <span key={id} className="guest-chip guest-chip--sidebar">
+                      <span className={`rsvp-dot rsvp-${guest.rsvp}`} />
+                      <span className="guest-name">{guest.fullName}</span>
+                    </span>
+                  );
+                })}
               </div>
             </div>
           )}
