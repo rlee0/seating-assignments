@@ -9,6 +9,7 @@ import { useSortable } from "@dnd-kit/sortable";
 interface Props {
   table: TableState;
   activeDragKind: "party" | "guest" | "group" | "table" | null;
+  activeDragGuestId: string | null;
 }
 
 function stopTableDrag(event: React.PointerEvent | React.MouseEvent) {
@@ -20,15 +21,20 @@ function SeatSlot({
   seatIndex,
   guestId,
   activeDragKind,
+  activeDragGuestId,
 }: {
   tableNumber: number;
   seatIndex: number;
   guestId: string | null;
   activeDragKind: "party" | "guest" | "group" | "table" | null;
+  activeDragGuestId: string | null;
 }) {
+  const isOriginSeat = activeDragKind === "guest" && guestId === activeDragGuestId;
+  const isVisuallyEmpty = guestId === null || isOriginSeat;
+
   const droppable = useDroppable({
     id: `seat-${tableNumber}-${seatIndex}`,
-    disabled: guestId !== null,
+    disabled: guestId !== null && guestId !== activeDragGuestId,
   });
 
   return (
@@ -36,18 +42,24 @@ function SeatSlot({
       ref={droppable.setNodeRef}
       className={[
         "seat-slot",
-        guestId ? "seat-occupied" : "seat-empty",
+        isVisuallyEmpty ? "seat-empty" : "seat-occupied",
         activeDragKind === "guest" && droppable.isOver ? "is-over" : null,
       ]
         .filter(Boolean)
         .join(" ")}>
-      {guestId ? <GuestChip guestId={guestId} context="table" /> : null}
+      {guestId ? (
+        <GuestChip
+          guestId={guestId}
+          context="table"
+          className={isOriginSeat ? "guest-chip--origin-hidden" : undefined}
+        />
+      ) : null}
     </div>
   );
 }
 
-export default function TableCard({ table, activeDragKind }: Props) {
-  const { dispatch, guests, parties } = useSeating();
+export default function TableCard({ table, activeDragKind, activeDragGuestId }: Props) {
+  const { dispatch } = useSeating();
   const {
     attributes,
     listeners,
@@ -69,15 +81,6 @@ export default function TableCard({ table, activeDragKind }: Props) {
   const occupancy = seatedGuestIds.length;
   const isFull = occupancy >= TABLE_CAPACITY;
 
-  // Flag if any seated guest has party members elsewhere
-  const hasSplitParty = seatedGuestIds.some((guestId) => {
-    const guest = guests.get(guestId);
-    if (!guest) return false;
-    const party = parties.get(guest.partyId);
-    if (!party || party.guestIds.length === 1) return false;
-    return party.guestIds.some((id) => id !== guestId && !seatedGuestIds.includes(id));
-  });
-
   function handleClearTable() {
     if (occupancy === 0) return;
     dispatch({ type: "CLEAR_TABLE", tableNumber: table.tableNumber });
@@ -90,7 +93,6 @@ export default function TableCard({ table, activeDragKind }: Props) {
     "table-card",
     isOver && activeDragKind !== "table" ? "is-over" : null,
     isFull ? "is-full" : null,
-    hasSplitParty ? "has-split" : null,
     isDragging ? "is-dragging" : null,
   ]
     .filter(Boolean)
@@ -113,41 +115,19 @@ export default function TableCard({ table, activeDragKind }: Props) {
               seatIndex={i}
               guestId={guestId}
               activeDragKind={activeDragKind}
+              activeDragGuestId={activeDragGuestId}
             />
           ))}
         </div>
 
         {/* Table label */}
         <div className="table-label">
-          <div
-            className="table-label-main"
-            title="Drag to move table"
-            {...listeners}
-            {...attributes}>
+          <div className="table-label-main" {...listeners} {...attributes}>
             <span className="table-name">{table.name}</span>
             <span className={`table-occupancy${isFull ? " full" : ""}`}>
               {occupancy}/{TABLE_CAPACITY}
             </span>
           </div>
-          {hasSplitParty && (
-            <span className="split-indicator" title="Household split across tables">
-              <svg viewBox="0 0 16 16" className="split-indicator-icon" aria-hidden="true">
-                <path
-                  d="M8 2.2L14 13H2L8 2.2z"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                />
-                <path
-                  d="M8 5.6v3.5"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                />
-                <circle cx="8" cy="11.5" r="0.8" fill="currentColor" />
-              </svg>
-            </span>
-          )}
           <button
             type="button"
             className={`table-action table-clear-btn${occupancy === 0 ? " is-hidden" : ""}`}
@@ -165,15 +145,19 @@ export default function TableCard({ table, activeDragKind }: Props) {
 
         {/* Bottom 4 seats */}
         <div className="table-seats table-seats-bottom">
-          {bottomRow.map((guestId, i) => (
-            <SeatSlot
-              key={i + 4}
-              tableNumber={table.tableNumber}
-              seatIndex={i + 4}
-              guestId={guestId}
-              activeDragKind={activeDragKind}
-            />
-          ))}
+          {bottomRow.map((guestId, i) => {
+            const seatIndex = i + 4;
+            return (
+              <SeatSlot
+                key={seatIndex}
+                tableNumber={table.tableNumber}
+                seatIndex={seatIndex}
+                guestId={guestId}
+                activeDragKind={activeDragKind}
+                activeDragGuestId={activeDragGuestId}
+              />
+            );
+          })}
         </div>
       </div>
     </div>

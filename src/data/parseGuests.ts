@@ -1,4 +1,4 @@
-import type { Guest, GuestInputRow, Party, RSVPStatus } from "../types";
+import type { Guest, GuestInputRow, Host, Party } from "../types";
 
 import rawMd from "../../guest-list-cleaned.md?raw";
 
@@ -28,13 +28,13 @@ function parseRawRows(): GuestInputRow[] {
     const t = line.trim();
     if (!t.startsWith("|")) continue;
     const parts = t.split("|").map((p) => p.trim());
-    // parts: ['', sr, household, group, tableCol, fullName, '']
-    const sr = parts[1];
-    if (sr !== "r" && sr !== "s") continue;
+    // parts: ['', host, household, group, tableCol, fullName, '']
+    const hostRaw = parts[1];
+    if (hostRaw !== "Ryan" && hostRaw !== "Stella") continue;
     const fullName = parts[5];
     if (!fullName) continue;
     rows.push({
-      rsvp: sr as RSVPStatus,
+      host: (hostRaw === "Ryan" ? "r" : "s") as Host,
       household: parts[2],
       group: parts[3],
       fullName,
@@ -73,7 +73,7 @@ export function parseGuestsFromRows(rawRows: GuestInputRow[]): ParsedData {
       id: guestId,
       fullName: row.fullName,
       partyId,
-      rsvp: row.rsvp,
+      host: row.host,
       group: row.group,
     };
     guests.set(guestId, guest);
@@ -82,23 +82,23 @@ export function parseGuestsFromRows(rawRows: GuestInputRow[]): ParsedData {
       parties.set(partyId, {
         id: partyId,
         household: row.household,
-        group: row.group || "—",
-        rsvp: row.rsvp,
+        group: row.group,
+        host: row.host,
         guestIds: [],
       });
     }
     const party = parties.get(partyId)!;
     party.guestIds.push(guestId);
 
-    // Party is pending if any member is pending
-    if (row.rsvp === "s") party.rsvp = "s";
+    // Party host follows Stella if any member is Stella's
+    if (row.host === "s") party.host = "s";
 
     if (!row.group) {
       warnings.push(`"${row.fullName}" has no group assigned`);
     }
 
     // Warn on mixed-group households (same household, different group value)
-    if (party.group && party.group !== "—" && row.group && party.group !== row.group) {
+    if (party.group && row.group && party.group !== row.group) {
       warnings.push(
         `Household "${row.household}": mixed groups ("${party.group}", "${row.group}")`
       );
@@ -107,8 +107,4 @@ export function parseGuestsFromRows(rawRows: GuestInputRow[]): ParsedData {
 
   const allGuestIds = [...guests.keys()];
   return { guests, parties, allGuestIds, warnings };
-}
-
-export function parseGuests(): ParsedData {
-  return parseGuestsFromRows(getDefaultGuestRows());
 }

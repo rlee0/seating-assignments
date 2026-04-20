@@ -57,6 +57,7 @@
 }
 
 .btn-undo,
+.btn-action,
 .btn-reset,
 .btn-warnings {
   display: inline-flex;
@@ -73,17 +74,20 @@
 }
 
 .btn-undo svg,
+.btn-action svg,
 .btn-reset svg,
 .btn-warnings svg {
   flex-shrink: 0;
 }
 
 .btn-undo:not(:disabled):hover,
+.btn-action:not(:disabled):hover,
 .btn-reset:not(:disabled):hover {
   background: #f5f5f5;
 }
 
 .btn-undo:disabled,
+.btn-action:disabled,
 .btn-reset:disabled {
   background: #fafafa;
   border-color: #e5e5e5;
@@ -245,6 +249,9 @@
   border-radius: 6px;
   margin-bottom: 5px;
   overflow: hidden;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease;
 }
 
 .group-card.is-dragging {
@@ -296,6 +303,9 @@
   overflow: hidden;
   cursor: grab;
   user-select: none;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease;
 }
 
 .party-card.is-dragging {
@@ -350,6 +360,9 @@
   font-size: 11px;
   max-width: 100%;
   touch-action: none;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 
 .guest-chip:active {
@@ -386,7 +399,12 @@
   background: #f9fafb;
 }
 
-.rsvp-dot {
+.guest-chip--origin-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.host-dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
@@ -394,12 +412,12 @@
   display: inline-block;
 }
 
-.rsvp-r {
-  background: #22c55e;
+.host-r {
+  background: #2e9e88;
 }
 
-.rsvp-s {
-  background: #f59e0b;
+.host-s {
+  background: #c0674a;
 }
 
 .guest-name {
@@ -444,7 +462,7 @@
 }
 
 .table-card.is-dragging {
-  opacity: 0.45;
+  opacity: 0;
   cursor: grabbing;
 }
 
@@ -453,14 +471,41 @@
   background: #eff6ff;
 }
 
+@media (hover: hover) {
+  .group-card:hover,
+  .group-card:focus-within {
+    background: #fcfcfd;
+    border-color: #cfd4dc;
+  }
+
+  .party-card:hover,
+  .party-card:focus-within {
+    background: #fcfcfd;
+    border-color: #cfd4dc;
+  }
+
+  .guest-chip--sidebar:hover,
+  .guest-chip--sidebar:focus-visible {
+    background: #e5e7eb;
+  }
+
+  .guest-chip--table:hover,
+  .guest-chip--table:focus-visible {
+    background: #f8fafc;
+    border-color: #d1d5db;
+  }
+
+  .table-card:hover,
+  .table-card:focus-within {
+    background: #fcfcfd;
+    border-color: #cfd4dc;
+  }
+}
+
 /* Red border when full and hovered — indicates reject */
 .table-card.is-full.is-over {
   border-color: #ef4444;
   background: #fef2f2;
-}
-
-.table-card.has-split {
-  border-color: #fbbf24;
 }
 
 /* ─── Seat rows ───────────────────────────────────────────────────────────── */
@@ -493,6 +538,15 @@
   background: transparent;
 }
 
+.seat-occupied.is-over {
+  background: #eff6ff;
+  box-shadow: inset 0 0 0 1px #3b82f6;
+}
+
+.seat-occupied.is-over .guest-chip--table {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
 /* ─── Table label ─────────────────────────────────────────────────────────── */
 
 .table-label {
@@ -618,26 +672,6 @@
   font-weight: 600;
 }
 
-.split-indicator {
-  position: absolute;
-  left: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 12px;
-  height: 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #d97706;
-  flex-shrink: 0;
-}
-
-.split-indicator-icon {
-  width: 12px;
-  height: 12px;
-  display: block;
-}
-
 /* ─── Drag overlay ────────────────────────────────────────────────────────── */
 
 .drag-overlay-guest-wrap {
@@ -650,6 +684,7 @@
 
 .drag-overlay-guest-chip {
   padding: 4px 8px;
+  border: 1px solid #d1d5db;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
 }
 
@@ -694,6 +729,14 @@
   pointer-events: none;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
   white-space: nowrap;
+}
+
+.drag-overlay-table-shell {
+  pointer-events: none;
+}
+
+.drag-overlay-table-shell .table-card {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.22);
 }
 
 .drag-overlay-group {

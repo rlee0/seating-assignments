@@ -4,7 +4,6 @@ import {
   closestCenter,
   type CollisionDetection,
   DndContext,
-  type DragCancelEvent,
   DragEndEvent,
   DragOverlay,
   DragOverEvent,
@@ -18,7 +17,7 @@ import {
 import { AlertTriangle, Download, Redo2, RotateCcw, Undo2, Upload } from "lucide-react";
 import { SeatingProvider, useSeating } from "./store/SeatingContext";
 import { SearchProvider } from "./store/SearchContext";
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 
 import Sidebar from "./components/Sidebar";
 import TableBoard from "./components/TableBoard";
@@ -30,6 +29,8 @@ import {
 } from "./data/parseGuests";
 import {
   clearPersistedAppState,
+  isCompatibleState,
+  isGuestInputRow,
   loadPersistedGuestRows,
   parsePersistedSeatingData,
   saveGuestDataSourceSignature,
@@ -38,7 +39,7 @@ import {
 } from "./store/localStorage";
 import {
   EXPORT_FORMAT_VERSION,
-  TABLE_COUNT,
+  TABLE_CAPACITY,
   type GuestInputRow,
   type PersistedSeatingData,
   type SeatingExportData,
@@ -150,46 +151,6 @@ function getInitialGuestRows(): GuestInputRow[] {
   const sourceSignature = getGuestSourceSignature();
 
   return loadPersistedGuestRows(sourceSignature) ?? getDefaultGuestRows();
-}
-
-function isGuestInputRow(value: unknown): value is GuestInputRow {
-  if (!value || typeof value !== "object") return false;
-
-  const candidate = value as {
-    rsvp?: unknown;
-    household?: unknown;
-    group?: unknown;
-    fullName?: unknown;
-  };
-
-  return (
-    (candidate.rsvp === "r" || candidate.rsvp === "s") &&
-    typeof candidate.household === "string" &&
-    typeof candidate.group === "string" &&
-    typeof candidate.fullName === "string"
-  );
-}
-
-function isCompatibleState(snapshot: PersistedSeatingData, guestRows: GuestInputRow[]): boolean {
-  const allGuestIds = guestRows.map((_, index) => `g${index}`);
-  const savedIds = [
-    ...snapshot.state.unassigned,
-    ...snapshot.state.tables.flatMap((table) =>
-      table.guestIds.filter((guestId): guestId is string => guestId !== null)
-    ),
-  ];
-  const uniqueSavedIds = new Set(savedIds);
-  const currentIds = new Set(allGuestIds);
-
-  if (snapshot.state.tables.length === 0 || snapshot.state.tables.length !== TABLE_COUNT) {
-    return false;
-  }
-
-  return (
-    savedIds.length === currentIds.size &&
-    uniqueSavedIds.size === currentIds.size &&
-    [...currentIds].every((id) => uniqueSavedIds.has(id))
-  );
 }
 
 function parseImportPayload(value: unknown): {
@@ -385,7 +346,7 @@ function SeatingApp({
     }
   }, []);
 
-  const handleDragCancel = useCallback((_event: DragCancelEvent) => {
+  const handleDragCancel = useCallback(() => {
     if (removeHintTimerRef.current !== null) {
       clearTimeout(removeHintTimerRef.current);
       removeHintTimerRef.current = null;
@@ -492,7 +453,7 @@ function SeatingApp({
     link.download = buildExportFilename();
     link.click();
 
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
   async function handleImportChange(event: ChangeEvent<HTMLInputElement>) {
@@ -509,7 +470,8 @@ function SeatingApp({
         return;
       }
 
-      if (!isCompatibleState(parsed.seating, parsed.guestRows)) {
+      const { allGuestIds: importedGuestIds } = parseGuestsFromRows(parsed.guestRows);
+      if (!isCompatibleState(parsed.seating.state, importedGuestIds)) {
         window.alert(
           "Import failed. The seating snapshot does not match the guest list in the file."
         );
@@ -525,6 +487,10 @@ function SeatingApp({
   // Overlay content while dragging
   const overlayGuest = activeDrag?.kind === "guest" ? guests.get(activeDrag.guestId) : null;
   const overlayParty = activeDrag?.kind === "party" ? parties.get(activeDrag.partyId) : null;
+  const overlayTable =
+    activeDrag?.kind === "table"
+      ? (state.tables.find((table) => table.tableNumber === activeDrag.tableNumber) ?? null)
+      : null;
   const overlayGuestIds = activeDrag
     ? resolveDragGuestIds(activeDrag, parties, state.unassigned)
     : [];
@@ -539,7 +505,7 @@ function SeatingApp({
       onDragEnd={handleDragEnd}>
       <div className="app">
         <header className="app-header">
-          <h1>Wedding Seating Chart</h1>
+          <h1>Seating Assignments</h1>
           <div className="app-stats">
             <span className="stat">
               {assignedCount}/{totalGuests} seated
@@ -559,7 +525,7 @@ function SeatingApp({
               <Undo2 size={14} aria-hidden="true" />
               <span className="btn-label">Undo</span>
             </button>
-            <button className="btn-undo" onClick={redo} disabled={!canRedo}>
+            <button className="btn-action" onClick={redo} disabled={!canRedo}>
               <Redo2 size={14} aria-hidden="true" />
               <span className="btn-label">Redo</span>
             </button>
@@ -567,11 +533,11 @@ function SeatingApp({
               <RotateCcw size={14} aria-hidden="true" />
               <span className="btn-label">Reset</span>
             </button>
-            <button className="btn-undo" onClick={handleExport}>
+            <button className="btn-action" onClick={handleExport}>
               <Download size={14} aria-hidden="true" />
               <span className="btn-label">Export</span>
             </button>
-            <button className="btn-undo" onClick={() => fileInputRef.current?.click()}>
+            <button className="btn-action" onClick={() => fileInputRef.current?.click()}>
               <Upload size={14} aria-hidden="true" />
               <span className="btn-label">Import</span>
             </button>
@@ -597,7 +563,10 @@ function SeatingApp({
 
         <div className={`app-body app-body--${mobilePanel}`}>
           <Sidebar />
-          <TableBoard activeDragKind={activeDrag?.kind ?? null} />
+          <TableBoard
+            activeDragKind={activeDrag?.kind ?? null}
+            activeDragGuestId={activeDrag?.kind === "guest" ? activeDrag.guestId : null}
+          />
         </div>
 
         <div className="mobile-tabs">
@@ -625,14 +594,67 @@ function SeatingApp({
                 ]
                   .filter(Boolean)
                   .join(" ")}>
-                <span className={`rsvp-dot rsvp-${overlayGuest.rsvp}`} />
+                <span className={`host-dot host-${overlayGuest.host}`} />
                 <span className="guest-name">{overlayGuest.fullName}</span>
               </span>
               {showRemoveHint && <span className="drag-overlay-remove-badge">× Remove</span>}
             </div>
           )}
-          {activeDrag?.kind === "table" && (
-            <div className="drag-overlay-table">{activeDrag.name}</div>
+          {overlayTable && activeDrag?.kind === "table" && (
+            <div className="table-card-shell drag-overlay-table-shell">
+              <div
+                className={[
+                  "table-card",
+                  overlayTable.guestIds.filter((guestId) => guestId !== null).length >=
+                  TABLE_CAPACITY
+                    ? "is-full"
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                style={dragOverlayWidth ? { width: `${dragOverlayWidth}px` } : undefined}>
+                <div className="table-seats table-seats-top">
+                  {overlayTable.guestIds.slice(0, 4).map((guestId, i) => (
+                    <div
+                      key={`overlay-top-${i}`}
+                      className={["seat-slot", guestId ? "seat-occupied" : "seat-empty"].join(" ")}>
+                      {guestId ? (
+                        <div className="guest-chip guest-chip--table">
+                          <span className={`host-dot host-${guests.get(guestId)?.host}`} />
+                          <span className="guest-name">{guests.get(guestId)?.fullName}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="table-label">
+                  <div className="table-label-main">
+                    <span className="table-name">{overlayTable.name}</span>
+                    <span
+                      className={`table-occupancy${overlayTable.guestIds.filter((guestId) => guestId !== null).length >= TABLE_CAPACITY ? " full" : ""}`}>
+                      {overlayTable.guestIds.filter((guestId) => guestId !== null).length}/
+                      {TABLE_CAPACITY}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="table-seats table-seats-bottom">
+                  {overlayTable.guestIds.slice(4, 8).map((guestId, i) => (
+                    <div
+                      key={`overlay-bottom-${i}`}
+                      className={["seat-slot", guestId ? "seat-occupied" : "seat-empty"].join(" ")}>
+                      {guestId ? (
+                        <div className="guest-chip guest-chip--table">
+                          <span className={`host-dot host-${guests.get(guestId)?.host}`} />
+                          <span className="guest-name">{guests.get(guestId)?.fullName}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           )}
           {overlayParty && activeDrag?.kind === "party" && (
             <div
@@ -648,7 +670,7 @@ function SeatingApp({
 
                   return (
                     <span key={id} className="guest-chip guest-chip--sidebar">
-                      <span className={`rsvp-dot rsvp-${guest.rsvp}`} />
+                      <span className={`host-dot host-${guest.host}`} />
                       <span className="guest-name">{guest.fullName}</span>
                     </span>
                   );
@@ -673,7 +695,7 @@ function SeatingApp({
 export default function App() {
   const [guestRows, setGuestRows] = useState<GuestInputRow[]>(() => getInitialGuestRows());
   const [providerVersion, setProviderVersion] = useState(0);
-  const parsedData = parseGuestsFromRows(guestRows);
+  const parsedData = useMemo(() => parseGuestsFromRows(guestRows), [guestRows]);
   const sourceSignature = getGuestSourceSignature();
 
   useEffect(() => {

@@ -1,9 +1,9 @@
 // ─── Domain types ────────────────────────────────────────────────────────────
 
-export type RSVPStatus = "r" | "s";
+export type Host = "r" | "s";
 
 export interface GuestInputRow {
-  rsvp: RSVPStatus;
+  host: Host;
   household: string;
   group: string;
   fullName: string;
@@ -13,7 +13,7 @@ export interface Guest {
   id: string; // slugified full name, unique
   fullName: string;
   partyId: string; // matches Party.id
-  rsvp: RSVPStatus;
+  host: Host;
   group: string;
 }
 
@@ -21,7 +21,7 @@ export interface Party {
   id: string; // slugified Household, unique
   household: string;
   group: string; // primary group (from first member that has one)
-  rsvp: RSVPStatus; // 'r' if all members are 'r', else 's'
+  host: Host; // 'r' = Ryan, 's' = Stella
   guestIds: string[]; // ordered list of Guest ids
 }
 

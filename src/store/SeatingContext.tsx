@@ -1,8 +1,8 @@
-import React, { createContext, useCallback, useContext, useEffect, useReducer } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer } from "react";
 import type { PersistedSeatingData, SeatingState } from "../types";
-import { TABLE_CAPACITY, TABLE_COUNT } from "../types";
+import { TABLE_CAPACITY } from "../types";
 import { seatingReducer, createInitialState, type SeatingAction } from "./reducer";
-import { loadPersistedSeating, MAX_UNDO_HISTORY, savePersistedSeating } from "./localStorage";
+import { isCompatibleState, loadPersistedSeating, MAX_UNDO_HISTORY, savePersistedSeating } from "./localStorage";
 import type { ParsedData } from "../data/parseGuests";
 
 interface SeatingContextValue {
@@ -91,24 +91,6 @@ function areSeatingStatesEqual(left: SeatingState, right: SeatingState): boolean
   });
 }
 
-function isCompatibleState(state: SeatingState, allGuestIds: string[]): boolean {
-  const savedIds = [
-    ...state.unassigned,
-    ...state.tables.flatMap((table) =>
-      table.guestIds.filter((guestId): guestId is string => guestId !== null)
-    ),
-  ];
-  const uniqueSavedIds = new Set(savedIds);
-  const currentIds = new Set(allGuestIds);
-
-  return (
-    state.tables.length === TABLE_COUNT &&
-    savedIds.length === currentIds.size &&
-    uniqueSavedIds.size === currentIds.size &&
-    [...currentIds].every((id) => uniqueSavedIds.has(id))
-  );
-}
-
 function seatingHistoryReducer(state: HistoryState, action: HistoryAction): HistoryState {
   switch (action.type) {
     case "APPLY_ACTION": {
@@ -160,7 +142,7 @@ export function SeatingProvider({
   parsedData: ParsedData;
 }) {
   const { guests, parties, allGuestIds, warnings } = parsedData;
-  const defaultState = createInitialState(allGuestIds);
+  const defaultState = useMemo(() => createInitialState(allGuestIds), [allGuestIds]);
 
   const [historyState, historyDispatch] = useReducer(
     seatingHistoryReducer,

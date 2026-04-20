@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import GuestChip from "./GuestChip";
 import type { Party } from "../types";
 import { useDraggable } from "@dnd-kit/core";
@@ -9,7 +10,7 @@ interface Props {
 
 export default function HouseholdCard({ party }: Props) {
   const { state } = useSeating();
-  const unassignedSet = new Set(state.unassigned);
+  const unassignedSet = useMemo(() => new Set(state.unassigned), [state.unassigned]);
 
   // Only carry unassigned members when dragging the whole party
   const unassignedGuestIds = party.guestIds.filter((id) => unassignedSet.has(id));
@@ -24,7 +25,6 @@ export default function HouseholdCard({ party }: Props) {
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      title="Drag to move all unassigned members"
       className={["party-card", isDragging ? "is-dragging" : null].filter(Boolean).join(" ")}>
       <div className="party-card-header">
         <span className="party-name">{party.household}</span>

@@ -1,23 +1,42 @@
-import { GUEST_DATA_SOURCE_KEY, GUEST_DATA_STORAGE_KEY, STORAGE_KEY } from "../types";
+import { GUEST_DATA_SOURCE_KEY, GUEST_DATA_STORAGE_KEY, STORAGE_KEY, TABLE_COUNT } from "../types";
 import type { GuestInputRow, PersistedSeatingData, SeatingState } from "../types";
 
-export const MAX_UNDO_HISTORY = 30;
+export const MAX_UNDO_HISTORY = 100;
 
-function isGuestInputRow(value: unknown): value is GuestInputRow {
+export function isGuestInputRow(value: unknown): value is GuestInputRow {
   if (!value || typeof value !== "object") return false;
 
   const candidate = value as {
-    rsvp?: unknown;
+    host?: unknown;
     household?: unknown;
     group?: unknown;
     fullName?: unknown;
   };
 
   return (
-    (candidate.rsvp === "r" || candidate.rsvp === "s") &&
+    (candidate.host === "r" || candidate.host === "s") &&
     typeof candidate.household === "string" &&
     typeof candidate.group === "string" &&
     typeof candidate.fullName === "string"
+  );
+}
+
+export function isCompatibleState(state: SeatingState, allGuestIds: string[]): boolean {
+  if (state.tables.length !== TABLE_COUNT) return false;
+
+  const savedIds = [
+    ...state.unassigned,
+    ...state.tables.flatMap((table) =>
+      table.guestIds.filter((guestId): guestId is string => guestId !== null)
+    ),
+  ];
+  const uniqueSavedIds = new Set(savedIds);
+  const currentIds = new Set(allGuestIds);
+
+  return (
+    savedIds.length === currentIds.size &&
+    uniqueSavedIds.size === currentIds.size &&
+    [...currentIds].every((id) => uniqueSavedIds.has(id))
   );
 }
 

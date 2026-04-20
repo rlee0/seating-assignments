@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import GroupCard from "./GroupCard";
 import HouseholdCard from "./HouseholdCard";
@@ -6,11 +6,18 @@ import { useDroppable } from "@dnd-kit/core";
 import { useSearch } from "../store/SearchContext";
 import { useSeating } from "../store/SeatingContext";
 
+function normalizeForSearch(str: string): string {
+  return str.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+}
+
 export default function Sidebar() {
   const { state, parties, guests } = useSeating();
   const { searchQuery, setSearchQuery } = useSearch();
-  const unassignedSet = new Set(state.unassigned);
-  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const unassignedSet = useMemo(() => new Set(state.unassigned), [state.unassigned]);
+  const normalizedQuery = useMemo(
+    () => normalizeForSearch(searchQuery.trim()),
+    [searchQuery]
+  );
 
   const { setNodeRef, isOver } = useDroppable({ id: "unassigned" });
   const dropzoneRef = useRef<HTMLDivElement | null>(null);
@@ -48,12 +55,12 @@ export default function Sidebar() {
     if (unassignedGuestIds.length === 0) return false;
     if (!normalizedQuery) return true;
 
-    if (party.household.toLowerCase().includes(normalizedQuery)) return true;
-    if ((party.group || "No Group").toLowerCase().includes(normalizedQuery)) return true;
+    if (normalizeForSearch(party.household).includes(normalizedQuery)) return true;
+    if (normalizeForSearch(party.group || "No Group").includes(normalizedQuery)) return true;
 
     return unassignedGuestIds.some((id) => {
       const guest = guests.get(id);
-      return guest?.fullName.toLowerCase().includes(normalizedQuery);
+      return guest && normalizeForSearch(guest.fullName).includes(normalizedQuery);
     });
   });
 
@@ -71,14 +78,10 @@ export default function Sidebar() {
     groupedGuestIds.set(groupName, [...existingGuestIds, ...unassignedGuestIds]);
   }
 
-  const sortedGroups = [...groupedParties.keys()].sort((a, b) => a.localeCompare(b));
+  const sortedGroups = [...groupedParties.keys()];
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-header">
-        <span className="sidebar-title">Unassigned</span>
-        <span className="sidebar-count">{state.unassigned.length}</span>
-      </div>
       <div className="sidebar-search-row">
         <input
           type="search"

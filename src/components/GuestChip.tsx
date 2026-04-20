@@ -3,12 +3,20 @@ import { useDraggable } from "@dnd-kit/core";
 import { useSearch } from "../store/SearchContext";
 import { useSeating } from "../store/SeatingContext";
 
+function normalizeForSearch(str: string): string {
+  return str
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+}
+
 interface Props {
   guestId: string;
   context: "sidebar" | "table";
+  className?: string;
 }
 
-export default function GuestChip({ guestId, context }: Props) {
+export default function GuestChip({ guestId, context, className }: Props) {
   const { guests } = useSeating();
   const { searchQuery } = useSearch();
   const guest = guests.get(guestId);
@@ -29,9 +37,10 @@ export default function GuestChip({ guestId, context }: Props) {
       className={[
         "guest-chip",
         `guest-chip--${context}`,
+        className,
         isDragging ? "is-dragging" : null,
         searchQuery.trim() &&
-        guest?.fullName.toLowerCase().includes(searchQuery.trim().toLowerCase())
+        normalizeForSearch(guest.fullName).includes(normalizeForSearch(searchQuery.trim()))
           ? "is-search-match"
           : null,
       ]
@@ -40,7 +49,7 @@ export default function GuestChip({ guestId, context }: Props) {
       title={guest.fullName}
       {...listeners}
       {...attributes}>
-      <span className={`rsvp-dot rsvp-${guest.rsvp}`} />
+      <span className={`host-dot host-${guest.host}`} />
       <span className="guest-name">{guest.fullName}</span>
     </div>
   );
