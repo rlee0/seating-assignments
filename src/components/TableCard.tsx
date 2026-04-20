@@ -80,9 +80,7 @@ export default function TableCard({ table, activeDragKind }: Props) {
 
   function handleClearTable() {
     if (occupancy === 0) return;
-    if (window.confirm(`Clear all guests from ${table.name}? This will keep the table name.`)) {
-      dispatch({ type: "CLEAR_TABLE", tableNumber: table.tableNumber });
-    }
+    dispatch({ type: "CLEAR_TABLE", tableNumber: table.tableNumber });
   }
 
   const topRow = seated.slice(0, 4);
