@@ -1,12 +1,24 @@
-import { STORAGE_KEY } from "../types";
-import type { SeatingState } from "../types";
+import { GUEST_DATA_STORAGE_KEY, STORAGE_KEY } from "../types";
+import type { GuestInputRow, PersistedSeatingData, SeatingState } from "../types";
 
 export const MAX_UNDO_HISTORY = 30;
 
-export interface PersistedSeatingData {
-  state: SeatingState;
-  history: SeatingState[];
-  future: SeatingState[];
+function isGuestInputRow(value: unknown): value is GuestInputRow {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as {
+    rsvp?: unknown;
+    displayName?: unknown;
+    group?: unknown;
+    fullName?: unknown;
+  };
+
+  return (
+    (candidate.rsvp === "r" || candidate.rsvp === "s") &&
+    typeof candidate.displayName === "string" &&
+    typeof candidate.group === "string" &&
+    typeof candidate.fullName === "string"
+  );
 }
 
 function isSeatingState(value: unknown): value is SeatingState {
@@ -20,41 +32,67 @@ function isSeatingState(value: unknown): value is SeatingState {
   return Array.isArray(candidate.tables) && Array.isArray(candidate.unassigned);
 }
 
+export function parsePersistedSeatingData(value: unknown): PersistedSeatingData | null {
+  if (isSeatingState(value)) {
+    return { state: value, history: [], future: [] };
+  }
+
+  if (value && typeof value === "object") {
+    const candidate = value as {
+      state?: unknown;
+      history?: unknown;
+      future?: unknown;
+    };
+
+    if (
+      isSeatingState(candidate.state) &&
+      Array.isArray(candidate.history) &&
+      candidate.history.every((snapshot) => isSeatingState(snapshot)) &&
+      (candidate.future === undefined ||
+        (Array.isArray(candidate.future) &&
+          candidate.future.every((snapshot) => isSeatingState(snapshot))))
+    ) {
+      return {
+        state: candidate.state,
+        history: candidate.history.slice(-MAX_UNDO_HISTORY),
+        future: Array.isArray(candidate.future) ? candidate.future.slice(-MAX_UNDO_HISTORY) : [],
+      };
+    }
+  }
+
+  return null;
+}
+
+export function loadPersistedGuestRows(): GuestInputRow[] | null {
+  try {
+    const raw = localStorage.getItem(GUEST_DATA_STORAGE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed) || !parsed.every((row) => isGuestInputRow(row))) {
+      return null;
+    }
+
+    return parsed.map((row) => ({ ...row }));
+  } catch {
+    return null;
+  }
+}
+
+export function savePersistedGuestRows(rows: GuestInputRow[]): void {
+  try {
+    localStorage.setItem(GUEST_DATA_STORAGE_KEY, JSON.stringify(rows));
+  } catch {
+    // Ignore quota errors silently
+  }
+}
+
 export function loadPersistedSeating(): PersistedSeatingData | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
 
-    const parsed = JSON.parse(raw) as unknown;
-
-    if (isSeatingState(parsed)) {
-      return { state: parsed, history: [], future: [] };
-    }
-
-    if (parsed && typeof parsed === "object") {
-      const candidate = parsed as {
-        state?: unknown;
-        history?: unknown;
-        future?: unknown;
-      };
-
-      if (
-        isSeatingState(candidate.state) &&
-        Array.isArray(candidate.history) &&
-        candidate.history.every((snapshot) => isSeatingState(snapshot)) &&
-        (candidate.future === undefined ||
-          (Array.isArray(candidate.future) &&
-            candidate.future.every((snapshot) => isSeatingState(snapshot))))
-      ) {
-        return {
-          state: candidate.state,
-          history: candidate.history.slice(-MAX_UNDO_HISTORY),
-          future: Array.isArray(candidate.future) ? candidate.future.slice(-MAX_UNDO_HISTORY) : [],
-        };
-      }
-    }
-
-    return null;
+    return parsePersistedSeatingData(JSON.parse(raw) as unknown);
   } catch {
     return null;
   }

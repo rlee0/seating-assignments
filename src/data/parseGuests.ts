@@ -1,4 +1,4 @@
-import type { Guest, Party, RSVPStatus } from "../types";
+import type { Guest, GuestInputRow, Party, RSVPStatus } from "../types";
 
 import rawMd from "../../guest-list-cleaned.md?raw";
 
@@ -9,15 +9,8 @@ export interface ParsedData {
   warnings: string[];
 }
 
-interface RawRow {
-  rsvp: RSVPStatus;
-  displayName: string;
-  group: string;
-  fullName: string;
-}
-
-function parseRawRows(): RawRow[] {
-  const rows: RawRow[] = [];
+function parseRawRows(): GuestInputRow[] {
+  const rows: GuestInputRow[] = [];
   for (const line of rawMd.split("\n")) {
     const t = line.trim();
     if (!t.startsWith("|")) continue;
@@ -37,8 +30,11 @@ function parseRawRows(): RawRow[] {
   return rows;
 }
 
-export function parseGuests(): ParsedData {
-  const rawRows = parseRawRows();
+export function getDefaultGuestRows(): GuestInputRow[] {
+  return parseRawRows().map((row) => ({ ...row }));
+}
+
+export function parseGuestsFromRows(rawRows: GuestInputRow[]): ParsedData {
   const guests = new Map<string, Guest>();
   const parties = new Map<string, Party>();
   const warnings: string[] = [];
@@ -92,4 +88,8 @@ export function parseGuests(): ParsedData {
 
   const allGuestIds = [...guests.keys()];
   return { guests, parties, allGuestIds, warnings };
+}
+
+export function parseGuests(): ParsedData {
+  return parseGuestsFromRows(getDefaultGuestRows());
 }

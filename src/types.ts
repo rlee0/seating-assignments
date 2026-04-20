@@ -2,6 +2,13 @@
 
 export type RSVPStatus = "r" | "s";
 
+export interface GuestInputRow {
+  rsvp: RSVPStatus;
+  displayName: string;
+  group: string;
+  fullName: string;
+}
+
 export interface Guest {
   id: string; // slugified full name, unique
   fullName: string;
@@ -23,6 +30,8 @@ export interface Party {
 export const TABLE_COUNT = 25;
 export const TABLE_CAPACITY = 8;
 export const STORAGE_KEY = "wedding-seating-v1";
+export const GUEST_DATA_STORAGE_KEY = "wedding-guests-v1";
+export const EXPORT_FORMAT_VERSION = 1;
 
 export interface TableState {
   tableNumber: number; // 1-based
@@ -33,4 +42,17 @@ export interface TableState {
 export interface SeatingState {
   tables: TableState[]; // length === TABLE_COUNT
   unassigned: string[]; // guest ids not yet seated
+}
+
+export interface PersistedSeatingData {
+  state: SeatingState;
+  history: SeatingState[];
+  future: SeatingState[];
+}
+
+export interface SeatingExportData {
+  version: number;
+  exportedAt: string;
+  guestRows: GuestInputRow[];
+  seating: PersistedSeatingData;
 }

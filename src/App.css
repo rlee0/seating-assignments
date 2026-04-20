@@ -12,6 +12,7 @@
 .app-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 16px;
   padding: 8px 16px;
   background: #fff;
@@ -46,7 +47,13 @@
 .app-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
+}
+
+.hidden-file-input {
+  display: none;
 }
 
 .btn-undo,
@@ -655,4 +662,106 @@
 .drag-overlay-group-count {
   font-size: 11px;
   opacity: 0.65;
+}
+
+/* ─── Mobile tab bar ──────────────────────────────────────────────────────── */
+
+.mobile-tabs {
+  display: none;
+}
+
+/* ─── Responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 767px) {
+  /* Allow the app shell to grow naturally */
+  .app {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  /* Stack sidebar and board vertically; active panel hides the other */
+  .app-body {
+    flex-direction: column;
+    overflow: visible;
+    flex: unset;
+  }
+
+  .app-body--sidebar .table-board {
+    display: none;
+  }
+
+  .app-body--tables .sidebar {
+    display: none;
+  }
+
+  /* Sidebar takes full width */
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid #e5e5e5;
+    max-height: calc(100dvh - 130px);
+  }
+
+  /* Table grid: 2 columns on phones */
+  .table-board {
+    grid-template-columns: repeat(2, 1fr);
+    /* leave room for fixed tab bar */
+    padding-bottom: 64px;
+  }
+
+  /* Tab bar — fixed at bottom */
+  .mobile-tabs {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 52px;
+    background: #fff;
+    border-top: 1px solid #e5e5e5;
+    z-index: 100;
+  }
+
+  .mobile-tab {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    font-size: 13px;
+    font-weight: 500;
+    color: #888;
+    cursor: pointer;
+    padding: 0;
+    transition:
+      color 0.12s,
+      background 0.12s;
+  }
+
+  .mobile-tab:active {
+    background: #f5f5f5;
+  }
+
+  .mobile-tab--active {
+    color: #1a1a1a;
+    border-top: 2px solid #3b82f6;
+  }
+
+  /* Header: icon-only buttons to save space */
+  .btn-label {
+    display: none;
+  }
+
+  .app-stats {
+    flex: unset;
+  }
+}
+
+/* Tablet: 3-column table grid */
+@media (min-width: 480px) and (max-width: 767px) {
+  .table-board {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }

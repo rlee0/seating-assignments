@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useReducer } from "react";
-import type { SeatingState } from "../types";
+import type { PersistedSeatingData, SeatingState } from "../types";
 import { TABLE_CAPACITY, TABLE_COUNT } from "../types";
 import { seatingReducer, createInitialState, type SeatingAction } from "./reducer";
 import { loadPersistedSeating, MAX_UNDO_HISTORY, savePersistedSeating } from "./localStorage";
@@ -7,6 +7,7 @@ import type { ParsedData } from "../data/parseGuests";
 
 interface SeatingContextValue {
   state: SeatingState;
+  snapshot: PersistedSeatingData;
   dispatch: React.Dispatch<SeatingAction>;
   undo: () => void;
   redo: () => void;
@@ -215,6 +216,11 @@ export function SeatingProvider({
     <SeatingContext.Provider
       value={{
         state: historyState.present,
+        snapshot: {
+          state: historyState.present,
+          history: historyState.history,
+          future: historyState.future,
+        },
         dispatch,
         undo,
         redo,

@@ -15,17 +15,27 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { AlertTriangle, Redo2, RotateCcw, Undo2 } from "lucide-react";
+import { AlertTriangle, Download, Redo2, RotateCcw, Undo2, Upload } from "lucide-react";
 import { SeatingProvider, useSeating } from "./store/SeatingContext";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import Sidebar from "./components/Sidebar";
 import TableBoard from "./components/TableBoard";
 import { createInitialState } from "./store/reducer";
-import { parseGuests } from "./data/parseGuests";
-
-// Parse once at module load — data is static
-const parsedData = parseGuests();
+import { getDefaultGuestRows, parseGuestsFromRows, type ParsedData } from "./data/parseGuests";
+import {
+  loadPersistedGuestRows,
+  parsePersistedSeatingData,
+  savePersistedGuestRows,
+  savePersistedSeating,
+} from "./store/localStorage";
+import {
+  EXPORT_FORMAT_VERSION,
+  TABLE_COUNT,
+  type GuestInputRow,
+  type PersistedSeatingData,
+  type SeatingExportData,
+} from "./types";
 
 type ActiveDragData =
   | { kind: "party"; partyId: string }
@@ -50,7 +60,7 @@ function isActiveDragData(value: unknown): value is ActiveDragData {
 
 function getUnassignedGuestIdsForParty(
   partyId: string,
-  parties: ReturnType<typeof parseGuests>["parties"],
+  parties: ParsedData["parties"],
   unassignedSet: Set<string>
 ): string[] {
   const party = parties.get(partyId);
@@ -61,7 +71,7 @@ function getUnassignedGuestIdsForParty(
 
 function getUnassignedGuestIdsForGroup(
   groupName: string,
-  parties: ReturnType<typeof parseGuests>["parties"],
+  parties: ParsedData["parties"],
   unassignedSet: Set<string>
 ): string[] {
   const guestIds: string[] = [];
@@ -77,7 +87,7 @@ function getUnassignedGuestIdsForGroup(
 
 function resolveDragGuestIds(
   data: ActiveDragData,
-  parties: ReturnType<typeof parseGuests>["parties"],
+  parties: ParsedData["parties"],
   unassignedGuestIds: string[]
 ): string[] {
   const unassignedSet = new Set(unassignedGuestIds);
@@ -129,12 +139,120 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
-function SeatingApp() {
-  const { state, dispatch, undo, redo, canUndo, canRedo, guests, parties, allGuestIds, warnings } =
-    useSeating();
+function getInitialGuestRows(): GuestInputRow[] {
+  return loadPersistedGuestRows() ?? getDefaultGuestRows();
+}
+
+function isGuestInputRow(value: unknown): value is GuestInputRow {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as {
+    rsvp?: unknown;
+    displayName?: unknown;
+    group?: unknown;
+    fullName?: unknown;
+  };
+
+  return (
+    (candidate.rsvp === "r" || candidate.rsvp === "s") &&
+    typeof candidate.displayName === "string" &&
+    typeof candidate.group === "string" &&
+    typeof candidate.fullName === "string"
+  );
+}
+
+function isCompatibleState(snapshot: PersistedSeatingData, guestRows: GuestInputRow[]): boolean {
+  const allGuestIds = guestRows.map((_, index) => `g${index}`);
+  const savedIds = [
+    ...snapshot.state.unassigned,
+    ...snapshot.state.tables.flatMap((table) =>
+      table.guestIds.filter((guestId): guestId is string => guestId !== null)
+    ),
+  ];
+  const uniqueSavedIds = new Set(savedIds);
+  const currentIds = new Set(allGuestIds);
+
+  if (snapshot.state.tables.length === 0 || snapshot.state.tables.length !== TABLE_COUNT) {
+    return false;
+  }
+
+  return (
+    savedIds.length === currentIds.size &&
+    uniqueSavedIds.size === currentIds.size &&
+    [...currentIds].every((id) => uniqueSavedIds.has(id))
+  );
+}
+
+function parseImportPayload(value: unknown): {
+  guestRows: GuestInputRow[];
+  seating: PersistedSeatingData;
+} | null {
+  if (!value || typeof value !== "object") return null;
+
+  const candidate = value as {
+    version?: unknown;
+    guestRows?: unknown;
+    seating?: unknown;
+  };
+
+  if (candidate.version !== EXPORT_FORMAT_VERSION) return null;
+  if (
+    !Array.isArray(candidate.guestRows) ||
+    !candidate.guestRows.every((row) => isGuestInputRow(row))
+  ) {
+    return null;
+  }
+
+  const seating = parsePersistedSeatingData(candidate.seating);
+  if (!seating) return null;
+
+  return {
+    guestRows: candidate.guestRows.map((row) => ({ ...row })),
+    seating,
+  };
+}
+
+function buildExportPayload(
+  guestRows: GuestInputRow[],
+  seating: PersistedSeatingData
+): SeatingExportData {
+  return {
+    version: EXPORT_FORMAT_VERSION,
+    exportedAt: new Date().toISOString(),
+    guestRows: guestRows.map((row) => ({ ...row })),
+    seating,
+  };
+}
+
+function buildExportFilename(): string {
+  return `seating-export-${new Date().toISOString().slice(0, 10)}.json`;
+}
+
+function SeatingApp({
+  guestRows,
+  onImportSnapshot,
+}: {
+  guestRows: GuestInputRow[];
+  onImportSnapshot: (nextGuestRows: GuestInputRow[], snapshot: PersistedSeatingData) => void;
+}) {
+  const {
+    state,
+    snapshot,
+    dispatch,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    guests,
+    parties,
+    allGuestIds,
+    warnings,
+  } = useSeating();
   const [activeDrag, setActiveDrag] = useState<ActiveDragData | null>(null);
   const [overTargetId, setOverTargetId] = useState<string | null>(null);
   const [showWarnings, setShowWarnings] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<"sidebar" | "tables">("sidebar");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -314,6 +432,46 @@ function SeatingApp() {
     }
   }
 
+  function handleExport() {
+    const payload = buildExportPayload(guestRows, snapshot);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = buildExportFilename();
+    link.click();
+
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleImportChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = parseImportPayload(JSON.parse(text) as unknown);
+
+      if (!parsed) {
+        window.alert("Import failed. Choose a seating export JSON from this app.");
+        return;
+      }
+
+      if (!isCompatibleState(parsed.seating, parsed.guestRows)) {
+        window.alert(
+          "Import failed. The seating snapshot does not match the guest list in the file."
+        );
+        return;
+      }
+
+      onImportSnapshot(parsed.guestRows, parsed.seating);
+    } catch {
+      window.alert("Import failed. The selected file is not valid JSON.");
+    }
+  }
+
   // Overlay content while dragging
   const overlayGuest = activeDrag?.kind === "guest" ? guests.get(activeDrag.guestId) : null;
   const overlayParty = activeDrag?.kind === "party" ? parties.get(activeDrag.partyId) : null;
@@ -349,16 +507,31 @@ function SeatingApp() {
             )}
             <button className="btn-undo" onClick={undo} disabled={!canUndo}>
               <Undo2 size={14} aria-hidden="true" />
-              Undo
+              <span className="btn-label">Undo</span>
             </button>
             <button className="btn-undo" onClick={redo} disabled={!canRedo}>
               <Redo2 size={14} aria-hidden="true" />
-              Redo
+              <span className="btn-label">Redo</span>
             </button>
             <button className="btn-reset" onClick={handleReset}>
               <RotateCcw size={14} aria-hidden="true" />
-              Reset
+              <span className="btn-label">Reset</span>
             </button>
+            <button className="btn-undo" onClick={handleExport}>
+              <Download size={14} aria-hidden="true" />
+              <span className="btn-label">Export</span>
+            </button>
+            <button className="btn-undo" onClick={() => fileInputRef.current?.click()}>
+              <Upload size={14} aria-hidden="true" />
+              <span className="btn-label">Import</span>
+            </button>
+            <input
+              ref={fileInputRef}
+              className="hidden-file-input"
+              type="file"
+              accept="application/json,.json"
+              onChange={handleImportChange}
+            />
           </div>
         </header>
 
@@ -372,9 +545,22 @@ function SeatingApp() {
           </div>
         )}
 
-        <div className="app-body">
+        <div className={`app-body app-body--${mobilePanel}`}>
           <Sidebar />
           <TableBoard activeDragKind={activeDrag?.kind ?? null} overTargetId={overTargetId} />
+        </div>
+
+        <div className="mobile-tabs">
+          <button
+            className={`mobile-tab${mobilePanel === "sidebar" ? " mobile-tab--active" : ""}`}
+            onClick={() => setMobilePanel("sidebar")}>
+            Unassigned{unassignedCount > 0 ? ` (${unassignedCount})` : ""}
+          </button>
+          <button
+            className={`mobile-tab${mobilePanel === "tables" ? " mobile-tab--active" : ""}`}
+            onClick={() => setMobilePanel("tables")}>
+            Tables
+          </button>
         </div>
 
         <DragOverlay dropAnimation={null}>
@@ -412,9 +598,24 @@ function SeatingApp() {
 }
 
 export default function App() {
+  const [guestRows, setGuestRows] = useState<GuestInputRow[]>(() => getInitialGuestRows());
+  const [providerVersion, setProviderVersion] = useState(0);
+  const parsedData = parseGuestsFromRows(guestRows);
+
+  useEffect(() => {
+    savePersistedGuestRows(guestRows);
+  }, [guestRows]);
+
+  function handleImportSnapshot(nextGuestRows: GuestInputRow[], snapshot: PersistedSeatingData) {
+    savePersistedGuestRows(nextGuestRows);
+    savePersistedSeating(snapshot.state, snapshot.history, snapshot.future);
+    setGuestRows(nextGuestRows);
+    setProviderVersion((value) => value + 1);
+  }
+
   return (
-    <SeatingProvider parsedData={parsedData}>
-      <SeatingApp />
+    <SeatingProvider key={providerVersion} parsedData={parsedData}>
+      <SeatingApp guestRows={guestRows} onImportSnapshot={handleImportSnapshot} />
     </SeatingProvider>
   );
 }

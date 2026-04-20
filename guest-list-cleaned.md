@@ -38,8 +38,8 @@
 | r   | Ken + Monica               | Brown            |       | Monica Pelayo         |
 | r   | Kevin + Ilka               | UCSF             |       | Ilka Keenan           |
 | r   | Kevin + Ilka               | UCSF             |       | Kevin Keenan          |
-| r   | Mark + Linda               | ???              |       | Linda Lyons           |
-| r   | Mark + Linda               | ???              |       | Mark Lyons            |
+| r   | Mark + Linda               | Monte Vista      |       | Linda Lyons           |
+| r   | Mark + Linda               | Monte Vista      |       | Mark Lyons            |
 | r   | Michael + Marisa           | Monte Vista      |       | Marissa               |
 | r   | Michael + Marisa           | Monte Vista      |       | Michael Lyons         |
 | r   | Melissa + Tim              | Monte Vista      |       | Melissa Fung          |
@@ -127,10 +127,8 @@
 | s   | Francesca + Anselmo        | Stella Family    |       | Anselmo Kim           |
 | s   | Francesca + Anselmo        | Stella Family    |       | Francesca Kim         |
 | s   | Michael Kim                | Stella Family    |       | Michael Kim           |
-| s   | Garry 이모 + Family        | Francesca Family |       | Garry Hwang           |
-| s   | Garry 이모 + Family        | Francesca Family |       | Malia Oxley           |
-| s   | Garry 이모 + Family        | Francesca Family |       | 이모                  |
-| s   | Garry 이모 + Family        | Francesca Family |       | 이모부                |
+| s   | Garry + Malia              | Francesca Family |       | Garry Hwang           |
+| s   | Garry + Malia              | Francesca Family |       | Malia Oxley           |
 | s   | Insun + Nick               | UCSD             |       | Insun Lee             |
 | s   | Insun + Nick               | UCSD             |       | Nick Wong             |
 | s   | Janet + John               | UCSD             |       | Janet Duong           |
@@ -159,7 +157,7 @@
 | s   | Lana + Stephen             | UCSD             |       | Stephen Zhang         |
 | s   | Lauren Chong               | Sac              |       | Lauren Chong          |
 | s   | Monica Chong               | Anselmo Friend   |       | Monica Chong          |
-| s   | Lauren Wong                | Anselmo Friend   |       | Lauren Wong           |
+| s   | Lauren Wong                | SITELAB          |       | Lauren Wong           |
 | s   | Anthony Mao                | UCSD             |       | Anthony Mao           |
 | s   | Meghan + Juan              | Sac              |       | Meghan McLaughlin     |
 | s   | Michelle + Johnny          | UCSD             |       | Johnny Kuang          |
@@ -198,3 +196,5 @@
 | s   | 혜선언니 + Family          | Anselmo Family   |       | JJ                    |
 | s   | 혜선언니 + Family          | Anselmo Family   |       | 혜선언니              |
 | s   | 혜선언니 + Family          | Anselmo Family   |       | 혜선언니's Husband    |
+| s   | Stella + Ryan              | Stella + Ryan    |       | Stella                |
+| s   | Stella + Ryan              | Stella + Ryan    |       | Ryan                  |
