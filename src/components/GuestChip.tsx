@@ -49,8 +49,7 @@ export default function GuestChip({ guestId, context, className }: Props) {
       title={guest.fullName}
       {...listeners}
       {...attributes}>
-      <span className={`host-dot host-${guest.host}`} />
-      <span className="guest-name">{guest.fullName}</span>
+      <span className={`guest-name guest-name--host-${guest.host}`}>{guest.fullName}</span>
     </div>
   );
 }

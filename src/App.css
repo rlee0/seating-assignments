@@ -376,6 +376,7 @@
   font-size: 11px;
   max-width: 100%;
   touch-action: none;
+  --guest-chip-bg: #fff;
   transition:
     background 0.12s ease,
     border-color 0.12s ease;
@@ -392,15 +393,18 @@
 .guest-chip.is-search-match {
   border: 1px solid #eab308;
   background: #fefce8;
+  --guest-chip-bg: #fefce8;
 }
 
 .guest-chip--sidebar {
   background: #f3f4f6;
   color: #374151;
+  --guest-chip-bg: #f3f4f6;
 }
 
 .guest-chip--sidebar:hover {
   background: #e5e7eb;
+  --guest-chip-bg: #e5e7eb;
 }
 
 .guest-chip--table {
@@ -409,10 +413,12 @@
   color: #111827;
   width: 100%;
   min-width: 0;
+  --guest-chip-bg: #fff;
 }
 
 .guest-chip--table:hover {
   background: #f9fafb;
+  --guest-chip-bg: #f9fafb;
 }
 
 .guest-chip--origin-hidden {
@@ -420,28 +426,35 @@
   pointer-events: none;
 }
 
-.host-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  display: inline-block;
-}
-
-.host-r {
-  background: #2e9e88;
-}
-
-.host-s {
-  background: #c0674a;
-}
-
 .guest-name {
+  position: relative;
+  display: block;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+  font-size: 10px;
+  line-height: 1.2;
+  padding-right: 6px;
+}
+
+.guest-name::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  pointer-events: none;
+  background: linear-gradient(to right, rgba(255, 255, 255, 0), var(--guest-chip-bg));
+}
+
+.guest-name--host-r {
+  color: #2e9e88;
+}
+
+.guest-name--host-s {
+  color: #c0674a;
 }
 
 /* ─── Table board ─────────────────────────────────────────────────────────── */
@@ -503,12 +516,14 @@
   .guest-chip--sidebar:hover,
   .guest-chip--sidebar:focus-visible {
     background: #e5e7eb;
+    --guest-chip-bg: #e5e7eb;
   }
 
   .guest-chip--table:hover,
   .guest-chip--table:focus-visible {
     background: #f8fafc;
     border-color: #d1d5db;
+    --guest-chip-bg: #f8fafc;
   }
 
   .table-card:hover,
@@ -562,6 +577,7 @@
 .seat-occupied.is-over .guest-chip--table {
   border-color: #3b82f6;
   background: #eff6ff;
+  --guest-chip-bg: #eff6ff;
 }
 /* ─── Table label ─────────────────────────────────────────────────────────── */
 
@@ -708,6 +724,7 @@
   background: #fee2e2;
   border: 1px solid #fecaca;
   color: #7f1d1d;
+  --guest-chip-bg: #fee2e2;
 }
 
 .drag-overlay-remove-badge {

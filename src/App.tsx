@@ -594,8 +594,9 @@ function SeatingApp({
                 ]
                   .filter(Boolean)
                   .join(" ")}>
-                <span className={`host-dot host-${overlayGuest.host}`} />
-                <span className="guest-name">{overlayGuest.fullName}</span>
+                <span className={`guest-name guest-name--host-${overlayGuest.host}`}>
+                  {overlayGuest.fullName}
+                </span>
               </span>
               {showRemoveHint && <span className="drag-overlay-remove-badge">× Remove</span>}
             </div>
@@ -620,8 +621,10 @@ function SeatingApp({
                       className={["seat-slot", guestId ? "seat-occupied" : "seat-empty"].join(" ")}>
                       {guestId ? (
                         <div className="guest-chip guest-chip--table">
-                          <span className={`host-dot host-${guests.get(guestId)?.host}`} />
-                          <span className="guest-name">{guests.get(guestId)?.fullName}</span>
+                          <span
+                            className={`guest-name guest-name--host-${guests.get(guestId)?.host}`}>
+                            {guests.get(guestId)?.fullName}
+                          </span>
                         </div>
                       ) : null}
                     </div>
@@ -646,8 +649,10 @@ function SeatingApp({
                       className={["seat-slot", guestId ? "seat-occupied" : "seat-empty"].join(" ")}>
                       {guestId ? (
                         <div className="guest-chip guest-chip--table">
-                          <span className={`host-dot host-${guests.get(guestId)?.host}`} />
-                          <span className="guest-name">{guests.get(guestId)?.fullName}</span>
+                          <span
+                            className={`guest-name guest-name--host-${guests.get(guestId)?.host}`}>
+                            {guests.get(guestId)?.fullName}
+                          </span>
                         </div>
                       ) : null}
                     </div>
@@ -670,8 +675,9 @@ function SeatingApp({
 
                   return (
                     <span key={id} className="guest-chip guest-chip--sidebar">
-                      <span className={`host-dot host-${guest.host}`} />
-                      <span className="guest-name">{guest.fullName}</span>
+                      <span className={`guest-name guest-name--host-${guest.host}`}>
+                        {guest.fullName}
+                      </span>
                     </span>
                   );
                 })}
