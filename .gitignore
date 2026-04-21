@@ -1,0 +1,42 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Node
+node_modules/
+.npm
+
+# Vite / build output
+dist/
+dist-ssr/
+coverage/
+
+# TypeScript
+*.tsbuildinfo
+
+# Environment
+.env
+.env.*
+!.env.example
+.env.local
+
+# Sensitive / raw input files
+guest-list-cleaned.md
+.playwright-mcp/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Editor / IDE
+.idea/
+.vscode/

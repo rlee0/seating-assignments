@@ -1,0 +1,59 @@
+// ─── Domain types ────────────────────────────────────────────────────────────
+
+export type Host = "Ryan" | "Stella";
+
+export interface GuestInputRow {
+  host: Host;
+  household: string;
+  group: string;
+  fullName: string;
+}
+
+export interface Guest {
+  id: string; // "g{rowIndex}", stable within a parsed dataset
+  fullName: string;
+  partyId: string; // matches Party.id
+  host: Host;
+  group: string;
+}
+
+export interface Party {
+  id: string; // "p{householdIndex}", stable within a parsed dataset
+  household: string;
+  group: string; // primary group (from first member that has one)
+  host: Host;
+  guestIds: string[]; // ordered list of Guest ids
+}
+
+// ─── Seating state ────────────────────────────────────────────────────────────
+
+export const TABLE_COUNT = 25;
+export const TABLE_CAPACITY = 8;
+export const STORAGE_KEY = "wedding-seating-v1";
+export const GUEST_DATA_STORAGE_KEY = "wedding-guests-v1";
+export const GUEST_DATA_SOURCE_KEY = "wedding-guests-source-v1";
+export const EXPORT_FORMAT_VERSION = 2;
+
+export interface TableState {
+  tableNumber: number; // 1-based
+  name: string; // display label, default "Table N"
+  guestIds: Array<string | null>; // fixed seat slots in visual order
+}
+
+export interface SeatingState {
+  tables: TableState[]; // length === TABLE_COUNT
+  unassigned: string[]; // guest ids not yet seated
+}
+
+export interface PersistedSeatingData {
+  state: SeatingState;
+  history: SeatingState[];
+  future: SeatingState[];
+}
+
+export interface SeatingExportData {
+  version: number;
+  exportedAt: string;
+  guests: GuestInputRow[];
+  tables: TableState[];
+}
