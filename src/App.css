@@ -477,6 +477,12 @@
   --guest-chip-bg: oklch(0.985 0.026 95.277);
 }
 
+.guest-chip.is-anchored,
+.guest-chip.is-anchored:hover,
+.guest-chip.is-anchored:active {
+  border-color: #dc2626 !important;
+}
+
 .guest-chip--sidebar {
   --guest-chip-bg: var(--secondary);
 }
@@ -590,19 +596,46 @@
   line-height: 1.2;
 }
 
-.guest-chip--table .guest-name.is-truncated::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 6px;
-  height: 100%;
-  pointer-events: none;
-  background: linear-gradient(
+.guest-chip--table .guest-name.is-truncated {
+  --guest-chip-fade-width: 8px;
+  padding-right: var(--guest-chip-fade-width);
+  -webkit-mask-image: linear-gradient(
     to right,
-    color-mix(in srgb, var(--guest-chip-bg) 0%, transparent),
-    var(--guest-chip-bg)
+    #000 0,
+    #000 calc(100% - var(--guest-chip-fade-width)),
+    transparent 100%
   );
+  mask-image: linear-gradient(
+    to right,
+    #000 0,
+    #000 calc(100% - var(--guest-chip-fade-width)),
+    transparent 100%
+  );
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+
+@supports not ((-webkit-mask-image: linear-gradient(to right, #000, transparent)) or (mask-image: linear-gradient(to right, #000, transparent))) {
+  .guest-chip--table .guest-name.is-truncated {
+    padding-right: 0;
+  }
+
+  .guest-chip--table .guest-name.is-truncated::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 8px;
+    height: 100%;
+    pointer-events: none;
+    background: linear-gradient(
+      to right,
+      color-mix(in oklch, var(--guest-chip-bg) 0%, transparent),
+      var(--guest-chip-bg)
+    );
+  }
 }
 
 .guest-chip.is-selected {

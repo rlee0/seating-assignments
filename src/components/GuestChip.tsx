@@ -82,6 +82,7 @@ export default function GuestChip({
   suppressStateStyles = false,
 }: Props) {
   const {
+    state,
     guests,
     selectedGuestId,
     selectGuest,
@@ -94,6 +95,7 @@ export default function GuestChip({
   const guestNameRef = useRef<HTMLSpanElement | null>(null);
   const [isNameTruncated, setIsNameTruncated] = useState(false);
   const guest = guests.get(guestId);
+  const isAnchored = (state.lockedGuestIds ?? []).includes(guestId);
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `guest-${guestId}`,
@@ -211,6 +213,7 @@ export default function GuestChip({
         className,
         highlightClass,
         ...relationClasses,
+        isAnchored ? "is-anchored" : null,
         isDragging ? "is-dragging" : null,
         isSearchMatch ? "is-search-match" : null,
       ]
