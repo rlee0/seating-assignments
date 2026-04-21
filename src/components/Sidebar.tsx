@@ -273,6 +273,10 @@ export default function Sidebar() {
           </button>
         </div>
       </div>
+      <div className="sidebar-header">
+        <span>Unassigned</span>
+        <span className="sidebar-count">{state.unassigned.length}</span>
+      </div>
       <div
         ref={setDropzoneRef}
         className={["sidebar-dropzone", isOver ? "is-over" : null].filter(Boolean).join(" ")}>
@@ -318,7 +322,10 @@ export default function Sidebar() {
               type="button"
               className={[
                 "sidebar-selected-guest-anchor-toggle",
-                chipToggleVariants({ state: isSelectedGuestAnchored ? "pressed" : "default", size: "sm" }),
+                chipToggleVariants({
+                  state: isSelectedGuestAnchored ? "pressed" : "default",
+                  size: "sm",
+                }),
               ]
                 .filter(Boolean)
                 .join(" ")}
