@@ -40,6 +40,7 @@ export interface TableState {
   tableNumber: number; // 1-based
   name: string; // display label, default "Table N"
   guestIds: Array<string | null>; // fixed seat slots in visual order
+  disabledSeats?: number[]; // seat indexes that are disabled (no guest can sit here)
 }
 
 export interface SeatingState {

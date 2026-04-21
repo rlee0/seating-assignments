@@ -123,17 +123,25 @@ function areSeatingStatesEqual(left: SeatingState, right: SeatingState): boolean
   if (left.tables.length !== right.tables.length) return false;
   if (!areSeatArraysEqual(left.unassigned, right.unassigned)) return false;
 
-  return left.tables.every((table, index) => {
-    const other = right.tables[index];
+  return (
+    left.tables.every((table, index) => {
+      const other = right.tables[index];
 
-    return (
-      table.tableNumber === other.tableNumber &&
-      table.name === other.name &&
-      areSeatArraysEqual(table.guestIds, other.guestIds)
-    );
-  }) && areSeatArraysEqual(
-    [...(left.lockedGuestIds ?? [])].sort(),
-    [...(right.lockedGuestIds ?? [])].sort()
+      const leftDisabled = [...(table.disabledSeats ?? [])].sort((a, b) => a - b);
+      const rightDisabled = [...(other.disabledSeats ?? [])].sort((a, b) => a - b);
+
+      return (
+        table.tableNumber === other.tableNumber &&
+        table.name === other.name &&
+        areSeatArraysEqual(table.guestIds, other.guestIds) &&
+        leftDisabled.length === rightDisabled.length &&
+        leftDisabled.every((v, i) => v === rightDisabled[i])
+      );
+    }) &&
+    areSeatArraysEqual(
+      [...(left.lockedGuestIds ?? [])].sort(),
+      [...(right.lockedGuestIds ?? [])].sort()
+    )
   );
 }
 

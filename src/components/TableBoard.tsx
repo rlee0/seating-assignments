@@ -1,10 +1,39 @@
-import { SortableContext, rectSortingStrategy } from "@dnd-kit/sortable";
+import { SortableContext } from "@dnd-kit/sortable";
+import type { ClientRect } from "@dnd-kit/core";
+import type { Transform } from "@dnd-kit/utilities";
 
 import TableCard from "./TableCard";
 import type { TableState } from "../types";
 import { useDroppable } from "@dnd-kit/core";
 import { useMemo } from "react";
 import { useSeating } from "../store/SeatingContext";
+
+// Only the table being swapped into animates to the dragged table's position;
+// all other tables stay put, avoiding the list-reorder "shift" effect.
+function swapSortingStrategy({
+  activeIndex,
+  index,
+  rects,
+  overIndex,
+}: {
+  activeIndex: number;
+  index: number;
+  rects: ClientRect[];
+  overIndex: number;
+}): Transform | null {
+  if (index === overIndex && activeIndex !== overIndex) {
+    const activeRect = rects[activeIndex];
+    const overRect = rects[index];
+    if (!activeRect || !overRect) return null;
+    return {
+      x: activeRect.left - overRect.left,
+      y: activeRect.top - overRect.top,
+      scaleX: 1,
+      scaleY: 1,
+    };
+  }
+  return null;
+}
 
 export interface AutoSeatPreview {
   tables: TableState[];
@@ -56,7 +85,7 @@ export default function TableBoard({ activeDragKind, activeDragGuestId, autoSeat
   }, [autoSeatPreview]);
 
   return (
-    <SortableContext items={tableIds} strategy={rectSortingStrategy}>
+    <SortableContext items={tableIds} strategy={swapSortingStrategy}>
       <main className="table-board">
         <section
           ref={setAutoSeatRef}

@@ -21,32 +21,47 @@ const SearchContext = createContext<SearchContextValue | null>(null);
 export function SearchProvider({ children }: { children: ReactNode }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [hostFilters, setHostFilters] = useState<string[]>([]);
-  const [isGroupHighlightOn, setGroupHighlightOn] = useState(false);
+  const [isGroupHighlightOn, setGroupHighlightOn] = useState(true);
   const [isHouseholdHighlightOn, setHouseholdHighlightOn] = useState(false);
   const [isHostHighlightOn, setHostHighlightOn] = useState(false);
 
   function handleSetGroupHighlightOn(isOn: boolean) {
-    setGroupHighlightOn(isOn);
     if (isOn) {
+      setGroupHighlightOn(true);
       setHouseholdHighlightOn(false);
       setHostHighlightOn(false);
+      return;
     }
+
+    if (!isHouseholdHighlightOn && !isHostHighlightOn) return;
+
+    setGroupHighlightOn(false);
   }
 
   function handleSetHouseholdHighlightOn(isOn: boolean) {
-    setHouseholdHighlightOn(isOn);
     if (isOn) {
+      setHouseholdHighlightOn(true);
       setGroupHighlightOn(false);
       setHostHighlightOn(false);
+      return;
     }
+
+    if (!isGroupHighlightOn && !isHostHighlightOn) return;
+
+    setHouseholdHighlightOn(false);
   }
 
   function handleSetHostHighlightOn(isOn: boolean) {
-    setHostHighlightOn(isOn);
     if (isOn) {
+      setHostHighlightOn(true);
       setGroupHighlightOn(false);
       setHouseholdHighlightOn(false);
+      return;
     }
+
+    if (!isGroupHighlightOn && !isHouseholdHighlightOn) return;
+
+    setHostHighlightOn(false);
   }
 
   function toggleHostFilter(host: string) {

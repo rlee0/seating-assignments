@@ -8,13 +8,13 @@ const guestChipVariants = cva(
         default:
           "border-input bg-secondary text-secondary-foreground hover:bg-secondary/80 active:bg-secondary/75",
         selected:
-          "border-transparent bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/85",
+          "border-[var(--guest-chip-selected-color,var(--primary))] bg-[var(--guest-chip-selected-color,var(--primary))] text-white hover:bg-[var(--guest-chip-selected-color,var(--primary))] active:bg-[var(--guest-chip-selected-color,var(--primary))]",
         relatedHousehold:
-          "border-primary/20 bg-primary/15 text-primary hover:bg-primary/20 active:bg-primary/25",
+          "border-[var(--guest-chip-selected-color,var(--primary))] bg-[var(--guest-chip-bg,var(--secondary))] text-secondary-foreground hover:bg-[var(--guest-chip-bg,var(--secondary))] active:bg-[var(--guest-chip-bg,var(--secondary))]",
         relatedGroup:
-          "border-input bg-secondary text-secondary-foreground hover:bg-secondary/80 active:bg-secondary/75",
+          "border-[var(--guest-chip-selected-color,var(--primary))] bg-white text-[var(--guest-chip-selected-color,var(--primary))] hover:bg-white active:bg-white",
         relatedBoth:
-          "border-primary/20 bg-primary/15 text-primary hover:bg-primary/20 active:bg-primary/25",
+          "border-[var(--guest-chip-selected-color,var(--primary))] bg-[var(--guest-chip-bg,var(--secondary))] text-secondary-foreground hover:bg-[var(--guest-chip-bg,var(--secondary))] active:bg-[var(--guest-chip-bg,var(--secondary))]",
         highlighted:
           "border-[var(--guest-chip-highlight-border)] bg-[var(--guest-chip-highlight-bg)] text-slate-900 hover:bg-[var(--guest-chip-highlight-bg)] active:bg-[var(--guest-chip-highlight-bg)]",
         searchMatch:

@@ -1,7 +1,5 @@
 import type { Host, SeatingState, TableState } from "../types";
-import { TABLE_CAPACITY, TABLE_COUNT, TABLES_PER_ROW } from "../types";
-
-import { arrayMove } from "@dnd-kit/sortable";
+import { TABLES_PER_ROW, TABLE_CAPACITY, TABLE_COUNT } from "../types";
 
 type AssignmentMode = "single-table" | "group-overflow";
 type AutoAssignTargetScope = "target-only" | "target-and-adjacent";
@@ -32,7 +30,10 @@ export type SeatingAction =
     }
   | { type: "REMOVE_GUESTS"; guestIds: string[] }
   | { type: "CLEAR_TABLE"; tableNumber: number }
-  | { type: "MOVE_TABLE"; activeTableNumber: number; overTableNumber: number };
+  | { type: "MOVE_TABLE"; activeTableNumber: number; overTableNumber: number }
+  | { type: "TOGGLE_SEAT_DISABLED"; tableNumber: number; seatIndex: number }
+  | { type: "LOCK_TABLE_GUESTS"; tableNumber: number }
+  | { type: "DISABLE_EMPTY_TABLE_SEATS"; tableNumber: number };
 
 function createEmptySeatSlots(): Array<string | null> {
   return Array<string | null>(TABLE_CAPACITY).fill(null);
@@ -67,6 +68,20 @@ function getSeatedHouseholdGuestIds(
   return seatedIds;
 }
 
+function findGuestSeat(
+  tables: TableState[],
+  guestId: string
+): { tableIdx: number; seatIdx: number } | null {
+  for (let tableIdx = 0; tableIdx < tables.length; tableIdx += 1) {
+    const seatIdx = tables[tableIdx].guestIds.indexOf(guestId);
+    if (seatIdx !== -1) {
+      return { tableIdx, seatIdx };
+    }
+  }
+
+  return null;
+}
+
 function removeGuestsFromSeatSlots(
   seatSlots: Array<string | null>,
   guestIdsToRemove: Set<string>
@@ -78,21 +93,32 @@ function getOccupiedSeatCount(seatSlots: Array<string | null>): number {
   return seatSlots.filter((guestId): guestId is string => guestId !== null).length;
 }
 
-function getAvailableSeatIndexes(seatSlots: Array<string | null>, startIndex?: number): number[] {
+function getAvailableSeatIndexes(
+  seatSlots: Array<string | null>,
+  startIndex?: number,
+  disabledSeats?: number[]
+): number[] {
+  const disabledSet = new Set(disabledSeats ?? []);
+
   if (startIndex != null) {
-    if (startIndex < 0 || startIndex >= TABLE_CAPACITY || seatSlots[startIndex] !== null) {
+    if (
+      startIndex < 0 ||
+      startIndex >= TABLE_CAPACITY ||
+      seatSlots[startIndex] !== null ||
+      disabledSet.has(startIndex)
+    ) {
       return [];
     }
 
     const indexes = [startIndex];
     for (let index = startIndex + 1; index < TABLE_CAPACITY; index += 1) {
-      if (seatSlots[index] === null) indexes.push(index);
+      if (seatSlots[index] === null && !disabledSet.has(index)) indexes.push(index);
     }
     return indexes;
   }
 
   return seatSlots.reduce<number[]>((indexes, guestId, index) => {
-    if (guestId === null) indexes.push(index);
+    if (guestId === null && !disabledSet.has(index)) indexes.push(index);
     return indexes;
   }, []);
 }
@@ -117,6 +143,7 @@ export function createInitialState(allGuestIds: string[]): SeatingState {
     tableNumber: index + 1,
     name: `Table ${index + 1}`,
     guestIds: createEmptySeatSlots(),
+    disabledSeats: [],
   }));
 
   return { tables, unassigned: [...allGuestIds], lockedGuestIds: [] };
@@ -144,6 +171,60 @@ function assignGuestsWithOverflow(
     ...table,
     guestIds: [...table.guestIds],
   }));
+
+  if (seatIndex != null) {
+    const insertionPositions: Array<{ tableIdx: number; seatIdx: number }> = [];
+
+    for (
+      let currentTableIdx = tableIdx;
+      currentTableIdx < nextTables.length;
+      currentTableIdx += 1
+    ) {
+      const startSeatIndex = currentTableIdx === tableIdx ? seatIndex : 0;
+      const disabledSet = new Set(nextTables[currentTableIdx].disabledSeats ?? []);
+
+      for (
+        let currentSeatIdx = startSeatIndex;
+        currentSeatIdx < TABLE_CAPACITY;
+        currentSeatIdx += 1
+      ) {
+        if (disabledSet.has(currentSeatIdx)) continue;
+
+        insertionPositions.push({
+          tableIdx: currentTableIdx,
+          seatIdx: currentSeatIdx,
+        });
+      }
+    }
+
+    if (insertionPositions.length === 0) return state;
+
+    const lockedSet = new Set(state.lockedGuestIds ?? []);
+    const shiftedOccupants: string[] = [];
+
+    for (const position of insertionPositions) {
+      const occupantId = nextTables[position.tableIdx].guestIds[position.seatIdx];
+      if (occupantId === null) continue;
+      if (lockedSet.has(occupantId)) return state;
+
+      shiftedOccupants.push(occupantId);
+    }
+
+    const insertedSequence = [...remainingGuests, ...shiftedOccupants];
+    if (insertedSequence.length > insertionPositions.length) return state;
+
+    for (let index = 0; index < insertionPositions.length; index += 1) {
+      const position = insertionPositions[index];
+      nextTables[position.tableIdx].guestIds[position.seatIdx] = insertedSequence[index] ?? null;
+    }
+
+    return {
+      tables: nextTables,
+      unassigned: state.unassigned.filter((guestId) => !incomingSet.has(guestId)),
+      lockedGuestIds: state.lockedGuestIds ?? [],
+    };
+  }
+
   let nextGuestIndex = 0;
 
   for (
@@ -153,7 +234,8 @@ function assignGuestsWithOverflow(
   ) {
     const availableSeatIndexes = getAvailableSeatIndexes(
       nextTables[index].guestIds,
-      index === tableIdx ? seatIndex : undefined
+      index === tableIdx ? seatIndex : undefined,
+      nextTables[index].disabledSeats
     );
     if (availableSeatIndexes.length === 0) continue;
 
@@ -215,11 +297,18 @@ const ROW_SIZE = TABLES_PER_ROW * TABLE_CAPACITY; // = 40 seats per row
 // ─── Row-surface helpers ──────────────────────────────────────────────────────
 
 /** Build a flat array of ROW_SIZE seat values from a slice of tables. */
+const DISABLED_SEAT_MARKER = "__disabled__";
+
 function buildRowSurface(tables: TableState[]): Array<string | null> {
   const surface: Array<string | null> = [];
   for (const table of tables) {
+    const disabledSet = new Set(table.disabledSeats ?? []);
     for (let s = 0; s < TABLE_CAPACITY; s += 1) {
-      surface.push(table.guestIds[s] ?? null);
+      if (disabledSet.has(s)) {
+        surface.push(DISABLED_SEAT_MARKER);
+      } else {
+        surface.push(table.guestIds[s] ?? null);
+      }
     }
   }
   // surface.length should equal ROW_SIZE when given a full row of tables.
@@ -315,7 +404,8 @@ function placeGroupIntoWindow(
   surface: Array<string | null>,
   windowStart: number,
   guestIds: string[],
-  guestProfiles: Record<string, GuestProfile>
+  guestProfiles: Record<string, GuestProfile>,
+  preferredTableIdx?: number
 ): Array<string | null> | null {
   const next = [...surface];
 
@@ -378,6 +468,16 @@ function placeGroupIntoWindow(
         (entry): entry is { tableIdx: number; run: number[]; spare: number } => entry !== null
       )
       .sort((a, b) => {
+        const aPreferred = preferredTableIdx != null && a.tableIdx === preferredTableIdx ? 0 : 1;
+        const bPreferred = preferredTableIdx != null && b.tableIdx === preferredTableIdx ? 0 : 1;
+        if (aPreferred !== bPreferred) return aPreferred - bPreferred;
+        // Among non-preferred tables, pick the one closest to the preferred table
+        // so that overflow households cluster near the target rather than jumping far.
+        if (preferredTableIdx != null) {
+          const aDist = Math.abs(a.tableIdx - preferredTableIdx);
+          const bDist = Math.abs(b.tableIdx - preferredTableIdx);
+          if (aDist !== bDist) return aDist - bDist;
+        }
         if (a.spare !== b.spare) return a.spare - b.spare;
         if (a.tableIdx !== b.tableIdx) return a.tableIdx - b.tableIdx;
         return a.run[0] - b.run[0];
@@ -397,32 +497,98 @@ function placeGroupIntoWindow(
   return next;
 }
 
+/**
+ * A household is "split" if its members span multiple tables and those members
+ * are NOT on the same side of the row AND physically contiguous (next to each
+ * other) on that side.
+ *
+ * A household that spans tables is acceptable when:
+ *   1. All members are on Side A (slots 0-3) OR all on Side B (slots 4-7).
+ *   2. All members are in the same table row.
+ *   3. Their physical positions on that side are consecutive (no gaps).
+ */
 function getSplitHouseholds(
   tables: TableState[],
   guestProfiles: Record<string, GuestProfile>
 ): Set<string> {
-  const householdToTables = new Map<string, Set<number>>();
+  // Map each household to its members' positions (display index + seat slot).
+  const householdPositions = new Map<string, Array<{ tableIdx: number; seatIdx: number }>>();
 
-  for (const table of tables) {
-    for (const guestId of table.guestIds) {
-      if (!guestId) continue;
+  for (let tableIdx = 0; tableIdx < tables.length; tableIdx += 1) {
+    const table = tables[tableIdx];
+    table.guestIds.forEach((guestId, seatIdx) => {
+      if (!guestId) return;
       const householdId = guestProfiles[guestId]?.partyId;
-      if (!householdId) continue;
-
-      const tableNumbers = householdToTables.get(householdId) ?? new Set<number>();
-      tableNumbers.add(table.tableNumber);
-      householdToTables.set(householdId, tableNumbers);
-    }
+      if (!householdId) return;
+      const positions = householdPositions.get(householdId) ?? [];
+      positions.push({ tableIdx, seatIdx });
+      householdPositions.set(householdId, positions);
+    });
   }
 
   const splitHouseholds = new Set<string>();
-  for (const [householdId, tableNumbers] of householdToTables.entries()) {
-    if (tableNumbers.size > 1) splitHouseholds.add(householdId);
+
+  for (const [householdId, positions] of householdPositions.entries()) {
+    if (positions.length <= 1) continue;
+
+    // Same table — adjacency is checked separately.
+    const tableIdxSet = new Set(positions.map((p) => p.tableIdx));
+    if (tableIdxSet.size === 1) continue;
+
+    // Members span multiple tables. Check same-side + same-row + contiguous.
+    const isAllSideA = positions.every((p) => p.seatIdx <= 3);
+    const isAllSideB = positions.every((p) => p.seatIdx >= 4);
+
+    if (!isAllSideA && !isAllSideB) {
+      // Members are on different sides — always a split.
+      splitHouseholds.add(householdId);
+      continue;
+    }
+
+    // All members must be in the same table row.
+    const rows = new Set(positions.map((p) => Math.floor(p.tableIdx / TABLES_PER_ROW)));
+    if (rows.size > 1) {
+      splitHouseholds.add(householdId);
+      continue;
+    }
+
+    // Compute physical left-to-right linear position on the side.
+    // Side A: slot s  → column * 4 + s         (order 0→1→2→3)
+    // Side B: slot s  → column * 4 + (7 - s)   (order 7→6→5→4, i.e. slot 7 leftmost)
+    const linearPositions = positions.map((p) => {
+      const col = p.tableIdx % TABLES_PER_ROW;
+      return isAllSideA ? col * 4 + p.seatIdx : col * 4 + (7 - p.seatIdx);
+    });
+
+    linearPositions.sort((a, b) => a - b);
+    let contiguous = true;
+    for (let i = 1; i < linearPositions.length; i += 1) {
+      if (linearPositions[i] !== linearPositions[i - 1] + 1) {
+        contiguous = false;
+        break;
+      }
+    }
+
+    if (!contiguous) {
+      splitHouseholds.add(householdId);
+    }
   }
 
   return splitHouseholds;
 }
 
+/**
+ * Two seats within the same table are adjacent if:
+ *   - They are on the same side and consecutive: (0,1), (1,2), (2,3), (4,5), (5,6), (6,7)
+ *   - They are directly across from each other: slot a + slot b === 7
+ *     i.e. (0,7), (1,6), (2,5), (3,4)
+ *
+ * For a household on a single table, all members must form a connected group
+ * under this adjacency definition.
+ *
+ * Cross-table households that pass getSplitHouseholds are on the same side and
+ * contiguous, which implies adjacency, so they are not re-checked here.
+ */
 function getNonAdjacentHouseholds(
   tables: TableState[],
   guestProfiles: Record<string, GuestProfile>
@@ -441,23 +607,41 @@ function getNonAdjacentHouseholds(
     });
   }
 
+  // Two seat slot indices are adjacent under the new rules.
+  function areSlotsAdjacent(a: number, b: number): boolean {
+    // Same side, consecutive
+    if (Math.abs(a - b) === 1 && a <= 3 === b <= 3) return true;
+    // Directly across from each other
+    if (a + b === 7) return true;
+    return false;
+  }
+
   const nonAdjacent = new Set<string>();
+
   for (const [householdId, seats] of householdToSeats.entries()) {
     if (seats.length <= 1) continue;
 
+    // Cross-table households: adjacency is already guaranteed by getSplitHouseholds.
     const tableNumbers = new Set(seats.map((s) => s.tableNumber));
     if (tableNumbers.size !== 1) continue;
 
-    const seatIdxs = seats.map((s) => s.seatIdx).sort((a, b) => a - b);
-    let contiguous = true;
-    for (let i = 1; i < seatIdxs.length; i += 1) {
-      if (seatIdxs[i] !== seatIdxs[i - 1] + 1) {
-        contiguous = false;
-        break;
+    // BFS connectivity check on the single-table adjacency graph.
+    const seatIdxs = seats.map((s) => s.seatIdx);
+    const visited = new Set<number>();
+    const queue = [seatIdxs[0]];
+    visited.add(seatIdxs[0]);
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      for (const other of seatIdxs) {
+        if (!visited.has(other) && areSlotsAdjacent(current, other)) {
+          visited.add(other);
+          queue.push(other);
+        }
       }
     }
 
-    if (!contiguous) {
+    if (visited.size !== seatIdxs.length) {
       nonAdjacent.add(householdId);
     }
   }
@@ -518,7 +702,10 @@ function countOpenSeats(surface: Array<string | null>): number {
   return surface.filter((s) => s === null).length;
 }
 
-function getRowBoundsForTableIndex(tableIdx: number, tableCount: number): {
+function getRowBoundsForTableIndex(
+  tableIdx: number,
+  tableCount: number
+): {
   rowStart: number;
   rowEndExclusive: number;
 } {
@@ -529,14 +716,34 @@ function getRowBoundsForTableIndex(tableIdx: number, tableCount: number): {
   };
 }
 
-function getAdjacentTableIndexesInRow(
-  targetTableIdx: number,
+function getRowAndColumnForTableIndex(tableIdx: number): { row: number; column: number } {
+  return {
+    row: Math.floor(tableIdx / TABLES_PER_ROW),
+    column: tableIdx % TABLES_PER_ROW,
+  };
+}
+
+function getTableIndexForRowAndColumn(
+  row: number,
+  column: number,
   tableCount: number
-): number[] {
+): number | null {
+  if (row < 0 || column < 0 || column >= TABLES_PER_ROW) return null;
+
+  const tableIdx = row * TABLES_PER_ROW + column;
+  if (tableIdx < 0 || tableIdx >= tableCount) return null;
+  return tableIdx;
+}
+
+function getAdjacentTableIndexesInRow(targetTableIdx: number, tableCount: number): number[] {
   const { rowStart, rowEndExclusive } = getRowBoundsForTableIndex(targetTableIdx, tableCount);
   const indexes: number[] = [targetTableIdx];
 
-  for (let distance = 1; rowStart <= targetTableIdx - distance || targetTableIdx + distance < rowEndExclusive; distance += 1) {
+  for (
+    let distance = 1;
+    rowStart <= targetTableIdx - distance || targetTableIdx + distance < rowEndExclusive;
+    distance += 1
+  ) {
     const left = targetTableIdx - distance;
     if (left >= rowStart) indexes.push(left);
 
@@ -571,10 +778,121 @@ function getClosestAllowedTableDistance(
 
   for (let i = windowStart; i < windowStart + windowLength; i += 1) {
     const tableIdx = rowStartTableIdx + Math.floor(i / TABLE_CAPACITY);
-    minDistance = Math.min(minDistance, Math.abs(tableIdx - targetTableIdx));
+    const source = getRowAndColumnForTableIndex(tableIdx);
+    const target = getRowAndColumnForTableIndex(targetTableIdx);
+    const manhattanDistance =
+      Math.abs(source.row - target.row) + Math.abs(source.column - target.column);
+
+    minDistance = Math.min(minDistance, manhattanDistance);
   }
 
   return minDistance;
+}
+
+function getTargetTablePreference(
+  tableIdx: number,
+  targetTableIdx: number
+): { tier: number; distance: number } {
+  if (tableIdx === targetTableIdx) {
+    return { tier: 0, distance: 0 };
+  }
+
+  const source = getRowAndColumnForTableIndex(tableIdx);
+  const target = getRowAndColumnForTableIndex(targetTableIdx);
+  const rowDistance = Math.abs(source.row - target.row);
+  const columnDistance = Math.abs(source.column - target.column);
+
+  if (rowDistance === 0 && columnDistance === 1) {
+    return { tier: 1, distance: 1 };
+  }
+  if (rowDistance === 1 && columnDistance === 0) {
+    return { tier: 2, distance: 1 };
+  }
+  if (rowDistance === 0) {
+    return { tier: 3, distance: columnDistance };
+  }
+
+  return {
+    tier: 4,
+    distance: rowDistance + columnDistance,
+  };
+}
+
+function getRowOptionPreference(rowTier: number, distanceFromTarget: number): number {
+  if (distanceFromTarget === 0) return 0;
+  if (rowTier === 0 && distanceFromTarget === 1) return 1;
+  if (rowTier === 1 && distanceFromTarget === 1) return 2;
+  if (rowTier === 0) return 3;
+  return 4;
+}
+
+function countIncomingGuestsInTable(
+  surface: Array<string | null>,
+  rowStartTableIdx: number,
+  targetTableIdx: number,
+  guestIds: string[]
+): number {
+  const localTableIdx = targetTableIdx - rowStartTableIdx;
+  if (localTableIdx < 0) return 0;
+
+  const start = localTableIdx * TABLE_CAPACITY;
+  const end = start + TABLE_CAPACITY;
+  if (start < 0 || end > surface.length) return 0;
+
+  const guestIdSet = new Set(guestIds);
+  return surface
+    .slice(start, end)
+    .filter((guestId): guestId is string => !!guestId)
+    .filter((guestId) => guestIdSet.has(guestId)).length;
+}
+
+function getGroupsWithSingleMemberOnDifferentRow(
+  tables: TableState[],
+  guestProfiles: Record<string, GuestProfile>
+): Set<string> {
+  const groupToRowCounts = new Map<string, Map<number, number>>();
+
+  for (let tableIdx = 0; tableIdx < tables.length; tableIdx += 1) {
+    const row = Math.floor(tableIdx / TABLES_PER_ROW);
+    for (const guestId of tables[tableIdx].guestIds) {
+      if (!guestId) continue;
+
+      const groupName = guestProfiles[guestId]?.group?.trim() ?? "";
+      if (!groupName) continue;
+
+      const rowCounts = groupToRowCounts.get(groupName) ?? new Map<number, number>();
+      rowCounts.set(row, (rowCounts.get(row) ?? 0) + 1);
+      groupToRowCounts.set(groupName, rowCounts);
+    }
+  }
+
+  const violations = new Set<string>();
+  for (const [groupName, rowCounts] of groupToRowCounts.entries()) {
+    if (rowCounts.size <= 1) continue;
+
+    if ([...rowCounts.values()].some((count) => count === 1)) {
+      violations.add(groupName);
+    }
+  }
+
+  return violations;
+}
+
+function introducesNewGroupRowIsolation(
+  previousTables: TableState[],
+  nextTables: TableState[],
+  guestProfiles?: Record<string, GuestProfile>
+): boolean {
+  if (!guestProfiles) return false;
+
+  const previousViolations = getGroupsWithSingleMemberOnDifferentRow(previousTables, guestProfiles);
+  const nextViolations = getGroupsWithSingleMemberOnDifferentRow(nextTables, guestProfiles);
+
+  for (const groupName of nextViolations) {
+    if (!previousViolations.has(groupName)) return true;
+  }
+
+  return false;
 }
 
 // ─── Main algorithm ───────────────────────────────────────────────────────────
@@ -680,16 +998,28 @@ function assignGuestsSmart(
       foreignGroupCount: number;
       openSeats: number;
       distanceFromTarget: number;
+      targetSeatCount: number;
+      rowTier: number;
     }
     const options: RowOption[] = [];
 
     for (let r = 0; r < numRows; r += 1) {
       const surface = surfaces[r];
+      const targetPosition =
+        targetTableIdx === -1 ? null : getRowAndColumnForTableIndex(targetTableIdx);
 
       const rowStartTableIdx = r * TABLES_PER_ROW;
-      if (targetTableIdx !== -1) {
-        const { rowStart } = getRowBoundsForTableIndex(targetTableIdx, nextTables.length);
-        if (rowStart !== rowStartTableIdx) continue;
+      let rowTier = 0;
+      if (targetPosition) {
+        const rowDistance = Math.abs(targetPosition.row - r);
+
+        if (targetScope === "target-only") {
+          if (targetPosition.row !== r) continue;
+        } else {
+          if (rowDistance > 1) continue;
+        }
+
+        rowTier = targetPosition.row === r ? 0 : 1;
       }
 
       const open = countOpenSeats(surface);
@@ -697,12 +1027,23 @@ function assignGuestsSmart(
 
       let windows = findCandidateWindows(surface, needed, groupName, guestProfiles);
 
-      if (targetTableIdx !== -1) {
-        const allowedTableIdxs = new Set<number>(
-          targetScope === "target-only"
-            ? [targetTableIdx]
-            : getAdjacentTableIndexesInRow(targetTableIdx, nextTables.length)
-        );
+      if (targetPosition) {
+        let allowedTableIdxs: Set<number>;
+        if (targetScope === "target-only") {
+          allowedTableIdxs = new Set<number>([targetTableIdx]);
+        } else if (targetPosition.row === r) {
+          allowedTableIdxs = new Set<number>(
+            getAdjacentTableIndexesInRow(targetTableIdx, nextTables.length)
+          );
+        } else {
+          const nearbyAdjacentRowIdx = getTableIndexForRowAndColumn(
+            r,
+            targetPosition.column,
+            nextTables.length
+          );
+          if (nearbyAdjacentRowIdx == null) continue;
+          allowedTableIdxs = new Set<number>([nearbyAdjacentRowIdx]);
+        }
 
         windows = windows.filter((window) =>
           windowUsesOnlyTables(window.start, needed, rowStartTableIdx, allowedTableIdxs)
@@ -711,11 +1052,78 @@ function assignGuestsSmart(
 
       if (windows.length === 0) continue;
 
+      const preferredTableIdxInRow = !targetPosition
+        ? undefined
+        : (() => {
+            if (targetPosition.row === r) {
+              return targetTableIdx - rowStartTableIdx;
+            }
+
+            const nearbyAdjacentRowIdx = getTableIndexForRowAndColumn(
+              r,
+              targetPosition.column,
+              nextTables.length
+            );
+            return nearbyAdjacentRowIdx == null
+              ? undefined
+              : nearbyAdjacentRowIdx - rowStartTableIdx;
+          })();
+
       const foreignGroupCount = countGroupsInSurface(surface, lockedSet, guestProfiles, groupName);
-      const viableWindow = windows.find(
-        (window) =>
-          placeGroupIntoWindow(surface, window.start, groupGuestIds, guestProfiles) !== null
-      );
+      const viableWindows = windows
+        .map((window) => {
+          const placedSurface = placeGroupIntoWindow(
+            surface,
+            window.start,
+            groupGuestIds,
+            guestProfiles,
+            preferredTableIdxInRow
+          );
+          if (!placedSurface) return null;
+
+          const targetSeatCount = !targetPosition
+            ? 0
+            : countIncomingGuestsInTable(
+                placedSurface,
+                rowStartTableIdx,
+                targetPosition.row === r
+                  ? targetTableIdx
+                  : (getTableIndexForRowAndColumn(r, targetPosition.column, nextTables.length) ??
+                      -1),
+                groupGuestIds
+              );
+
+          return {
+            ...window,
+            placedSurface,
+            targetSeatCount,
+          };
+        })
+        .filter(
+          (
+            window
+          ): window is {
+            start: number;
+            foreignCount: number;
+            placedSurface: Array<string | null>;
+            targetSeatCount: number;
+          } => window !== null
+        );
+      const viableWindow = viableWindows.sort((a, b) => {
+        if (a.targetSeatCount !== b.targetSeatCount) return b.targetSeatCount - a.targetSeatCount;
+        const aDistance =
+          targetTableIdx === -1
+            ? Number.POSITIVE_INFINITY
+            : getClosestAllowedTableDistance(a.start, needed, rowStartTableIdx, targetTableIdx);
+        const bDistance =
+          targetTableIdx === -1
+            ? Number.POSITIVE_INFINITY
+            : getClosestAllowedTableDistance(b.start, needed, rowStartTableIdx, targetTableIdx);
+
+        if (aDistance !== bDistance) return aDistance - bDistance;
+        if (a.foreignCount !== b.foreignCount) return a.foreignCount - b.foreignCount;
+        return a.start - b.start;
+      })[0];
       if (!viableWindow) continue;
 
       const distanceFromTarget =
@@ -734,16 +1142,138 @@ function assignGuestsSmart(
         foreignGroupCount,
         openSeats: open,
         distanceFromTarget,
+        targetSeatCount: viableWindow.targetSeatCount,
+        rowTier,
       });
     }
 
     if (options.length === 0) {
+      // Fallback: place households one-by-one by scored proximity, and stop
+      // once only far same-row spill options remain.
+      if (targetTableIdx !== -1 && targetScope !== "target-only") {
+        const targetPos = getRowAndColumnForTableIndex(targetTableIdx);
+        const nearbyTableIdxs = [
+          ...getAdjacentTableIndexesInRow(targetTableIdx, nextTables.length),
+        ];
+        for (const rowOffset of [-1, 1]) {
+          const adjacentRowIdx = getTableIndexForRowAndColumn(
+            targetPos.row + rowOffset,
+            targetPos.column,
+            nextTables.length
+          );
+          if (adjacentRowIdx != null) nearbyTableIdxs.push(adjacentRowIdx);
+        }
+
+        const householdBuckets = new Map<string, string[]>();
+        for (const guestId of groupGuestIds) {
+          const hh = guestProfiles[guestId]?.partyId ?? guestId;
+          const bucket = householdBuckets.get(hh) ?? [];
+          bucket.push(guestId);
+          householdBuckets.set(hh, bucket);
+        }
+        const sortedHouseholds = [...householdBuckets.values()].sort((a, b) => {
+          if (b.length !== a.length) return b.length - a.length;
+          const hhA = guestProfiles[a[0]]?.partyId ?? a[0];
+          const hhB = guestProfiles[b[0]]?.partyId ?? b[0];
+          return hhA.localeCompare(hhB);
+        });
+
+        const draftGuestIds = new Map<number, Array<string | null>>(
+          nearbyTableIdxs.map((idx) => [idx, [...nextTables[idx].guestIds]])
+        );
+        let placedAnyHousehold = false;
+
+        for (const hhGuests of sortedHouseholds) {
+          const candidateTables = nearbyTableIdxs
+            .map((tableIdx) => {
+              const seats = draftGuestIds.get(tableIdx);
+              if (!seats) return null;
+
+              const openSlots = seats
+                .map((id, i) => (id === null ? i : -1))
+                .filter((i) => i !== -1);
+              if (openSlots.length < hhGuests.length) return null;
+
+              let run: number[] | null = null;
+              for (let start = 0; start <= openSlots.length - hhGuests.length; start += 1) {
+                const candidate = openSlots.slice(start, start + hhGuests.length);
+                const isContiguous = candidate.every(
+                  (slot, i) => i === 0 || slot === candidate[i - 1] + 1
+                );
+                if (isContiguous) {
+                  run = candidate;
+                  break;
+                }
+              }
+              if (!run) return null;
+
+              return {
+                tableIdx,
+                run,
+                spare: openSlots.length - hhGuests.length,
+                preference: getTargetTablePreference(tableIdx, targetTableIdx),
+              };
+            })
+            .filter(
+              (
+                entry
+              ): entry is {
+                tableIdx: number;
+                run: number[];
+                spare: number;
+                preference: { tier: number; distance: number };
+              } => entry !== null
+            )
+            .sort((a, b) => {
+              if (a.preference.tier !== b.preference.tier) {
+                return a.preference.tier - b.preference.tier;
+              }
+              if (a.preference.distance !== b.preference.distance) {
+                return a.preference.distance - b.preference.distance;
+              }
+              if (a.spare !== b.spare) {
+                return a.spare - b.spare;
+              }
+              return a.tableIdx - b.tableIdx;
+            });
+
+          const selected = candidateTables[0];
+          if (!selected || selected.preference.tier > 2) {
+            break;
+          }
+
+          const seats = draftGuestIds.get(selected.tableIdx);
+          if (!seats) continue;
+          for (let i = 0; i < hhGuests.length; i += 1) {
+            seats[selected.run[i]] = hhGuests[i];
+          }
+          placedAnyHousehold = true;
+        }
+
+        if (placedAnyHousehold) {
+          for (const [tableIdx, guestIds] of draftGuestIds) {
+            nextTables[tableIdx] = { ...nextTables[tableIdx], guestIds };
+          }
+          continue;
+        }
+      }
       continue;
     }
 
     options.sort((a, b) => {
+      const aPreference = getRowOptionPreference(a.rowTier, a.distanceFromTarget);
+      const bPreference = getRowOptionPreference(b.rowTier, b.distanceFromTarget);
+      if (aPreference !== bPreference) {
+        return aPreference - bPreference;
+      }
+      if (a.targetSeatCount !== b.targetSeatCount) {
+        return b.targetSeatCount - a.targetSeatCount;
+      }
       if (a.distanceFromTarget !== b.distanceFromTarget) {
         return a.distanceFromTarget - b.distanceFromTarget;
+      }
+      if (a.rowTier !== b.rowTier) {
+        return a.rowTier - b.rowTier;
       }
       if (a.foreignGroupCount !== b.foreignGroupCount) {
         return a.foreignGroupCount - b.foreignGroupCount;
@@ -757,11 +1287,30 @@ function assignGuestsSmart(
     let placed = false;
     for (const option of options) {
       const surface = surfaces[option.rowIdx];
+      const preferredTableIdxInRow =
+        targetTableIdx === -1
+          ? undefined
+          : (() => {
+              const targetPosition = getRowAndColumnForTableIndex(targetTableIdx);
+              if (targetPosition.row === option.rowIdx) {
+                return targetTableIdx - option.rowIdx * TABLES_PER_ROW;
+              }
+
+              const nearbyAdjacentRowIdx = getTableIndexForRowAndColumn(
+                option.rowIdx,
+                targetPosition.column,
+                nextTables.length
+              );
+              return nearbyAdjacentRowIdx == null
+                ? undefined
+                : nearbyAdjacentRowIdx - option.rowIdx * TABLES_PER_ROW;
+            })();
       const newSurface = placeGroupIntoWindow(
         surface,
         option.windowStart,
         groupGuestIds,
-        guestProfiles
+        guestProfiles,
+        preferredTableIdxInRow
       );
       if (!newSurface) continue;
 
@@ -789,6 +1338,9 @@ function assignGuestsSmart(
     return state;
   }
   if (introducesNewHouseholdAdjacencyViolation(state.tables, nextTables, guestProfiles)) {
+    return state;
+  }
+  if (introducesNewGroupRowIsolation(state.tables, nextTables, guestProfiles)) {
     return state;
   }
 
@@ -837,6 +1389,7 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
         seatIndex,
         guestProfiles,
       } = action;
+      const isManualSeatOverride = assignmentMode === "single-table" && seatIndex != null;
       const tableIdx = state.tables.findIndex(
         (tableEntry) => tableEntry.tableNumber === tableNumber
       );
@@ -861,7 +1414,55 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       }
 
       let orderedGuestIds = getUniqueGuestIds(guestIds);
-      if (orderedGuestIds.length === 1 && guestProfiles) {
+
+      if (orderedGuestIds.length === 1 && seatIndex != null) {
+        const incomingGuestId = orderedGuestIds[0];
+        const incomingSeat = findGuestSeat(state.tables, incomingGuestId);
+        const targetSeatGuestId = table.guestIds[seatIndex];
+
+        if (
+          incomingSeat &&
+          targetSeatGuestId !== null &&
+          targetSeatGuestId !== incomingGuestId &&
+          seatIndex >= 0 &&
+          seatIndex < TABLE_CAPACITY
+        ) {
+          const lockedSet = new Set(state.lockedGuestIds ?? []);
+          if (lockedSet.has(incomingGuestId) || lockedSet.has(targetSeatGuestId)) {
+            return state;
+          }
+
+          const nextTables = state.tables.map((currentTable) => ({
+            ...currentTable,
+            guestIds: [...currentTable.guestIds],
+          }));
+
+          nextTables[tableIdx].guestIds[seatIndex] = incomingGuestId;
+          nextTables[incomingSeat.tableIdx].guestIds[incomingSeat.seatIdx] = targetSeatGuestId;
+
+          if (!isManualSeatOverride) {
+            if (introducesNewHouseholdSplit(state.tables, nextTables, guestProfiles)) {
+              return state;
+            }
+            if (
+              introducesNewHouseholdAdjacencyViolation(state.tables, nextTables, guestProfiles)
+            ) {
+              return state;
+            }
+            if (introducesNewGroupRowIsolation(state.tables, nextTables, guestProfiles)) {
+              return state;
+            }
+          }
+
+          return {
+            tables: nextTables,
+            unassigned: state.unassigned.filter((guestId) => guestId !== incomingGuestId),
+            lockedGuestIds: state.lockedGuestIds ?? [],
+          };
+        }
+      }
+
+      if (!isManualSeatOverride && orderedGuestIds.length === 1 && guestProfiles) {
         const dragGuestId = orderedGuestIds[0];
         const partyId = guestProfiles[dragGuestId]?.partyId;
         if (partyId) {
@@ -894,9 +1495,14 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       const newTables = normalizedTables.map((currentTable, index) =>
         index === tableIdx ? { ...currentTable, guestIds: updatedSeatSlots } : currentTable
       );
-      if (introducesNewHouseholdSplit(state.tables, newTables, guestProfiles)) return state;
-      if (introducesNewHouseholdAdjacencyViolation(state.tables, newTables, guestProfiles)) {
-        return state;
+      if (!isManualSeatOverride) {
+        if (introducesNewHouseholdSplit(state.tables, newTables, guestProfiles)) return state;
+        if (introducesNewHouseholdAdjacencyViolation(state.tables, newTables, guestProfiles)) {
+          return state;
+        }
+        if (introducesNewGroupRowIsolation(state.tables, newTables, guestProfiles)) {
+          return state;
+        }
       }
 
       const newUnassigned = state.unassigned.filter((guestId) => !incomingSet.has(guestId));
@@ -936,6 +1542,70 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       return { tables: newTables, unassigned: newUnassigned, lockedGuestIds: newLocked };
     }
 
+    case "TOGGLE_SEAT_DISABLED": {
+      const { tableNumber, seatIndex } = action;
+      const tableIdx = state.tables.findIndex((t) => t.tableNumber === tableNumber);
+      if (tableIdx === -1) return state;
+      const table = state.tables[tableIdx];
+
+      const currentDisabled = table.disabledSeats ?? [];
+      const isCurrentlyDisabled = currentDisabled.includes(seatIndex);
+
+      let nextUnassigned = state.unassigned;
+      let nextLockedGuestIds = state.lockedGuestIds ?? [];
+      let nextGuestIds = table.guestIds;
+
+      if (!isCurrentlyDisabled) {
+        // Disabling: if a guest occupies this seat, evict them
+        const evictedGuestId = table.guestIds[seatIndex];
+        if (evictedGuestId !== null) {
+          nextGuestIds = table.guestIds.map((id, i) => (i === seatIndex ? null : id));
+          nextUnassigned = [...new Set([...state.unassigned, evictedGuestId])];
+          nextLockedGuestIds = nextLockedGuestIds.filter((id) => id !== evictedGuestId);
+        }
+      }
+
+      const nextDisabled = isCurrentlyDisabled
+        ? currentDisabled.filter((i) => i !== seatIndex)
+        : [...currentDisabled, seatIndex];
+
+      const nextTables = state.tables.map((t, i) =>
+        i === tableIdx ? { ...t, guestIds: nextGuestIds, disabledSeats: nextDisabled } : t
+      );
+
+      return {
+        ...state,
+        tables: nextTables,
+        unassigned: nextUnassigned,
+        lockedGuestIds: nextLockedGuestIds,
+      };
+    }
+
+    case "LOCK_TABLE_GUESTS": {
+      const table = state.tables.find((t) => t.tableNumber === action.tableNumber);
+      if (!table) return state;
+      const guestIdsToLock = table.guestIds.filter((id): id is string => id !== null);
+      if (guestIdsToLock.length === 0) return state;
+      const nextLockedGuestIds = [...new Set([...(state.lockedGuestIds ?? []), ...guestIdsToLock])];
+      return { ...state, lockedGuestIds: nextLockedGuestIds };
+    }
+
+    case "DISABLE_EMPTY_TABLE_SEATS": {
+      const tableIdx = state.tables.findIndex((t) => t.tableNumber === action.tableNumber);
+      if (tableIdx === -1) return state;
+      const table = state.tables[tableIdx];
+      const currentDisabled = new Set(table.disabledSeats ?? []);
+      const emptyIndexes = table.guestIds
+        .map((id, i) => (id === null && !currentDisabled.has(i) ? i : -1))
+        .filter((i) => i !== -1);
+      if (emptyIndexes.length === 0) return state;
+      const nextDisabled = [...currentDisabled, ...emptyIndexes];
+      const nextTables = state.tables.map((t, i) =>
+        i === tableIdx ? { ...t, disabledSeats: nextDisabled } : t
+      );
+      return { ...state, tables: nextTables };
+    }
+
     case "MOVE_TABLE": {
       if (action.activeTableNumber === action.overTableNumber) return state;
 
@@ -947,7 +1617,9 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       );
       if (activeIndex === -1 || overIndex === -1) return state;
 
-      return { ...state, tables: arrayMove(state.tables, activeIndex, overIndex) };
+      const swapped = [...state.tables];
+      [swapped[activeIndex], swapped[overIndex]] = [swapped[overIndex], swapped[activeIndex]];
+      return { ...state, tables: swapped };
     }
 
     default:
