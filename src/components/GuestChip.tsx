@@ -154,6 +154,10 @@ export default function GuestChip({
     highlightClass = "is-highlighted";
   }
 
+  if (isAnchored) {
+    style.borderColor = "#dc2626";
+  }
+
   const hasInlineStyle = Object.keys(style).length > 0;
   const relationClasses: string[] = [];
   if (!suppressStateStyles) {

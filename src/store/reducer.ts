@@ -4,6 +4,7 @@ import { TABLE_CAPACITY, TABLE_COUNT, TABLES_PER_ROW } from "../types";
 import { arrayMove } from "@dnd-kit/sortable";
 
 type AssignmentMode = "single-table" | "group-overflow";
+type AutoAssignTargetScope = "target-only" | "target-and-adjacent";
 
 export interface GuestProfile {
   partyId: string;
@@ -26,6 +27,8 @@ export type SeatingAction =
       type: "AUTO_ASSIGN_GUESTS";
       guestIds: string[];
       guestProfiles?: Record<string, GuestProfile>;
+      targetTableNumber?: number;
+      targetScope?: AutoAssignTargetScope;
     }
   | { type: "REMOVE_GUESTS"; guestIds: string[] }
   | { type: "CLEAR_TABLE"; tableNumber: number }
@@ -515,33 +518,114 @@ function countOpenSeats(surface: Array<string | null>): number {
   return surface.filter((s) => s === null).length;
 }
 
+function getRowBoundsForTableIndex(tableIdx: number, tableCount: number): {
+  rowStart: number;
+  rowEndExclusive: number;
+} {
+  const rowStart = Math.floor(tableIdx / TABLES_PER_ROW) * TABLES_PER_ROW;
+  return {
+    rowStart,
+    rowEndExclusive: Math.min(rowStart + TABLES_PER_ROW, tableCount),
+  };
+}
+
+function getAdjacentTableIndexesInRow(
+  targetTableIdx: number,
+  tableCount: number
+): number[] {
+  const { rowStart, rowEndExclusive } = getRowBoundsForTableIndex(targetTableIdx, tableCount);
+  const indexes: number[] = [targetTableIdx];
+
+  for (let distance = 1; rowStart <= targetTableIdx - distance || targetTableIdx + distance < rowEndExclusive; distance += 1) {
+    const left = targetTableIdx - distance;
+    if (left >= rowStart) indexes.push(left);
+
+    const right = targetTableIdx + distance;
+    if (right < rowEndExclusive) indexes.push(right);
+  }
+
+  return indexes;
+}
+
+function windowUsesOnlyTables(
+  windowStart: number,
+  windowLength: number,
+  rowStartTableIdx: number,
+  allowedTableIdxs: Set<number>
+): boolean {
+  for (let i = windowStart; i < windowStart + windowLength; i += 1) {
+    const tableIdx = rowStartTableIdx + Math.floor(i / TABLE_CAPACITY);
+    if (!allowedTableIdxs.has(tableIdx)) return false;
+  }
+
+  return true;
+}
+
+function getClosestAllowedTableDistance(
+  windowStart: number,
+  windowLength: number,
+  rowStartTableIdx: number,
+  targetTableIdx: number
+): number {
+  let minDistance = Number.POSITIVE_INFINITY;
+
+  for (let i = windowStart; i < windowStart + windowLength; i += 1) {
+    const tableIdx = rowStartTableIdx + Math.floor(i / TABLE_CAPACITY);
+    minDistance = Math.min(minDistance, Math.abs(tableIdx - targetTableIdx));
+  }
+
+  return minDistance;
+}
+
 // ─── Main algorithm ───────────────────────────────────────────────────────────
 
 function assignGuestsSmart(
   state: SeatingState,
   incomingGuestIds: string[],
-  guestProfiles: Record<string, GuestProfile>
+  guestProfiles: Record<string, GuestProfile>,
+  options?: {
+    targetTableNumber?: number;
+    targetScope?: AutoAssignTargetScope;
+    allowReseatIncoming?: boolean;
+  }
 ): SeatingState {
   const orderedGuestIds = getUniqueGuestIds(incomingGuestIds);
   if (orderedGuestIds.length === 0) return state;
 
   const lockedSet = new Set(state.lockedGuestIds ?? []);
 
-  // Already-seated guests (locked or not) are never disturbed by auto-seating.
-  // Auto-seating only fills unassigned guests into empty seats.
+  // Already-seated guests (locked or not) are never disturbed by default.
+  // Targeted table-drop auto-seat can opt-in to re-seating the incoming guests.
   const alreadySeatedSet = new Set(
     state.tables.flatMap((t) => t.guestIds.filter((id): id is string => id !== null))
   );
 
-  // Only seat guests who are currently unassigned and not locked.
-  const toSeat = orderedGuestIds.filter((id) => !lockedSet.has(id) && !alreadySeatedSet.has(id));
+  const allowReseatIncoming = options?.allowReseatIncoming ?? false;
+  const targetTableNumber = options?.targetTableNumber;
+  const targetScope = options?.targetScope;
+
+  const incomingReseatSet = new Set(
+    allowReseatIncoming
+      ? orderedGuestIds.filter((id) => !lockedSet.has(id) && alreadySeatedSet.has(id))
+      : []
+  );
+
+  const toSeat = orderedGuestIds.filter(
+    (id) => !lockedSet.has(id) && (!alreadySeatedSet.has(id) || incomingReseatSet.has(id))
+  );
   if (toSeat.length === 0) return state;
 
-  // Build working copy of tables — no guests are removed since toSeat contains only unassigned guests.
+  // Build working copy of tables. Targeted guest->table can remove incoming guests first.
   const nextTables = state.tables.map((table) => ({
     ...table,
-    guestIds: [...table.guestIds],
+    guestIds: removeGuestsFromSeatSlots(table.guestIds, incomingReseatSet),
   }));
+
+  const targetTableIdx =
+    targetTableNumber == null
+      ? -1
+      : nextTables.findIndex((table) => table.tableNumber === targetTableNumber);
+  if (targetTableNumber != null && targetTableIdx === -1) return state;
 
   // Check global capacity.
   const totalOpen = nextTables.reduce(
@@ -595,15 +679,36 @@ function assignGuestsSmart(
       windowStart: number;
       foreignGroupCount: number;
       openSeats: number;
+      distanceFromTarget: number;
     }
     const options: RowOption[] = [];
 
     for (let r = 0; r < numRows; r += 1) {
       const surface = surfaces[r];
+
+      const rowStartTableIdx = r * TABLES_PER_ROW;
+      if (targetTableIdx !== -1) {
+        const { rowStart } = getRowBoundsForTableIndex(targetTableIdx, nextTables.length);
+        if (rowStart !== rowStartTableIdx) continue;
+      }
+
       const open = countOpenSeats(surface);
       if (open < needed) continue; // not enough room in this row
 
-      const windows = findCandidateWindows(surface, needed, groupName, guestProfiles);
+      let windows = findCandidateWindows(surface, needed, groupName, guestProfiles);
+
+      if (targetTableIdx !== -1) {
+        const allowedTableIdxs = new Set<number>(
+          targetScope === "target-only"
+            ? [targetTableIdx]
+            : getAdjacentTableIndexesInRow(targetTableIdx, nextTables.length)
+        );
+
+        windows = windows.filter((window) =>
+          windowUsesOnlyTables(window.start, needed, rowStartTableIdx, allowedTableIdxs)
+        );
+      }
+
       if (windows.length === 0) continue;
 
       const foreignGroupCount = countGroupsInSurface(surface, lockedSet, guestProfiles, groupName);
@@ -613,11 +718,22 @@ function assignGuestsSmart(
       );
       if (!viableWindow) continue;
 
+      const distanceFromTarget =
+        targetTableIdx === -1
+          ? Number.POSITIVE_INFINITY
+          : getClosestAllowedTableDistance(
+              viableWindow.start,
+              needed,
+              rowStartTableIdx,
+              targetTableIdx
+            );
+
       options.push({
         rowIdx: r,
         windowStart: viableWindow.start,
         foreignGroupCount,
         openSeats: open,
+        distanceFromTarget,
       });
     }
 
@@ -626,6 +742,9 @@ function assignGuestsSmart(
     }
 
     options.sort((a, b) => {
+      if (a.distanceFromTarget !== b.distanceFromTarget) {
+        return a.distanceFromTarget - b.distanceFromTarget;
+      }
       if (a.foreignGroupCount !== b.foreignGroupCount) {
         return a.foreignGroupCount - b.foreignGroupCount;
       }
@@ -703,7 +822,11 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
         return assignGuestsWithOverflow(state, 0, action.guestIds);
       }
 
-      return assignGuestsSmart(state, action.guestIds, action.guestProfiles);
+      return assignGuestsSmart(state, action.guestIds, action.guestProfiles, {
+        targetTableNumber: action.targetTableNumber,
+        targetScope: action.targetScope,
+        allowReseatIncoming: action.targetTableNumber != null,
+      });
     }
 
     case "ASSIGN_GUESTS": {

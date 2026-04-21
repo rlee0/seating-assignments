@@ -728,11 +728,11 @@ function SeatingApp({
       const tableNumber = parseTableNumber(targetId);
       if (tableNumber != null) {
         dispatch({
-          type: "ASSIGN_GUESTS",
-          tableNumber,
+          type: "AUTO_ASSIGN_GUESTS",
           guestIds,
-          assignmentMode: data.kind === "group" ? "group-overflow" : "single-table",
           guestProfiles,
+          targetTableNumber: tableNumber,
+          targetScope: data.kind === "guest" ? "target-only" : "target-and-adjacent",
         });
       }
     },

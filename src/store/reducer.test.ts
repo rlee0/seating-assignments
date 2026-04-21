@@ -351,3 +351,147 @@ describe("anchoring behavior", () => {
     expect(unanchored.lockedGuestIds).not.toContain("g1");
   });
 });
+
+describe("targeted auto-assign", () => {
+  it("seats a guest in the dropped table when target-only mode has space", () => {
+    const profiles = makeProfiles([{ id: "g1", partyId: "p1" }]);
+    const state = createInitialState(["g1"]);
+
+    const result = seatingReducer(state, {
+      type: "AUTO_ASSIGN_GUESTS",
+      guestIds: ["g1"],
+      guestProfiles: profiles,
+      targetTableNumber: 3,
+      targetScope: "target-only",
+    });
+
+    expect(seatsAt(result, 3).filter(Boolean)).toEqual(["g1"]);
+    expect(result.unassigned).not.toContain("g1");
+  });
+
+  it("does nothing when target-only table has no available seat", () => {
+    const blockers = Array.from({ length: TABLE_CAPACITY }, (_, i) => `b${i + 1}`);
+    const allIds = [...blockers, "g1"];
+    const profiles = makeProfiles([
+      ...blockers.map((id) => ({ id, partyId: id })),
+      { id: "g1", partyId: "p1" },
+    ]);
+
+    let state = createInitialState(allIds);
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: blockers,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+
+    const result = seatingReducer(state, {
+      type: "AUTO_ASSIGN_GUESTS",
+      guestIds: ["g1"],
+      guestProfiles: profiles,
+      targetTableNumber: 1,
+      targetScope: "target-only",
+    });
+
+    expect(result).toEqual(state);
+  });
+
+  it("can re-seat a dragged guest into a new target-only table", () => {
+    const profiles = makeProfiles([{ id: "g1", partyId: "p1" }]);
+
+    let state = createInitialState(["g1"]);
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g1"],
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+
+    const result = seatingReducer(state, {
+      type: "AUTO_ASSIGN_GUESTS",
+      guestIds: ["g1"],
+      guestProfiles: profiles,
+      targetTableNumber: 2,
+      targetScope: "target-only",
+    });
+
+    expect(seatsAt(result, 1).filter(Boolean)).toEqual([]);
+    expect(seatsAt(result, 2).filter(Boolean)).toEqual(["g1"]);
+  });
+
+  it("uses adjacent tables in the same visual row for household placement", () => {
+    const household = ["h1", "h2"];
+    const blockers1 = Array.from({ length: TABLE_CAPACITY }, (_, i) => `l${i + 1}`);
+    const blockers2 = Array.from({ length: TABLE_CAPACITY }, (_, i) => `t${i + 1}`);
+    const allIds = [...household, ...blockers1, ...blockers2];
+    const profiles = makeProfiles([
+      ...household.map((id) => ({ id, partyId: "hh1", group: "Group HH" })),
+      ...blockers1.map((id) => ({ id, partyId: id, group: "Blockers" })),
+      ...blockers2.map((id) => ({ id, partyId: id, group: "Blockers" })),
+    ]);
+
+    let state = createInitialState(allIds);
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: blockers1,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 2,
+      guestIds: blockers2,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+
+    const result = seatingReducer(state, {
+      type: "AUTO_ASSIGN_GUESTS",
+      guestIds: household,
+      guestProfiles: profiles,
+      targetTableNumber: 2,
+      targetScope: "target-and-adjacent",
+    });
+
+    expect(seatsAt(result, 3).filter((id): id is string => id !== null)).toEqual([
+      "h1",
+      "h2",
+    ]);
+  });
+
+  it("uses adjacent tables in the same visual row for group placement", () => {
+    const groupGuests = ["g1", "g2", "g3"];
+    const blockers = Array.from({ length: TABLE_CAPACITY }, (_, i) => `x${i + 1}`);
+    const allIds = [...groupGuests, ...blockers];
+    const profiles = makeProfiles([
+      ...groupGuests.map((id) => ({ id, partyId: id, group: "My Group" })),
+      ...blockers.map((id) => ({ id, partyId: id, group: "Blockers" })),
+    ]);
+
+    let state = createInitialState(allIds);
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 2,
+      guestIds: blockers,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+
+    const result = seatingReducer(state, {
+      type: "AUTO_ASSIGN_GUESTS",
+      guestIds: groupGuests,
+      guestProfiles: profiles,
+      targetTableNumber: 2,
+      targetScope: "target-and-adjacent",
+    });
+
+    expect(seatsAt(result, 1).filter((id): id is string => id !== null)).toEqual([
+      "g1",
+      "g2",
+      "g3",
+    ]);
+  });
+});

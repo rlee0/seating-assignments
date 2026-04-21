@@ -477,11 +477,6 @@
   --guest-chip-bg: oklch(0.985 0.026 95.277);
 }
 
-.guest-chip.is-anchored,
-.guest-chip.is-anchored:hover,
-.guest-chip.is-anchored:active {
-  border-color: #dc2626 !important;
-}
 
 .guest-chip--sidebar {
   --guest-chip-bg: var(--secondary);
