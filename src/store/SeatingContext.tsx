@@ -16,7 +16,28 @@ import {
   MAX_UNDO_HISTORY,
   savePersistedSeating,
 } from "./localStorage";
+import type { GuestProfile } from "./reducer";
 import type { ParsedData } from "../data/parseGuests";
+
+function buildGuestProfiles(
+  guests: ParsedData["guests"],
+  parties: ParsedData["parties"]
+): Record<string, GuestProfile> {
+  const profiles: Record<string, GuestProfile> = {};
+
+  for (const [guestId, guest] of guests) {
+    const party = parties.get(guest.partyId);
+
+    profiles[guestId] = {
+      partyId: guest.partyId,
+      group: guest.group || "",
+      host: guest.host,
+      household: party?.household ?? "",
+    };
+  }
+
+  return profiles;
+}
 
 interface SeatingContextValue {
   state: SeatingState;
@@ -35,6 +56,7 @@ interface SeatingContextValue {
   clearSelectedGuest: () => void;
   relatedHouseholdGuestIds: Set<string>;
   relatedGroupGuestIds: Set<string>;
+  autoAssignGuestIds: (guestIds: string[]) => void;
 }
 
 interface HistoryState {
@@ -89,6 +111,9 @@ function normalizeSeatingState(state: SeatingState): SeatingState | null {
   return {
     ...state,
     tables: normalizedTables as SeatingState["tables"],
+    lockedGuestIds: Array.isArray(state.lockedGuestIds)
+      ? (state.lockedGuestIds as unknown[]).filter((v): v is string => typeof v === "string")
+      : [],
   };
 }
 
@@ -106,7 +131,10 @@ function areSeatingStatesEqual(left: SeatingState, right: SeatingState): boolean
       table.name === other.name &&
       areSeatArraysEqual(table.guestIds, other.guestIds)
     );
-  });
+  }) && areSeatArraysEqual(
+    [...(left.lockedGuestIds ?? [])].sort(),
+    [...(right.lockedGuestIds ?? [])].sort()
+  );
 }
 
 function seatingHistoryReducer(state: HistoryState, action: HistoryAction): HistoryState {
@@ -161,6 +189,7 @@ export function SeatingProvider({
 }) {
   const { guests, parties, allGuestIds, warnings } = parsedData;
   const defaultState = useMemo(() => createInitialState(allGuestIds), [allGuestIds]);
+  const guestProfiles = useMemo(() => buildGuestProfiles(guests, parties), [guests, parties]);
   const [selectedGuestId, setSelectedGuestId] = useState<string | null>(null);
 
   const [historyState, historyDispatch] = useReducer(
@@ -210,6 +239,13 @@ export function SeatingProvider({
     historyDispatch({ type: "APPLY_ACTION", action });
   }, []);
 
+  const autoAssignGuestIds = useCallback(
+    (guestIds: string[]) => {
+      dispatch({ type: "AUTO_ASSIGN_GUESTS", guestIds, guestProfiles });
+    },
+    [dispatch, guestProfiles]
+  );
+
   const undo = useCallback(() => {
     historyDispatch({ type: "UNDO" });
   }, []);
@@ -253,14 +289,13 @@ export function SeatingProvider({
     const relatedIds = new Set<string>();
     for (const guest of guests.values()) {
       if (guest.id === selectedGuest.id) continue;
-      if (relatedHouseholdGuestIds.has(guest.id)) continue;
       if (guest.group === selectedGuest.group) {
         relatedIds.add(guest.id);
       }
     }
 
     return relatedIds;
-  }, [guests, relatedHouseholdGuestIds, selectedGuest]);
+  }, [guests, selectedGuest]);
 
   const selectGuest = useCallback((guestId: string) => {
     setSelectedGuestId(guestId);
@@ -289,6 +324,7 @@ export function SeatingProvider({
         clearSelectedGuest,
         relatedHouseholdGuestIds,
         relatedGroupGuestIds,
+        autoAssignGuestIds,
       }}>
       {children}
     </SeatingContext.Provider>

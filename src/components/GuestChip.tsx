@@ -1,6 +1,9 @@
+import type { CSSProperties, MouseEvent, PointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import { CSS } from "@dnd-kit/utilities";
+import { Sparkles } from "lucide-react";
+import { guestChipVariants } from "@/components/ui/chip";
 import { useDraggable } from "@dnd-kit/core";
 import { useSearch } from "../store/SearchContext";
 import { useSeating } from "../store/SeatingContext";
@@ -12,13 +15,33 @@ function normalizeForSearch(str: string): string {
     .toLowerCase();
 }
 
+function getHighlightColor(token: string): { background: string; border: string } {
+  let hash = 0;
+  for (let index = 0; index < token.length; index += 1) {
+    hash = (hash << 5) - hash + token.charCodeAt(index);
+    hash |= 0;
+  }
+
+  const hue = Math.abs(hash) % 360;
+  return {
+    background: `hsl(${hue} 76% 86%)`,
+    border: `hsl(${hue} 56% 68%)`,
+  };
+}
+
 interface Props {
   guestId: string;
   context: "sidebar" | "table";
   className?: string;
+  suppressStateStyles?: boolean;
 }
 
-export default function GuestChip({ guestId, context, className }: Props) {
+export default function GuestChip({
+  guestId,
+  context,
+  className,
+  suppressStateStyles = false,
+}: Props) {
   const {
     guests,
     selectedGuestId,
@@ -26,15 +49,17 @@ export default function GuestChip({ guestId, context, className }: Props) {
     clearSelectedGuest,
     relatedHouseholdGuestIds,
     relatedGroupGuestIds,
+    autoAssignGuestIds,
   } = useSeating();
-  const { searchQuery } = useSearch();
+  const { searchQuery, isGroupHighlightOn, isHouseholdHighlightOn, isHostHighlightOn } =
+    useSearch();
   const guestNameRef = useRef<HTMLSpanElement | null>(null);
   const [isNameTruncated, setIsNameTruncated] = useState(false);
   const guest = guests.get(guestId);
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `guest-${guestId}`,
-    data: { kind: "guest", guestId },
+    data: { kind: "guest", guestId, origin: context },
   });
 
   useEffect(() => {
@@ -64,15 +89,69 @@ export default function GuestChip({ guestId, context, className }: Props) {
 
   if (!guest) return null;
 
-  const style = transform ? { transform: CSS.Translate.toString(transform) } : undefined;
-  const relationClass =
-    selectedGuestId === guestId
-      ? "is-selected"
-      : relatedHouseholdGuestIds.has(guestId)
-        ? "is-related-household"
-        : relatedGroupGuestIds.has(guestId)
-          ? "is-related-group"
-          : null;
+  // When DragOverlay is active it owns the visual movement; don't also move the original element.
+  const style: CSSProperties & Record<string, string> = {};
+  if (!isDragging && transform) {
+    style.transform = CSS.Translate.toString(transform);
+  }
+
+  const highlightToken =
+    context === "table"
+      ? isHostHighlightOn
+        ? `host:${guest.host || "Unknown"}`
+        : isHouseholdHighlightOn
+          ? `household:${guest.partyId}`
+          : isGroupHighlightOn
+            ? `group:${guest.group || "No Group"}`
+            : null
+      : null;
+
+  let highlightClass: string | null = null;
+  if (highlightToken) {
+    const { background, border } = getHighlightColor(highlightToken);
+    style["--guest-chip-highlight-bg"] = background;
+    style["--guest-chip-highlight-border"] = border;
+    highlightClass = "is-highlighted";
+  }
+
+  const hasInlineStyle = Object.keys(style).length > 0;
+  const relationClasses: string[] = [];
+  if (!suppressStateStyles) {
+    const isSelected = selectedGuestId === guestId;
+    const isRelatedHousehold = relatedHouseholdGuestIds.has(guestId);
+    const isRelatedGroup = relatedGroupGuestIds.has(guestId);
+
+    if (isSelected) {
+      relationClasses.push("is-selected");
+    } else if (isRelatedHousehold && isRelatedGroup) {
+      relationClasses.push("is-related-household", "is-related-group", "is-related-both");
+    } else if (isRelatedHousehold) {
+      relationClasses.push("is-related-household");
+    } else if (isRelatedGroup) {
+      relationClasses.push("is-related-group");
+    } else if (selectedGuestId) {
+      relationClasses.push("is-dimmed");
+    }
+  }
+
+  const isSearchMatch =
+    !suppressStateStyles &&
+    searchQuery.trim() &&
+    normalizeForSearch(guest.fullName).includes(normalizeForSearch(searchQuery.trim()));
+
+  const visualState = relationClasses.includes("is-selected")
+    ? "selected"
+    : relationClasses.includes("is-related-both")
+      ? "relatedBoth"
+      : relationClasses.includes("is-related-household")
+        ? "relatedHousehold"
+        : relationClasses.includes("is-related-group")
+          ? "relatedGroup"
+          : highlightClass
+            ? "highlighted"
+            : isSearchMatch
+              ? "searchMatch"
+              : "default";
 
   function handleSelectGuest() {
     if (isDragging) return;
@@ -83,20 +162,29 @@ export default function GuestChip({ guestId, context, className }: Props) {
     }
   }
 
+  function stopGuestChipAction(event: PointerEvent | MouseEvent) {
+    event.stopPropagation();
+  }
+
+  function handleAutoSeat(event: MouseEvent<HTMLButtonElement>) {
+    stopGuestChipAction(event);
+    if (isDragging) return;
+    autoAssignGuestIds([guestId]);
+  }
+
   return (
     <div
       ref={setNodeRef}
-      style={style}
+      style={hasInlineStyle ? style : undefined}
       className={[
         "guest-chip",
         `guest-chip--${context}`,
+        guestChipVariants({ state: visualState, context }),
         className,
-        relationClass,
+        highlightClass,
+        ...relationClasses,
         isDragging ? "is-dragging" : null,
-        searchQuery.trim() &&
-        normalizeForSearch(guest.fullName).includes(normalizeForSearch(searchQuery.trim()))
-          ? "is-search-match"
-          : null,
+        isSearchMatch ? "is-search-match" : null,
       ]
         .filter(Boolean)
         .join(" ")}
@@ -106,15 +194,23 @@ export default function GuestChip({ guestId, context, className }: Props) {
       {...attributes}>
       <span
         ref={guestNameRef}
-        className={[
-          "guest-name",
-          `guest-name--host-${guest.host.toLowerCase()}`,
-          context === "table" && isNameTruncated ? "is-truncated" : null,
-        ]
+        className={["guest-name", context === "table" && isNameTruncated ? "is-truncated" : null]
           .filter(Boolean)
           .join(" ")}>
         {guest.fullName}
       </span>
+      {context === "sidebar" ? (
+        <button
+          type="button"
+          className="sidebar-quick-action"
+          aria-label={`Auto-seat ${guest.fullName}`}
+          title="Auto-seat guest"
+          onPointerDown={stopGuestChipAction}
+          onMouseDown={stopGuestChipAction}
+          onClick={handleAutoSeat}>
+          <Sparkles className="sidebar-quick-action-icon" aria-hidden="true" />
+        </button>
+      ) : null}
     </div>
   );
 }

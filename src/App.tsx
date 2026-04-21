@@ -5,6 +5,7 @@ import {
   type CollisionDetection,
   DndContext,
   DragEndEvent,
+  DragMoveEvent,
   DragOverlay,
   DragOverEvent,
   DragStartEvent,
@@ -15,6 +16,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { AlertTriangle, Download, RotateCcw, Upload } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { SeatingProvider, useSeating } from "./store/SeatingContext";
 import { SearchProvider } from "./store/SearchContext";
 import {
@@ -49,26 +51,53 @@ import {
   type SeatingExportData,
   type TableState,
 } from "./types";
+import { type GuestProfile } from "./store/reducer";
 
 type ActiveDragData =
-  | { kind: "party"; partyId: string }
-  | { kind: "guest"; guestId: string }
-  | { kind: "group"; groupName: string }
-  | { kind: "table"; tableNumber: number; name: string };
+  | { kind: "party"; partyId: string; origin: "sidebar" }
+  | { kind: "guest"; guestId: string; origin: "sidebar" | "table" }
+  | { kind: "group"; groupName: string; origin: "sidebar" }
+  | { kind: "table"; tableNumber: number; name: string; origin: "table" };
 
 function isActiveDragData(value: unknown): value is ActiveDragData {
   if (!value || typeof value !== "object") return false;
 
   const maybeData = value as Record<string, unknown>;
+  if (maybeData.origin !== "sidebar" && maybeData.origin !== "table") return false;
+
   if (maybeData.kind === "guest") return typeof maybeData.guestId === "string";
-  if (maybeData.kind === "party") return typeof maybeData.partyId === "string";
-  if (maybeData.kind === "group") return typeof maybeData.groupName === "string";
+  if (maybeData.kind === "party") {
+    return maybeData.origin === "sidebar" && typeof maybeData.partyId === "string";
+  }
+  if (maybeData.kind === "group") {
+    return maybeData.origin === "sidebar" && typeof maybeData.groupName === "string";
+  }
 
   return (
     maybeData.kind === "table" &&
+    maybeData.origin === "table" &&
     typeof maybeData.tableNumber === "number" &&
     typeof maybeData.name === "string"
   );
+}
+
+function getPointerCoordinatesFromEvent(
+  event: Event | null | undefined
+): { x: number; y: number } | null {
+  if (!event) return null;
+
+  const maybeMouseEvent = event as MouseEvent;
+  if (typeof maybeMouseEvent.clientX === "number" && typeof maybeMouseEvent.clientY === "number") {
+    return { x: maybeMouseEvent.clientX, y: maybeMouseEvent.clientY };
+  }
+
+  const maybeTouchEvent = event as TouchEvent;
+  const touch = maybeTouchEvent.touches?.[0] ?? maybeTouchEvent.changedTouches?.[0];
+  if (touch) {
+    return { x: touch.clientX, y: touch.clientY };
+  }
+
+  return null;
 }
 
 function getUnassignedGuestIdsForParty(
@@ -138,6 +167,26 @@ function parseTableNumber(targetId: string): number | null {
   }
 
   return null;
+}
+
+function buildGuestProfiles(
+  guests: ParsedData["guests"],
+  parties: ParsedData["parties"]
+): Record<string, GuestProfile> {
+  const profiles: Record<string, GuestProfile> = {};
+
+  for (const [guestId, guest] of guests) {
+    const party = parties.get(guest.partyId);
+
+    profiles[guestId] = {
+      partyId: guest.partyId,
+      group: guest.group || "",
+      host: guest.host,
+      household: party?.household ?? "",
+    };
+  }
+
+  return profiles;
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -278,6 +327,11 @@ function SeatingApp({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const fileDragDepthRef = useRef(0);
   const [isFileDragOver, setIsFileDragOver] = useState(false);
+  const latestPointerPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const activeDragOriginRef = useRef<"sidebar" | "table" | null>(null);
+  const activeSidebarScrollContainerRef = useRef<HTMLElement | null>(null);
+  const isDragOverSidebarDropzoneRef = useRef(false);
+  const guestProfiles = useMemo(() => buildGuestProfiles(guests, parties), [guests, parties]);
 
   const updateRemoveHint = useCallback((isVisible: boolean) => {
     removeHintActiveRef.current = isVisible;
@@ -299,11 +353,53 @@ function SeatingApp({
   }, [clearSelectedGuest]);
 
   useEffect(() => {
+    if (!activeDrag) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      latestPointerPositionRef.current = {
+        x: event.clientX,
+        y: event.clientY,
+      };
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const touch = event.touches[0] ?? event.changedTouches[0];
+      if (!touch) return;
+
+      latestPointerPositionRef.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+      };
+    };
+
+    window.addEventListener("pointermove", handlePointerMove, { passive: true });
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("touchmove", handleTouchMove);
+    };
+  }, [activeDrag]);
+
+  useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       const isModifierPressed = event.metaKey || event.ctrlKey;
+      const isDeleteKey = event.key === "Backspace" || event.key === "Delete";
+      const isFindShortcut =
+        isModifierPressed && !event.shiftKey && event.key.toLowerCase() === "f";
       const isZKey = event.key.toLowerCase() === "z";
       const isUndoShortcut = isModifierPressed && !event.shiftKey && isZKey;
       const isRedoShortcut = isModifierPressed && event.shiftKey && isZKey;
+
+      if (isFindShortcut) {
+        const searchInput = document.querySelector<HTMLInputElement>("[data-app-search='true']");
+        if (searchInput) {
+          event.preventDefault();
+          searchInput.focus();
+          searchInput.select();
+        }
+        return;
+      }
 
       if (event.altKey || isEditableTarget(event.target)) {
         return;
@@ -324,9 +420,7 @@ function SeatingApp({
         (document.activeElement as HTMLElement | null)?.blur();
       }
 
-      const isDeleteShortcut =
-        isModifierPressed && (event.key === "Backspace" || event.key === "Delete");
-      if (isDeleteShortcut && selectedGuestId) {
+      if (isDeleteKey && selectedGuestId) {
         const isAssigned = !state.unassigned.includes(selectedGuestId);
         if (isAssigned) {
           event.preventDefault();
@@ -358,6 +452,32 @@ function SeatingApp({
     })
   );
 
+  const autoScrollOptions = useMemo(
+    () => ({
+      canScroll: (element: Element) => {
+        if (!(element instanceof HTMLElement)) {
+          return false;
+        }
+
+        const sidebarScrollContainer = activeSidebarScrollContainerRef.current;
+        const isSidebarScrollableElement =
+          sidebarScrollContainer !== null &&
+          (element === sidebarScrollContainer || sidebarScrollContainer.contains(element));
+
+        if (isSidebarScrollableElement) {
+          if (activeDragOriginRef.current !== "sidebar") {
+            return false;
+          }
+
+          return isDragOverSidebarDropzoneRef.current;
+        }
+
+        return true;
+      },
+    }),
+    []
+  );
+
   // For table drags: consider only sortable-table targets so reordering cannot collide with seats.
   // For guest drags: prefer the exact seat under the pointer before falling back to table-level
   // targets, while still excluding sortable-table-N containers so the board does not reorder.
@@ -368,9 +488,10 @@ function SeatingApp({
     if (kind === "table") {
       return closestCenter({
         ...args,
-        droppableContainers: args.droppableContainers.filter((container) =>
-          String(container.id).startsWith("sortable-table-")
-        ),
+        droppableContainers: args.droppableContainers.filter((container) => {
+          const id = String(container.id);
+          return id.startsWith("sortable-table-") || id === "unassigned";
+        }),
       });
     }
 
@@ -413,6 +534,24 @@ function SeatingApp({
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
       const data = isActiveDragData(event.active.data.current) ? event.active.data.current : null;
+      const pointer = getPointerCoordinatesFromEvent(event.activatorEvent);
+      latestPointerPositionRef.current = pointer;
+      activeDragOriginRef.current = data?.origin ?? null;
+      if (data?.origin === "sidebar") {
+        const targetAtPointer = pointer
+          ? document
+              .elementFromPoint(pointer.x, pointer.y)
+              ?.closest<HTMLElement>(".sidebar-dropzone")
+          : null;
+
+        activeSidebarScrollContainerRef.current =
+          targetAtPointer ?? document.querySelector<HTMLElement>(".sidebar-dropzone");
+        isDragOverSidebarDropzoneRef.current = true;
+      } else {
+        activeSidebarScrollContainerRef.current = null;
+        isDragOverSidebarDropzoneRef.current = false;
+      }
+
       setActiveDrag(data);
       setDragOverlayWidth(event.active.rect.current.initial?.width ?? null);
       updateRemoveHint(false);
@@ -425,21 +564,33 @@ function SeatingApp({
     [state.unassigned, updateRemoveHint]
   );
 
-  const handleDragOver = useCallback((event: DragOverEvent) => {
-    if (!isDraggedGuestSeatedRef.current) return;
-    if (removeHintTimerRef.current !== null) {
-      clearTimeout(removeHintTimerRef.current);
-      removeHintTimerRef.current = null;
-    }
-    if (event.over) {
-      updateRemoveHint(false);
-    } else {
-      removeHintTimerRef.current = setTimeout(() => {
-        updateRemoveHint(true);
+  const handleDragMove = useCallback((event: DragMoveEvent) => {
+    const pointer = getPointerCoordinatesFromEvent(event.activatorEvent);
+    if (!pointer) return;
+
+    latestPointerPositionRef.current = pointer;
+  }, []);
+
+  const handleDragOver = useCallback(
+    (event: DragOverEvent) => {
+      isDragOverSidebarDropzoneRef.current =
+        event.over !== null && String(event.over.id) === "unassigned";
+      if (!isDraggedGuestSeatedRef.current) return;
+      if (removeHintTimerRef.current !== null) {
+        clearTimeout(removeHintTimerRef.current);
         removeHintTimerRef.current = null;
-      }, 500);
-    }
-  }, [updateRemoveHint]);
+      }
+      if (event.over) {
+        updateRemoveHint(false);
+      } else {
+        removeHintTimerRef.current = setTimeout(() => {
+          updateRemoveHint(true);
+          removeHintTimerRef.current = null;
+        }, 500);
+      }
+    },
+    [updateRemoveHint]
+  );
 
   const handleDragCancel = useCallback(() => {
     if (removeHintTimerRef.current !== null) {
@@ -449,6 +600,10 @@ function SeatingApp({
     isDraggedGuestSeatedRef.current = false;
     setActiveDrag(null);
     setDragOverlayWidth(null);
+    latestPointerPositionRef.current = null;
+    activeDragOriginRef.current = null;
+    activeSidebarScrollContainerRef.current = null;
+    isDragOverSidebarDropzoneRef.current = false;
     updateRemoveHint(false);
   }, [updateRemoveHint]);
 
@@ -463,6 +618,10 @@ function SeatingApp({
       const data = isActiveDragData(active.data.current) ? active.data.current : null;
       setActiveDrag(null);
       setDragOverlayWidth(null);
+      latestPointerPositionRef.current = null;
+      activeDragOriginRef.current = null;
+      activeSidebarScrollContainerRef.current = null;
+      isDragOverSidebarDropzoneRef.current = false;
       updateRemoveHint(false);
 
       if (willRemove && data?.kind === "guest") {
@@ -474,6 +633,11 @@ function SeatingApp({
       const targetId = String(over.id);
 
       if (data.kind === "table") {
+        if (targetId === "unassigned") {
+          dispatch({ type: "CLEAR_TABLE", tableNumber: data.tableNumber });
+          return;
+        }
+
         const overTableNumber = parseTableNumber(targetId);
         if (overTableNumber == null) return;
 
@@ -499,6 +663,11 @@ function SeatingApp({
         return;
       }
 
+      if (targetId === "auto-seat") {
+        dispatch({ type: "AUTO_ASSIGN_GUESTS", guestIds, guestProfiles });
+        return;
+      }
+
       const seatTarget = parseSeatTarget(targetId);
       if (seatTarget && data.kind === "guest") {
         dispatch({
@@ -521,19 +690,9 @@ function SeatingApp({
         });
       }
     },
-    [dispatch, guests, parties, state.unassigned, updateRemoveHint]
+    [dispatch, guestProfiles, guests, parties, state.tables, state.unassigned, updateRemoveHint]
   );
 
-  let stellaUnassignedCount = 0;
-  let ryanUnassignedCount = 0;
-  for (const guestId of state.unassigned) {
-    const host = guests.get(guestId)?.host;
-    if (host === "Stella") {
-      stellaUnassignedCount += 1;
-    } else if (host === "Ryan") {
-      ryanUnassignedCount += 1;
-    }
-  }
   const unassignedCount = state.unassigned.length;
 
   function handleReset() {
@@ -571,6 +730,7 @@ function SeatingApp({
           {
             tables: parsed.tables,
             unassigned: [],
+            lockedGuestIds: [],
           },
           importedGuestIds
         );
@@ -664,8 +824,10 @@ function SeatingApp({
   return (
     <DndContext
       sensors={sensors}
+      autoScroll={autoScrollOptions}
       collisionDetection={collisionDetection}
       onDragStart={handleDragStart}
+      onDragMove={handleDragMove}
       onDragOver={handleDragOver}
       onDragCancel={handleDragCancel}
       onDragEnd={handleDragEnd}>
@@ -683,31 +845,34 @@ function SeatingApp({
         onDrop={handleFileDrop}>
         <header className="app-header">
           <h1>Seating Assignments</h1>
-          <div className="app-stats">
-            <span className="stat stat-host stat-host-stella">
-              {stellaUnassignedCount} unassigned
-            </span>
-            <span className="stat stat-host stat-host-ryan">{ryanUnassignedCount} unassigned</span>
-          </div>
           <div className="app-actions">
             {warnings.length > 0 && (
-              <button type="button" className="btn-warnings" onClick={() => setShowWarnings((v) => !v)}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-yellow-300 bg-yellow-50 text-yellow-900 hover:bg-yellow-100 hover:border-yellow-400"
+                onClick={() => setShowWarnings((v) => !v)}>
                 <AlertTriangle size={14} aria-hidden="true" />
                 {warnings.length} data {warnings.length === 1 ? "issue" : "issues"}
-              </button>
+              </Button>
             )}
-            <button type="button" className="btn-reset" onClick={handleReset}>
+            <Button type="button" variant="outline" size="sm" onClick={handleReset}>
               <RotateCcw size={14} aria-hidden="true" />
               <span className="btn-label">Reset</span>
-            </button>
-            <button type="button" className="btn-action" onClick={() => fileInputRef.current?.click()}>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}>
               <Upload size={14} aria-hidden="true" />
               <span className="btn-label">Import</span>
-            </button>
-            <button type="button" className="btn-action" onClick={handleExport}>
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={handleExport}>
               <Download size={14} aria-hidden="true" />
               <span className="btn-label">Export</span>
-            </button>
+            </Button>
             <input
               ref={fileInputRef}
               className="hidden-file-input"
@@ -758,25 +923,27 @@ function SeatingApp({
               <span
                 className={[
                   "guest-chip",
-                  "guest-chip--sidebar",
+                  activeDrag?.kind === "guest" && activeDrag.origin === "table"
+                    ? "guest-chip--table"
+                    : "guest-chip--sidebar",
                   "drag-overlay-guest-chip",
                   showRemoveHint ? "drag-overlay-guest-chip--remove" : null,
                 ]
                   .filter(Boolean)
-                  .join(" ")}>
-                <span className={`guest-name guest-name--host-${overlayGuest.host.toLowerCase()}`}>
-                  {overlayGuest.fullName}
-                </span>
+                  .join(" ")}
+                style={
+                  activeDrag?.kind === "guest" && activeDrag.origin === "table" && dragOverlayWidth
+                    ? { width: `${dragOverlayWidth}px` }
+                    : undefined
+                }>
+                <span className="guest-name">{overlayGuest.fullName}</span>
               </span>
             </div>
           )}
           {overlayTable && activeDrag?.kind === "table" && (
             <div className="table-card-shell drag-overlay-table-shell">
               <div
-                className={[
-                  "table-card",
-                  overlayOccupancy >= TABLE_CAPACITY ? "is-full" : null,
-                ]
+                className={["table-card", overlayOccupancy >= TABLE_CAPACITY ? "is-full" : null]
                   .filter(Boolean)
                   .join(" ")}
                 style={dragOverlayWidth ? { width: `${dragOverlayWidth}px` } : undefined}>
@@ -787,10 +954,7 @@ function SeatingApp({
                       className={["seat-slot", guestId ? "seat-occupied" : "seat-empty"].join(" ")}>
                       {guestId ? (
                         <div className="guest-chip guest-chip--table">
-                          <span
-                            className={`guest-name guest-name--host-${(guests.get(guestId)?.host ?? "").toLowerCase()}`}>
-                            {guests.get(guestId)?.fullName}
-                          </span>
+                          <span className="guest-name">{guests.get(guestId)?.fullName}</span>
                         </div>
                       ) : null}
                     </div>
@@ -814,10 +978,7 @@ function SeatingApp({
                       className={["seat-slot", guestId ? "seat-occupied" : "seat-empty"].join(" ")}>
                       {guestId ? (
                         <div className="guest-chip guest-chip--table">
-                          <span
-                            className={`guest-name guest-name--host-${(guests.get(guestId)?.host ?? "").toLowerCase()}`}>
-                            {guests.get(guestId)?.fullName}
-                          </span>
+                          <span className="guest-name">{guests.get(guestId)?.fullName}</span>
                         </div>
                       ) : null}
                     </div>
@@ -840,9 +1001,7 @@ function SeatingApp({
 
                   return (
                     <span key={id} className="guest-chip guest-chip--sidebar">
-                      <span className={`guest-name guest-name--host-${guest.host.toLowerCase()}`}>
-                        {guest.fullName}
-                      </span>
+                      <span className="guest-name">{guest.fullName}</span>
                     </span>
                   );
                 })}

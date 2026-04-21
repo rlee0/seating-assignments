@@ -1,7 +1,20 @@
+import { Filter, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
+import { Button } from "@/components/ui/button";
 import GroupCard from "./GroupCard";
 import HouseholdCard from "./HouseholdCard";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { chipToggleVariants } from "@/components/ui/chip";
 import { useDroppable } from "@dnd-kit/core";
 import { useSearch } from "../store/SearchContext";
 import { useSeating } from "../store/SeatingContext";
@@ -30,7 +43,19 @@ function comparePartiesForSidebar(
 
 export default function Sidebar() {
   const { state, parties, guests, selectedGuestId } = useSeating();
-  const { searchQuery, setSearchQuery } = useSearch();
+  const {
+    searchQuery,
+    setSearchQuery,
+    hostFilters,
+    toggleHostFilter,
+    clearHostFilters,
+    isGroupHighlightOn,
+    setGroupHighlightOn,
+    isHouseholdHighlightOn,
+    setHouseholdHighlightOn,
+    isHostHighlightOn,
+    setHostHighlightOn,
+  } = useSearch();
   const unassignedSet = useMemo(() => new Set(state.unassigned), [state.unassigned]);
   const normalizedQuery = useMemo(() => normalizeForSearch(searchQuery.trim()), [searchQuery]);
 
@@ -63,13 +88,45 @@ export default function Sidebar() {
     };
   }, []);
 
+  const availableHosts = useMemo(() => {
+    const hosts = new Set<string>();
+
+    for (const guest of guests.values()) {
+      if (guest.host.trim()) {
+        hosts.add(guest.host);
+      }
+    }
+
+    return [...hosts].sort((left, right) => sidebarSortCollator.compare(left, right));
+  }, [guests]);
+
+  const selectedHosts = useMemo(() => new Set(hostFilters), [hostFilters]);
+  const activeHostFilterCount = hostFilters.length;
+  const emptyStateMessage =
+    normalizedQuery.length > 0
+      ? `No unassigned matches for "${searchQuery.trim()}"`
+      : activeHostFilterCount > 0
+        ? "No unassigned guests match the current host filters"
+        : "No unassigned guests available";
+
   // Show parties that still have at least one unassigned member
   const partiesWithUnassigned = useMemo(
     () =>
       [...parties.values()].filter((party) => {
         const unassignedGuestIds = party.guestIds.filter((id) => unassignedSet.has(id));
+        const unassignedHosts = new Set(
+          unassignedGuestIds
+            .map((id) => guests.get(id)?.host ?? "")
+            .filter((host): host is string => host.length > 0)
+        );
 
         if (unassignedGuestIds.length === 0) return false;
+        if (
+          selectedHosts.size > 0 &&
+          ![...unassignedHosts].some((host) => selectedHosts.has(host))
+        ) {
+          return false;
+        }
         if (!normalizedQuery) return true;
 
         if (normalizeForSearch(party.household).includes(normalizedQuery)) return true;
@@ -80,7 +137,7 @@ export default function Sidebar() {
           return guest && normalizeForSearch(guest.fullName).includes(normalizedQuery);
         });
       }),
-    [parties, unassignedSet, normalizedQuery, guests]
+    [parties, unassignedSet, normalizedQuery, guests, selectedHosts]
   );
 
   const sortedPartiesWithUnassigned = useMemo(
@@ -113,24 +170,105 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-search-row">
-        <div className="sidebar-search-wrap">
-          <svg
-            className="sidebar-search-icon"
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 20 20"
-            fill="none"
-            aria-hidden="true">
-            <circle cx="8.5" cy="8.5" r="5" stroke="currentColor" strokeWidth="1.5" />
-            <path d="M13 13l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-          <input
-            type="search"
-            className="sidebar-search-input"
-            placeholder="Search guests, tables, groups"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            aria-label="Search unassigned guests, tables, and groups"
-          />
+        <div className="sidebar-search-controls">
+          <div className="sidebar-search-wrap">
+            <Search className="sidebar-search-icon" aria-hidden="true" />
+            <Input
+              type="search"
+              className="h-8 pl-8 text-[13px]"
+              data-app-search="true"
+              placeholder="Search guests, households, groups"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              aria-label="Search unassigned guests, households, and groups"
+            />
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="outline" size="sm" className="sidebar-filter-trigger">
+                <Filter aria-hidden="true" />
+                <span>Filter</span>
+                {activeHostFilterCount > 0 ? (
+                  <span className="sidebar-filter-count">{activeHostFilterCount}</span>
+                ) : null}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="sidebar-filter-menu"
+              aria-label="Filter unassigned guests by host">
+              <DropdownMenuLabel className="sidebar-filter-menu-title">Hosts</DropdownMenuLabel>
+              {availableHosts.length === 0 ? (
+                <DropdownMenuItem disabled className="sidebar-filter-empty">
+                  No hosts found
+                </DropdownMenuItem>
+              ) : (
+                availableHosts.map((host) => (
+                  <DropdownMenuCheckboxItem
+                    key={host}
+                    checked={selectedHosts.has(host)}
+                    className="sidebar-filter-item"
+                    onCheckedChange={() => toggleHostFilter(host)}>
+                    <span className="sidebar-filter-host-name">{host}</span>
+                  </DropdownMenuCheckboxItem>
+                ))
+              )}
+              {activeHostFilterCount > 0 ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="sidebar-filter-clear"
+                    onSelect={() => clearHostFilters()}>
+                    Clear
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        <div className="sidebar-highlight-controls" aria-label="Highlight views">
+          <button
+            type="button"
+            className={[
+              "sidebar-highlight-toggle sidebar-highlight-toggle--group",
+              chipToggleVariants({ state: isGroupHighlightOn ? "pressed" : "default", size: "sm" }),
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            aria-pressed={isGroupHighlightOn}
+            title="Highlight guests in the same group"
+            onClick={() => setGroupHighlightOn(!isGroupHighlightOn)}>
+            Group
+          </button>
+          <button
+            type="button"
+            className={[
+              "sidebar-highlight-toggle sidebar-highlight-toggle--household",
+              chipToggleVariants({
+                state: isHouseholdHighlightOn ? "pressed" : "default",
+                size: "sm",
+              }),
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            aria-pressed={isHouseholdHighlightOn}
+            title="Highlight guests in the same household"
+            onClick={() => setHouseholdHighlightOn(!isHouseholdHighlightOn)}>
+            Household
+          </button>
+          <button
+            type="button"
+            className={[
+              "sidebar-highlight-toggle sidebar-highlight-toggle--host",
+              chipToggleVariants({ state: isHostHighlightOn ? "pressed" : "default", size: "sm" }),
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            aria-pressed={isHostHighlightOn}
+            title="Highlight seated guests by host"
+            onClick={() => setHostHighlightOn(!isHostHighlightOn)}>
+            Host
+          </button>
         </div>
       </div>
       <div
@@ -139,7 +277,7 @@ export default function Sidebar() {
         {state.unassigned.length === 0 ? (
           <div className="sidebar-empty">All guests are seated ✓</div>
         ) : partiesWithUnassigned.length === 0 ? (
-          <div className="sidebar-empty">No unassigned matches for "{searchQuery.trim()}"</div>
+          <div className="sidebar-empty">{emptyStateMessage}</div>
         ) : (
           sortedGroups.map((groupName) => (
             <div key={groupName} className="group-section">

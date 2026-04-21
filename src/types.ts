@@ -1,6 +1,6 @@
 // ─── Domain types ────────────────────────────────────────────────────────────
 
-export type Host = "Ryan" | "Stella";
+export type Host = string;
 
 export interface GuestInputRow {
   host: Host;
@@ -29,6 +29,8 @@ export interface Party {
 
 export const TABLE_COUNT = 25;
 export const TABLE_CAPACITY = 8;
+// Configurable later via UI; treated as a constant for now.
+export const TABLES_PER_ROW = 5;
 export const STORAGE_KEY = "wedding-seating-v1";
 export const GUEST_DATA_STORAGE_KEY = "wedding-guests-v1";
 export const GUEST_DATA_SOURCE_KEY = "wedding-guests-source-v1";
@@ -43,6 +45,7 @@ export interface TableState {
 export interface SeatingState {
   tables: TableState[]; // length === TABLE_COUNT
   unassigned: string[]; // guest ids not yet seated
+  lockedGuestIds: string[]; // guest ids placed manually; auto-seat never moves them
 }
 
 export interface PersistedSeatingData {

@@ -1,7 +1,9 @@
+import { Button } from "@/components/ui/button";
 import { CSS } from "@dnd-kit/utilities";
 import GuestChip from "./GuestChip";
 import { TABLE_CAPACITY } from "../types";
 import type { TableState } from "../types";
+import { X } from "lucide-react";
 import { useDroppable } from "@dnd-kit/core";
 import { useSeating } from "../store/SeatingContext";
 import { useSortable } from "@dnd-kit/sortable";
@@ -10,6 +12,10 @@ interface Props {
   table: TableState;
   activeDragKind: "party" | "guest" | "group" | "table" | null;
   activeDragGuestId: string | null;
+  displayGuestIds?: Array<string | null>;
+  previewSeatKinds?: Array<"added" | "changed" | "deleted" | null>;
+  isPreviewMode?: boolean;
+  hasTablePreviewChanges?: boolean;
 }
 
 function stopTableDrag(event: React.PointerEvent | React.MouseEvent) {
@@ -20,21 +26,31 @@ function SeatSlot({
   tableNumber,
   seatIndex,
   guestId,
+  realGuestId,
   activeDragKind,
   activeDragGuestId,
+  isPreviewMode,
+  previewSeatKind,
 }: {
   tableNumber: number;
   seatIndex: number;
   guestId: string | null;
+  realGuestId: string | null;
   activeDragKind: "party" | "guest" | "group" | "table" | null;
   activeDragGuestId: string | null;
+  isPreviewMode: boolean;
+  previewSeatKind: "added" | "changed" | "deleted" | null;
 }) {
-  const isOriginSeat = activeDragKind === "guest" && guestId === activeDragGuestId;
+  const isOriginSeat =
+    !isPreviewMode &&
+    activeDragKind === "guest" &&
+    guestId !== null &&
+    guestId === activeDragGuestId;
   const isVisuallyEmpty = guestId === null || isOriginSeat;
 
   const droppable = useDroppable({
     id: `seat-${tableNumber}-${seatIndex}`,
-    disabled: guestId !== null && guestId !== activeDragGuestId,
+    disabled: realGuestId !== null && realGuestId !== activeDragGuestId,
   });
 
   return (
@@ -44,6 +60,7 @@ function SeatSlot({
         "seat-slot",
         isVisuallyEmpty ? "seat-empty" : "seat-occupied",
         activeDragKind === "guest" && droppable.isOver ? "is-over" : null,
+        previewSeatKind ? `seat-slot--preview-${previewSeatKind}` : null,
       ]
         .filter(Boolean)
         .join(" ")}>
@@ -51,14 +68,28 @@ function SeatSlot({
         <GuestChip
           guestId={guestId}
           context="table"
-          className={isOriginSeat ? "guest-chip--origin-hidden" : undefined}
+          className={[
+            isOriginSeat ? "guest-chip--origin-hidden" : null,
+            previewSeatKind ? `guest-chip--preview-${previewSeatKind}` : null,
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          suppressStateStyles={isPreviewMode}
         />
       ) : null}
     </div>
   );
 }
 
-export default function TableCard({ table, activeDragKind, activeDragGuestId }: Props) {
+export default function TableCard({
+  table,
+  activeDragKind,
+  activeDragGuestId,
+  displayGuestIds,
+  previewSeatKinds,
+  isPreviewMode = false,
+  hasTablePreviewChanges = false,
+}: Props) {
   const { dispatch } = useSeating();
   const {
     attributes,
@@ -69,14 +100,14 @@ export default function TableCard({ table, activeDragKind, activeDragGuestId }: 
     isDragging,
   } = useSortable({
     id: `sortable-table-${table.tableNumber}`,
-    data: { kind: "table", tableNumber: table.tableNumber, name: table.name },
+    data: { kind: "table", tableNumber: table.tableNumber, name: table.name, origin: "table" },
   });
 
   const { setNodeRef: setDroppableNodeRef, isOver } = useDroppable({
     id: `table-${table.tableNumber}`,
   });
 
-  const seated = table.guestIds;
+  const seated = displayGuestIds ?? table.guestIds;
   const seatedGuestIds = seated.filter((guestId): guestId is string => guestId !== null);
   const occupancy = seatedGuestIds.length;
   const isFull = occupancy >= TABLE_CAPACITY;
@@ -94,6 +125,7 @@ export default function TableCard({ table, activeDragKind, activeDragGuestId }: 
     isOver && activeDragKind !== "table" ? "is-over" : null,
     isFull ? "is-full" : null,
     isDragging ? "is-dragging" : null,
+    hasTablePreviewChanges ? "table-card--preview" : null,
   ]
     .filter(Boolean)
     .join(" ");
@@ -114,8 +146,11 @@ export default function TableCard({ table, activeDragKind, activeDragGuestId }: 
               tableNumber={table.tableNumber}
               seatIndex={i}
               guestId={guestId}
+              realGuestId={table.guestIds[i]}
               activeDragKind={activeDragKind}
               activeDragGuestId={activeDragGuestId}
+              isPreviewMode={isPreviewMode}
+              previewSeatKind={previewSeatKinds?.[i] ?? null}
             />
           ))}
         </div>
@@ -128,19 +163,18 @@ export default function TableCard({ table, activeDragKind, activeDragGuestId }: 
               {occupancy}/{TABLE_CAPACITY}
             </span>
           </div>
-          <button
+          <Button
             type="button"
-            className={`table-action table-clear-btn${occupancy === 0 ? " is-hidden" : ""}`}
+            variant="ghost"
+            size="icon"
+            className={`table-action table-clear-btn${occupancy === 0 ? " is-hidden" : ""} w-6 h-6`}
             aria-label={`Clear ${table.name}`}
             onPointerDownCapture={stopTableDrag}
             onClick={handleClearTable}
             title="Clear table"
             disabled={occupancy === 0}>
-            <svg viewBox="0 0 12 12" className="table-action-icon" aria-hidden="true">
-              <path d="M3 3l6 6" />
-              <path d="M9 3l-6 6" />
-            </svg>
-          </button>
+            <X className="w-3 h-3" aria-hidden="true" />
+          </Button>
         </div>
 
         {/* Bottom 4 seats */}
@@ -153,8 +187,11 @@ export default function TableCard({ table, activeDragKind, activeDragGuestId }: 
                 tableNumber={table.tableNumber}
                 seatIndex={seatIndex}
                 guestId={guestId}
+                realGuestId={table.guestIds[seatIndex]}
                 activeDragKind={activeDragKind}
                 activeDragGuestId={activeDragGuestId}
+                isPreviewMode={isPreviewMode}
+                previewSeatKind={previewSeatKinds?.[seatIndex] ?? null}
               />
             );
           })}

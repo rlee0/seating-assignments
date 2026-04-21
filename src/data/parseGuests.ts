@@ -52,11 +52,12 @@ export function parseGuestsFromRows(rawRows: GuestInputRow[]): ParsedData {
     const party = parties.get(partyId)!;
     party.guestIds.push(guestId);
 
-    // Party host follows Stella if any member is Stella's
-    if (row.host === "Stella") party.host = "Stella";
-
     if (!row.group) {
       warnings.push(`"${row.fullName}" has no group assigned`);
+    }
+
+    if (party.host !== row.host) {
+      warnings.push(`Household "${row.household}": mixed hosts ("${party.host}", "${row.host}")`);
     }
 
     // Warn on mixed-group households (same household, different group value)

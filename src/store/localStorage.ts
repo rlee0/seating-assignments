@@ -14,7 +14,7 @@ export function isGuestInputRow(value: unknown): value is GuestInputRow {
   };
 
   return (
-    (candidate.host === "Ryan" || candidate.host === "Stella") &&
+    typeof candidate.host === "string" &&
     typeof candidate.household === "string" &&
     typeof candidate.group === "string" &&
     typeof candidate.fullName === "string"

@@ -5,14 +5,79 @@ import type { ReactNode } from "react";
 interface SearchContextValue {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
+  hostFilters: string[];
+  toggleHostFilter: (host: string) => void;
+  clearHostFilters: () => void;
+  isGroupHighlightOn: boolean;
+  setGroupHighlightOn: (isOn: boolean) => void;
+  isHouseholdHighlightOn: boolean;
+  setHouseholdHighlightOn: (isOn: boolean) => void;
+  isHostHighlightOn: boolean;
+  setHostHighlightOn: (isOn: boolean) => void;
 }
 
 const SearchContext = createContext<SearchContextValue | null>(null);
 
 export function SearchProvider({ children }: { children: ReactNode }) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [hostFilters, setHostFilters] = useState<string[]>([]);
+  const [isGroupHighlightOn, setGroupHighlightOn] = useState(false);
+  const [isHouseholdHighlightOn, setHouseholdHighlightOn] = useState(false);
+  const [isHostHighlightOn, setHostHighlightOn] = useState(false);
+
+  function handleSetGroupHighlightOn(isOn: boolean) {
+    setGroupHighlightOn(isOn);
+    if (isOn) {
+      setHouseholdHighlightOn(false);
+      setHostHighlightOn(false);
+    }
+  }
+
+  function handleSetHouseholdHighlightOn(isOn: boolean) {
+    setHouseholdHighlightOn(isOn);
+    if (isOn) {
+      setGroupHighlightOn(false);
+      setHostHighlightOn(false);
+    }
+  }
+
+  function handleSetHostHighlightOn(isOn: boolean) {
+    setHostHighlightOn(isOn);
+    if (isOn) {
+      setGroupHighlightOn(false);
+      setHouseholdHighlightOn(false);
+    }
+  }
+
+  function toggleHostFilter(host: string) {
+    setHostFilters((current) => {
+      if (current.includes(host)) {
+        return current.filter((entry) => entry !== host);
+      }
+
+      return [...current, host];
+    });
+  }
+
+  function clearHostFilters() {
+    setHostFilters([]);
+  }
+
   return (
-    <SearchContext.Provider value={{ searchQuery, setSearchQuery }}>
+    <SearchContext.Provider
+      value={{
+        searchQuery,
+        setSearchQuery,
+        hostFilters,
+        toggleHostFilter,
+        clearHostFilters,
+        isGroupHighlightOn,
+        setGroupHighlightOn: handleSetGroupHighlightOn,
+        isHouseholdHighlightOn,
+        setHouseholdHighlightOn: handleSetHouseholdHighlightOn,
+        isHostHighlightOn,
+        setHostHighlightOn: handleSetHostHighlightOn,
+      }}>
       {children}
     </SearchContext.Provider>
   );

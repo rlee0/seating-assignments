@@ -15,14 +15,22 @@ export default function TableBoard({ activeDragKind, activeDragGuestId }: Props)
   return (
     <SortableContext items={tableIds} strategy={rectSortingStrategy}>
       <main className="table-board">
-        {state.tables.map((table) => (
-          <TableCard
-            key={table.tableNumber}
-            table={table}
-            activeDragKind={activeDragKind}
-            activeDragGuestId={activeDragGuestId}
-          />
-        ))}
+        <div className="table-grid">
+          {state.tables.map((table) => {
+            return (
+              <TableCard
+                key={table.tableNumber}
+                table={table}
+                activeDragKind={activeDragKind}
+                activeDragGuestId={activeDragGuestId}
+                displayGuestIds={table.guestIds}
+                previewSeatKinds={table.guestIds.map(() => null)}
+                isPreviewMode={false}
+                hasTablePreviewChanges={false}
+              />
+            );
+          })}
+        </div>
       </main>
     </SortableContext>
   );
