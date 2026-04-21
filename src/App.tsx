@@ -51,13 +51,17 @@ import {
   type SeatingExportData,
   type TableState,
 } from "./types";
-import { type GuestProfile } from "./store/reducer";
+import { type GuestProfile, seatingReducer } from "./store/reducer";
 
 type ActiveDragData =
   | { kind: "party"; partyId: string; origin: "sidebar" }
   | { kind: "guest"; guestId: string; origin: "sidebar" | "table" }
   | { kind: "group"; groupName: string; origin: "sidebar" }
   | { kind: "table"; tableNumber: number; name: string; origin: "table" };
+
+interface AutoSeatPreview {
+  tables: TableState[];
+}
 
 function isActiveDragData(value: unknown): value is ActiveDragData {
   if (!value || typeof value !== "object") return false;
@@ -167,6 +171,33 @@ function parseTableNumber(targetId: string): number | null {
   }
 
   return null;
+}
+
+function getSeatedGuestIdsForTable(
+  tableNumber: number,
+  tables: Array<{ tableNumber: number; guestIds: Array<string | null> }>
+): string[] {
+  const table = tables.find((entry) => entry.tableNumber === tableNumber);
+  if (!table) return [];
+  return table.guestIds.filter((guestId): guestId is string => guestId !== null);
+}
+
+function hasSeatLayoutChanges(leftTables: TableState[], rightTables: TableState[]): boolean {
+  if (leftTables.length !== rightTables.length) return true;
+
+  for (let index = 0; index < leftTables.length; index += 1) {
+    const left = leftTables[index];
+    const right = rightTables[index];
+
+    if (left.tableNumber !== right.tableNumber) return true;
+    if (left.guestIds.length !== right.guestIds.length) return true;
+
+    for (let seatIndex = 0; seatIndex < left.guestIds.length; seatIndex += 1) {
+      if (left.guestIds[seatIndex] !== right.guestIds[seatIndex]) return true;
+    }
+  }
+
+  return false;
 }
 
 function buildGuestProfiles(
@@ -324,6 +355,7 @@ function SeatingApp({
   const isDraggedGuestSeatedRef = useRef(false);
   const [showWarnings, setShowWarnings] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<"sidebar" | "tables">("sidebar");
+  const [isAutoSeatHovering, setIsAutoSeatHovering] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const fileDragDepthRef = useRef(0);
   const [isFileDragOver, setIsFileDragOver] = useState(false);
@@ -490,7 +522,7 @@ function SeatingApp({
         ...args,
         droppableContainers: args.droppableContainers.filter((container) => {
           const id = String(container.id);
-          return id.startsWith("sortable-table-") || id === "unassigned";
+          return id.startsWith("sortable-table-") || id === "auto-seat" || id === "unassigned";
         }),
       });
     }
@@ -553,6 +585,7 @@ function SeatingApp({
       }
 
       setActiveDrag(data);
+      setIsAutoSeatHovering(false);
       setDragOverlayWidth(event.active.rect.current.initial?.width ?? null);
       updateRemoveHint(false);
       if (data?.kind === "guest") {
@@ -573,6 +606,7 @@ function SeatingApp({
 
   const handleDragOver = useCallback(
     (event: DragOverEvent) => {
+      setIsAutoSeatHovering(event.over ? String(event.over.id) === "auto-seat" : false);
       isDragOverSidebarDropzoneRef.current =
         event.over !== null && String(event.over.id) === "unassigned";
       if (!isDraggedGuestSeatedRef.current) return;
@@ -598,6 +632,7 @@ function SeatingApp({
       removeHintTimerRef.current = null;
     }
     isDraggedGuestSeatedRef.current = false;
+    setIsAutoSeatHovering(false);
     setActiveDrag(null);
     setDragOverlayWidth(null);
     latestPointerPositionRef.current = null;
@@ -617,6 +652,7 @@ function SeatingApp({
       isDraggedGuestSeatedRef.current = false;
       const data = isActiveDragData(active.data.current) ? active.data.current : null;
       setActiveDrag(null);
+      setIsAutoSeatHovering(false);
       setDragOverlayWidth(null);
       latestPointerPositionRef.current = null;
       activeDragOriginRef.current = null;
@@ -635,6 +671,14 @@ function SeatingApp({
       if (data.kind === "table") {
         if (targetId === "unassigned") {
           dispatch({ type: "CLEAR_TABLE", tableNumber: data.tableNumber });
+          return;
+        }
+
+        if (targetId === "auto-seat") {
+          const guestIds = getSeatedGuestIdsForTable(data.tableNumber, state.tables);
+          if (guestIds.length > 0) {
+            dispatch({ type: "AUTO_ASSIGN_GUESTS", guestIds, guestProfiles });
+          }
           return;
         }
 
@@ -692,6 +736,28 @@ function SeatingApp({
     },
     [dispatch, guestProfiles, guests, parties, state.tables, state.unassigned, updateRemoveHint]
   );
+
+  const autoSeatPreview = useMemo<AutoSeatPreview | null>(() => {
+    if (!activeDrag || !isAutoSeatHovering) return null;
+
+    const previewGuestIds =
+      activeDrag.kind === "table"
+        ? getSeatedGuestIdsForTable(activeDrag.tableNumber, state.tables)
+        : resolveDragGuestIds(activeDrag, parties, state.unassigned);
+
+    if (previewGuestIds.length === 0) return null;
+    if (activeDrag.kind === "guest" && !guests.has(activeDrag.guestId)) return null;
+
+    const previewState = seatingReducer(state, {
+      type: "AUTO_ASSIGN_GUESTS",
+      guestIds: previewGuestIds,
+      guestProfiles,
+    });
+
+    if (!hasSeatLayoutChanges(state.tables, previewState.tables)) return null;
+
+    return { tables: previewState.tables };
+  }, [activeDrag, guestProfiles, guests, isAutoSeatHovering, parties, state]);
 
   const unassignedCount = state.unassigned.length;
 
@@ -899,6 +965,7 @@ function SeatingApp({
           <TableBoard
             activeDragKind={activeDrag?.kind ?? null}
             activeDragGuestId={activeDrag?.kind === "guest" ? activeDrag.guestId : null}
+            autoSeatPreview={autoSeatPreview}
           />
         </div>
 

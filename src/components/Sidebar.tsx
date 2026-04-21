@@ -42,7 +42,7 @@ function comparePartiesForSidebar(
 }
 
 export default function Sidebar() {
-  const { state, parties, guests, selectedGuestId } = useSeating();
+  const { state, parties, guests, selectedGuestId, dispatch } = useSeating();
   const {
     searchQuery,
     setSearchQuery,
@@ -166,6 +166,8 @@ export default function Sidebar() {
   const sortedGroups = useMemo(() => [...groupedParties.keys()], [groupedParties]);
   const selectedGuest = selectedGuestId ? (guests.get(selectedGuestId) ?? null) : null;
   const selectedGuestParty = selectedGuest ? (parties.get(selectedGuest.partyId) ?? null) : null;
+  const isSelectedGuestAnchored =
+    selectedGuestId != null && (state.lockedGuestIds ?? []).includes(selectedGuestId);
 
   return (
     <aside className="sidebar">
@@ -311,6 +313,27 @@ export default function Sidebar() {
               <dd>{selectedGuest.host}</dd>
             </div>
           </dl>
+          <div className="sidebar-selected-guest-actions">
+            <button
+              type="button"
+              className={[
+                "sidebar-selected-guest-anchor-toggle",
+                chipToggleVariants({ state: isSelectedGuestAnchored ? "pressed" : "default", size: "sm" }),
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              aria-pressed={isSelectedGuestAnchored}
+              aria-label="Anchor selected guest"
+              onClick={() => {
+                dispatch({
+                  type: "SET_GUEST_ANCHORED",
+                  guestId: selectedGuest.id,
+                  anchored: !isSelectedGuestAnchored,
+                });
+              }}>
+              Anchored
+            </button>
+          </div>
         </section>
       )}
     </aside>

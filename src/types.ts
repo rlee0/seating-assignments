@@ -45,7 +45,7 @@ export interface TableState {
 export interface SeatingState {
   tables: TableState[]; // length === TABLE_COUNT
   unassigned: string[]; // guest ids not yet seated
-  lockedGuestIds: string[]; // guest ids placed manually; auto-seat never moves them
+  lockedGuestIds: string[]; // anchored guest ids; auto-seat never moves them
 }
 
 export interface PersistedSeatingData {

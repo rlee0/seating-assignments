@@ -20,6 +20,7 @@ export type SeatingAction =
       assignmentMode?: AssignmentMode;
       seatIndex?: number;
     }
+  | { type: "SET_GUEST_ANCHORED"; guestId: string; anchored: boolean }
   | {
       type: "AUTO_ASSIGN_GUESTS";
       guestIds: string[];
@@ -176,7 +177,7 @@ function assignGuestsWithOverflow(
 //     Side B: slots 7,6,5,4  (faces Side A; slot 4 is opposite slot 3, slot 7 opposite slot 0)
 //
 // Rules (in priority order):
-//   1. Locked (manually placed) guests are never moved.
+//   1. Anchored guests are never moved.
 //   2. Household members always occupy a contiguous seat block (hard).
 //   3. Group members occupy a contiguous seat block within the row surface (hard).
 //   4. Row capacity is never exceeded (hard).
@@ -522,6 +523,22 @@ function assignGuestsSmart(
 
 export function seatingReducer(state: SeatingState, action: SeatingAction): SeatingState {
   switch (action.type) {
+    case "SET_GUEST_ANCHORED": {
+      const currentlyAnchored = (state.lockedGuestIds ?? []).includes(action.guestId);
+      if (action.anchored === currentlyAnchored) {
+        return state;
+      }
+
+      const nextLockedGuestIds = action.anchored
+        ? [...new Set([...(state.lockedGuestIds ?? []), action.guestId])]
+        : (state.lockedGuestIds ?? []).filter((guestId) => guestId !== action.guestId);
+
+      return {
+        ...state,
+        lockedGuestIds: nextLockedGuestIds,
+      };
+    }
+
     case "AUTO_ASSIGN_GUESTS": {
       if (!action.guestProfiles) {
         return assignGuestsWithOverflow(state, 0, action.guestIds);
@@ -561,9 +578,7 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
         index === tableIdx ? { ...currentTable, guestIds: updatedSeatSlots } : currentTable
       );
       const newUnassigned = state.unassigned.filter((guestId) => !incomingSet.has(guestId));
-      // Lock all manually assigned guests so auto-seat won't move them.
-      const newLocked = [...new Set([...(state.lockedGuestIds ?? []), ...orderedGuestIds])];
-      return { tables: newTables, unassigned: newUnassigned, lockedGuestIds: newLocked };
+      return { tables: newTables, unassigned: newUnassigned, lockedGuestIds: state.lockedGuestIds ?? [] };
     }
 
     case "REMOVE_GUESTS": {

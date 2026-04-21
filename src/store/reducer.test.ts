@@ -232,3 +232,38 @@ describe("group cohesion regression", () => {
     expect(homeTable.guestIds).toContain("p2");
   });
 });
+
+describe("anchoring behavior", () => {
+  it("does not anchor guests automatically when manually assigned", () => {
+    const state = createInitialState(["g1"]);
+
+    const result = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g1"],
+      assignmentMode: "single-table",
+    });
+
+    expect(result.lockedGuestIds).not.toContain("g1");
+  });
+
+  it("anchors and unanchors a guest explicitly", () => {
+    const state = createInitialState(["g1"]);
+
+    const anchored = seatingReducer(state, {
+      type: "SET_GUEST_ANCHORED",
+      guestId: "g1",
+      anchored: true,
+    });
+
+    expect(anchored.lockedGuestIds).toContain("g1");
+
+    const unanchored = seatingReducer(anchored, {
+      type: "SET_GUEST_ANCHORED",
+      guestId: "g1",
+      anchored: false,
+    });
+
+    expect(unanchored.lockedGuestIds).not.toContain("g1");
+  });
+});
