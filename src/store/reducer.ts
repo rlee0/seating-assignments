@@ -45,6 +45,25 @@ function getUniqueGuestIds(guestIds: string[]): string[] {
   });
 }
 
+function getSeatedHouseholdGuestIds(
+  tables: TableState[],
+  partyId: string,
+  guestProfiles: Record<string, GuestProfile>
+): string[] {
+  const seatedIds: string[] = [];
+
+  for (const table of tables) {
+    for (const guestId of table.guestIds) {
+      if (!guestId) continue;
+      if (guestProfiles[guestId]?.partyId === partyId) {
+        seatedIds.push(guestId);
+      }
+    }
+  }
+
+  return seatedIds;
+}
+
 function removeGuestsFromSeatSlots(
   seatSlots: Array<string | null>,
   guestIdsToRemove: Set<string>
@@ -718,7 +737,23 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
         return overflowState;
       }
 
-      const orderedGuestIds = getUniqueGuestIds(guestIds);
+      let orderedGuestIds = getUniqueGuestIds(guestIds);
+      if (orderedGuestIds.length === 1 && guestProfiles) {
+        const dragGuestId = orderedGuestIds[0];
+        const partyId = guestProfiles[dragGuestId]?.partyId;
+        if (partyId) {
+          const seatedHouseholdGuestIds = getSeatedHouseholdGuestIds(
+            state.tables,
+            partyId,
+            guestProfiles
+          );
+          if (seatedHouseholdGuestIds.length > 1 && seatedHouseholdGuestIds.includes(dragGuestId)) {
+            // Preserve household integrity when manually moving one seated household member.
+            orderedGuestIds = seatedHouseholdGuestIds;
+          }
+        }
+      }
+
       const incomingSet = new Set(orderedGuestIds);
       const normalizedTables = state.tables.map((currentTable) => ({
         ...currentTable,

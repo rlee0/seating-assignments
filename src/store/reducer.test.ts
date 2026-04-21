@@ -252,7 +252,7 @@ describe("group cohesion regression", () => {
     expect(homeTable.guestIds).toContain("p2");
   });
 
-  it("rejects manual reassignment that would split a seated household", () => {
+  it("moves the seated household together when manually reassigning one member", () => {
     const household = ["g1", "g2"];
     const profiles = makeProfiles(household.map((id) => ({ id, partyId: "hh1" })));
 
@@ -273,7 +273,8 @@ describe("group cohesion regression", () => {
       guestProfiles: profiles,
     });
 
-    expect(result).toEqual(state);
+    expect(seatsAt(result, 1)).toEqual(Array(TABLE_CAPACITY).fill(null));
+    expect(seatsAt(result, 2).slice(0, 2)).toEqual(["g1", "g2"]);
   });
 
   it("rejects manual seating that puts same-household members non-adjacent", () => {
