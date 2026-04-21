@@ -142,7 +142,7 @@ export default function Sidebar() {
             </div>
             <div>
               <dt>Host</dt>
-              <dd>{selectedGuest.host === "r" ? "Ryan" : "Stella"}</dd>
+              <dd>{selectedGuest.host}</dd>
             </div>
           </dl>
         </section>

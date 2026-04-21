@@ -18,8 +18,8 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 16px;
-  padding: 8px 16px;
+  gap: 20px;
+  padding: 12px 20px;
   background: #fff;
   border-bottom: 1px solid #e5e5e5;
   flex-shrink: 0;
@@ -27,7 +27,7 @@
 }
 
 .app-header h1 {
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 600;
   color: #1a1a1a;
   white-space: nowrap;
@@ -40,7 +40,7 @@
 }
 
 .stat {
-  font-size: 12px;
+  font-size: 13px;
   color: #888;
 }
 
@@ -68,11 +68,11 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
-  border-radius: 4px;
+  padding: 6px 12px;
+  border-radius: 6px;
   border: 1px solid #d4d4d4;
   background: #fff;
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
   color: #444;
   white-space: nowrap;
@@ -97,7 +97,7 @@
   background: #fafafa;
   border-color: #e5e5e5;
   color: #a3a3a3;
-  cursor: default;
+  cursor: not-allowed;
 }
 
 .btn-warnings {
@@ -115,10 +115,10 @@
 .warnings-panel {
   background: #fffbeb;
   border-bottom: 1px solid #fcd34d;
-  padding: 6px 16px;
-  font-size: 11px;
+  padding: 8px 20px;
+  font-size: 12px;
   color: #78350f;
-  max-height: 100px;
+  max-height: 120px;
   overflow-y: auto;
   flex-shrink: 0;
 }
@@ -138,7 +138,7 @@
 /* ─── Sidebar ─────────────────────────────────────────────────────────────── */
 
 .sidebar {
-  width: 264px;
+  width: 300px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -157,8 +157,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px 8px;
-  font-size: 11px;
+  padding: 12px 14px 10px;
+  font-size: 12px;
   font-weight: 600;
   color: #666;
   text-transform: uppercase;
@@ -168,7 +168,7 @@
 }
 
 .sidebar-search-row {
-  padding: 8px 12px;
+  padding: 10px 14px;
   border-bottom: 1px solid #ebebeb;
   background: #fcfdfe;
   flex-shrink: 0;
@@ -182,9 +182,9 @@
 
 .sidebar-search-icon {
   position: absolute;
-  left: 8px;
-  width: 14px;
-  height: 14px;
+  left: 9px;
+  width: 16px;
+  height: 16px;
   color: #9ca3af;
   pointer-events: none;
   flex-shrink: 0;
@@ -196,9 +196,9 @@
   border-radius: 6px;
   background: #fff;
   color: #1a1a1a;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.4;
-  padding: 7px 9px 7px 28px;
+  padding: 8px 10px 8px 32px;
   outline: none;
 }
 
@@ -222,7 +222,7 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: clip;
-  padding: 6px 8px 12px;
+  padding: 8px 10px 14px;
   transition: background 0.12s;
   overscroll-behavior-x: none;
   touch-action: pan-y;
@@ -235,20 +235,20 @@
 .sidebar-empty {
   text-align: center;
   color: #bbb;
-  font-size: 12px;
+  font-size: 13px;
   padding: 48px 16px;
 }
 
 .sidebar-selected-guest {
   border-top: 1px solid #e5e7eb;
   background: #f9fafb;
-  padding: 9px 12px 16px;
+  padding: 12px 14px 18px;
   flex-shrink: 0;
 }
 
 .sidebar-selected-guest-label {
   margin: 0 0 3px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.45px;
   text-transform: uppercase;
@@ -257,22 +257,22 @@
 
 .sidebar-selected-guest-name {
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: #1a1a1a;
 }
 
 .sidebar-selected-guest-meta {
-  margin: 7px 0 0;
+  margin: 8px 0 0;
   display: grid;
-  gap: 4px;
+  gap: 5px;
 }
 
 .sidebar-selected-guest-meta div {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .sidebar-selected-guest-meta dt {
@@ -289,19 +289,19 @@
 
 .sidebar-selected-guest-empty {
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
   color: #9ca3af;
 }
 
 .group-section {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .group-party-list {
   position: relative;
-  margin-left: 14px;
-  padding-left: 14px;
-  padding-top: 2px;
+  margin-left: 16px;
+  padding-left: 16px;
+  padding-top: 3px;
 }
 
 .group-party-list::before {
@@ -321,8 +321,8 @@
 .group-card {
   background: #fff;
   border: 1px solid #e5e5e5;
-  border-radius: 6px;
-  margin-bottom: 5px;
+  border-radius: 8px;
+  margin-bottom: 8px;
   overflow: hidden;
   transition:
     background 0.14s ease,
@@ -337,8 +337,8 @@
 .group-card-header {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 6px 8px 4px;
+  gap: 6px;
+  padding: 8px 10px 6px;
   cursor: grab;
   user-select: none;
 }
@@ -348,10 +348,10 @@
 }
 
 .group-name {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.45px;
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -360,8 +360,8 @@
 }
 
 .group-count {
-  font-size: 10px;
-  padding: 1px 5px;
+  font-size: 11px;
+  padding: 2px 6px;
   border-radius: 3px;
   background: #f0f0f0;
   color: #666;
@@ -373,8 +373,8 @@
 .party-card {
   background: #fff;
   border: 1px solid #e5e5e5;
-  border-radius: 6px;
-  margin-bottom: 5px;
+  border-radius: 8px;
+  margin-bottom: 8px;
   overflow: hidden;
   cursor: grab;
   user-select: none;
@@ -395,8 +395,8 @@
 .party-card-header {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 6px 8px 4px;
+  gap: 6px;
+  padding: 8px 10px 6px;
   cursor: grab;
   user-select: none;
 }
@@ -406,7 +406,7 @@
 }
 
 .party-name {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   flex: 1;
   overflow: hidden;
@@ -430,9 +430,9 @@
   gap: 4px;
   cursor: grab;
   user-select: none;
-  border-radius: 3px;
+  border-radius: 4px;
   padding: 2px 6px;
-  font-size: 11px;
+  font-size: 12px;
   max-width: 100%;
   touch-action: none;
   border: 1px solid #e5e7eb;
@@ -458,6 +458,9 @@
 .guest-chip--sidebar {
   background: #f3f4f6;
   color: #374151;
+  gap: 3px;
+  padding: 1px 5px;
+  font-size: 11px;
   --guest-chip-bg: #f3f4f6;
 }
 
@@ -469,10 +472,12 @@
 .guest-chip--table {
   background: #f3f4f6;
   color: #374151;
-  width: fit-content;
-  max-width: 100%;
+  width: 100%;
   box-sizing: border-box;
   min-width: 0;
+  gap: 3px;
+  padding: 1px 5px;
+  font-size: 11px;
   min-height: 20px;
   --guest-chip-bg: #f3f4f6;
 }
@@ -496,6 +501,12 @@
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.guest-chip--sidebar .guest-name,
+.guest-chip--table .guest-name {
   font-size: 10px;
   line-height: 1.2;
 }
@@ -523,7 +534,7 @@
   background: #2e9e88;
   border: 1px solid transparent;
   box-shadow: none;
-  outline: 1px solid #55d1bb;
+  outline: 1px solid var(--guest-chip-bg);
   outline-offset: 1px;
   --guest-chip-bg: #2e9e88;
 }
@@ -532,14 +543,14 @@
   background: #c0674a;
   border: 1px solid transparent;
   box-shadow: none;
-  outline: 1px solid #e18f74;
+  outline: 1px solid var(--guest-chip-bg);
   outline-offset: 1px;
   --guest-chip-bg: #c0674a;
 }
 
 .guest-chip.is-selected .guest-name {
   color: #fff;
-  font-weight: 700;
+  font-weight: 900;
 }
 
 .guest-chip.is-related-household:has(.guest-name--host-r) {
@@ -573,19 +584,19 @@
 .guest-chip--table.is-selected:has(.guest-name--host-r) {
   border: 1px solid transparent;
   box-shadow: none;
-  outline: 1px solid #55d1bb;
+  outline: 1px solid var(--guest-chip-bg);
   outline-offset: 1px;
 }
 
 .guest-chip--table.is-selected:has(.guest-name--host-s) {
   border: 1px solid transparent;
   box-shadow: none;
-  outline: 1px solid #e18f74;
+  outline: 1px solid var(--guest-chip-bg);
   outline-offset: 1px;
 }
 
 .guest-chip--table.is-selected .guest-name {
-  font-weight: 700;
+  font-weight: 900;
 }
 
 .guest-chip.is-related-group:has(.guest-name--host-r) {
@@ -617,9 +628,9 @@
 .table-board {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 10px;
-  padding: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+  padding: 14px;
   overflow-y: auto;
   align-content: start;
 }
@@ -633,11 +644,11 @@
 .table-card {
   background: #fff;
   border: 1px solid #e5e5e5;
-  border-radius: 6px;
+  border-radius: 8px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 5px 5px 4px;
+  gap: 3px;
+  padding: 7px 7px 6px;
   transition:
     border-color 0.12s,
     background 0.12s;
@@ -647,6 +658,10 @@
 
 .table-card.is-dragging {
   opacity: 0;
+  cursor: grabbing;
+}
+
+.table-card:active {
   cursor: grabbing;
 }
 
@@ -691,7 +706,7 @@
 .guest-chip.is-selected:focus-visible:has(.guest-name--host-r) {
   background: #2e9e88;
   box-shadow: none;
-  outline: 1px solid #55d1bb;
+  outline: 1px solid var(--guest-chip-bg);
   outline-offset: 1px;
   --guest-chip-bg: #2e9e88;
 }
@@ -700,7 +715,7 @@
 .guest-chip.is-selected:focus-visible:has(.guest-name--host-s) {
   background: #c0674a;
   box-shadow: none;
-  outline: 1px solid #e18f74;
+  outline: 1px solid var(--guest-chip-bg);
   outline-offset: 1px;
   --guest-chip-bg: #c0674a;
 }
@@ -742,29 +757,25 @@
 /* ─── Seat rows ───────────────────────────────────────────────────────────── */
 
 .table-seats {
-  display: flex;
-  gap: 3px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
   min-width: 0;
 }
 
 .seat-slot {
   position: relative;
   min-width: 0;
-  min-height: 20px;
-  border-radius: 3px;
+  min-height: 22px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   overflow: hidden;
 }
 
 .seat-empty {
-  flex: 1 1 0;
   background: #f9fafb;
   border: 1px dashed #d1d5db;
-}
-
-.table-seats:has(.seat-occupied) .seat-empty {
-  flex: 1 1 22px;
 }
 
 .seat-empty.is-over {
@@ -773,11 +784,8 @@
 }
 
 .seat-occupied {
-  flex: 0 1 auto;
   background: transparent;
-  box-sizing: border-box;
   min-width: 0;
-  padding-inline: 0;
   overflow: visible;
 }
 
@@ -798,8 +806,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 34px;
-  padding: 3px 28px 2px;
+  min-height: 38px;
+  padding: 4px 30px 3px;
 }
 
 .table-label-main {
@@ -822,11 +830,11 @@
 
 .table-action {
   position: absolute;
-  right: 4px;
+  right: 5px;
   top: 50%;
   transform: translateY(-50%);
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -854,8 +862,8 @@
 }
 
 .table-action-icon {
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
   fill: currentColor;
   stroke: currentColor;
   stroke-width: 1.5;
@@ -876,7 +884,7 @@
 }
 
 .table-clear-btn:disabled {
-  cursor: default;
+  cursor: not-allowed;
   pointer-events: none;
 }
 
@@ -894,7 +902,7 @@
 }
 
 .table-name {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: #6b7280;
   overflow: hidden;
@@ -905,7 +913,7 @@
 }
 
 .table-occupancy {
-  font-size: 10px;
+  font-size: 11px;
   color: #9ca3af;
   white-space: nowrap;
   flex-shrink: 0;

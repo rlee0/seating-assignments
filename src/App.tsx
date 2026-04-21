@@ -14,10 +14,18 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { AlertTriangle, Download, Redo2, RotateCcw, Undo2, Upload } from "lucide-react";
+import { AlertTriangle, Download, RotateCcw, Upload } from "lucide-react";
 import { SeatingProvider, useSeating } from "./store/SeatingContext";
 import { SearchProvider } from "./store/SearchContext";
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent as ReactDragEvent,
+} from "react";
 
 import Sidebar from "./components/Sidebar";
 import TableBoard from "./components/TableBoard";
@@ -27,7 +35,7 @@ import {
   isCompatibleState,
   isGuestInputRow,
   loadPersistedGuestRows,
-  parsePersistedSeatingData,
+  reconcileStateToGuestIds,
   saveGuestDataSourceSignature,
   savePersistedGuestRows,
   savePersistedSeating,
@@ -35,9 +43,11 @@ import {
 import {
   EXPORT_FORMAT_VERSION,
   TABLE_CAPACITY,
+  TABLE_COUNT,
   type GuestInputRow,
   type PersistedSeatingData,
   type SeatingExportData,
+  type TableState,
 } from "./types";
 
 type ActiveDragData =
@@ -148,49 +158,90 @@ function getInitialGuestRows(): GuestInputRow[] {
   return loadPersistedGuestRows(sourceSignature) ?? [];
 }
 
+function isTableStateForImport(value: unknown): value is TableState {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as {
+    tableNumber?: unknown;
+    name?: unknown;
+    guestIds?: unknown;
+  };
+
+  return (
+    typeof candidate.tableNumber === "number" &&
+    typeof candidate.name === "string" &&
+    Array.isArray(candidate.guestIds) &&
+    candidate.guestIds.length === TABLE_CAPACITY &&
+    candidate.guestIds.every((guestId) => guestId === null || typeof guestId === "string")
+  );
+}
+
 function parseImportPayload(value: unknown): {
-  guestRows: GuestInputRow[];
-  seating: PersistedSeatingData;
+  guests: GuestInputRow[];
+  tables: TableState[];
 } | null {
   if (!value || typeof value !== "object") return null;
 
   const candidate = value as {
     version?: unknown;
-    guestRows?: unknown;
-    seating?: unknown;
+    guests?: unknown;
+    tables?: unknown;
   };
 
-  if (candidate.version !== EXPORT_FORMAT_VERSION) return null;
+  if (candidate.version !== EXPORT_FORMAT_VERSION) {
+    return null;
+  }
+
+  if (!Array.isArray(candidate.guests) || !candidate.guests.every((row) => isGuestInputRow(row))) {
+    return null;
+  }
+
   if (
-    !Array.isArray(candidate.guestRows) ||
-    !candidate.guestRows.every((row) => isGuestInputRow(row))
+    !Array.isArray(candidate.tables) ||
+    candidate.tables.length !== TABLE_COUNT ||
+    !candidate.tables.every((table) => isTableStateForImport(table))
   ) {
     return null;
   }
 
-  const seating = parsePersistedSeatingData(candidate.seating);
-  if (!seating) return null;
-
   return {
-    guestRows: candidate.guestRows.map((row) => ({ ...row })),
-    seating,
+    guests: candidate.guests.map((row) => ({ ...row })),
+    tables: candidate.tables.map((table) => ({
+      ...table,
+      guestIds: [...table.guestIds],
+    })),
   };
 }
 
 function buildExportPayload(
-  guestRows: GuestInputRow[],
+  guests: GuestInputRow[],
   seating: PersistedSeatingData
 ): SeatingExportData {
   return {
     version: EXPORT_FORMAT_VERSION,
     exportedAt: new Date().toISOString(),
-    guestRows: guestRows.map((row) => ({ ...row })),
-    seating,
+    guests: guests.map((row) => ({ ...row })),
+    tables: seating.state.tables.map((table) => ({
+      ...table,
+      guestIds: [...table.guestIds],
+    })),
   };
 }
 
 function buildExportFilename(): string {
   return `seating-export-${new Date().toISOString().slice(0, 10)}.json`;
+}
+
+function getFirstJsonFile(files: FileList | null): File | null {
+  if (!files || files.length === 0) return null;
+
+  for (const file of Array.from(files)) {
+    if (file.type === "application/json" || file.name.toLowerCase().endsWith(".json")) {
+      return file;
+    }
+  }
+
+  return null;
 }
 
 function SeatingApp({
@@ -225,6 +276,8 @@ function SeatingApp({
   const [showWarnings, setShowWarnings] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<"sidebar" | "tables">("sidebar");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileDragDepthRef = useRef(0);
+  const [isFileDragOver, setIsFileDragOver] = useState(false);
 
   function updateRemoveHint(isVisible: boolean) {
     removeHintActiveRef.current = isVisible;
@@ -473,32 +526,93 @@ function SeatingApp({
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
+  const importFromFile = useCallback(
+    async (file: File) => {
+      try {
+        const text = await file.text();
+        const parsed = parseImportPayload(JSON.parse(text) as unknown);
+
+        if (!parsed) {
+          window.alert("Import failed. Use v2 JSON with version, guests, and tables.");
+          return;
+        }
+
+        const { allGuestIds: importedGuestIds } = parseGuestsFromRows(parsed.guests);
+        const reconciledState = reconcileStateToGuestIds(
+          {
+            tables: parsed.tables,
+            unassigned: [],
+          },
+          importedGuestIds
+        );
+
+        if (!reconciledState || !isCompatibleState(reconciledState, importedGuestIds)) {
+          window.alert("Import failed. The tables payload is invalid for the provided guests.");
+          return;
+        }
+
+        const snapshotToImport: PersistedSeatingData = {
+          state: reconciledState,
+          history: [],
+          future: [],
+        };
+
+        onImportSnapshot(parsed.guests, snapshotToImport);
+      } catch {
+        window.alert("Import failed. The selected file is not valid JSON.");
+      }
+    },
+    [onImportSnapshot]
+  );
+
   async function handleImportChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+    const file = getFirstJsonFile(event.target.files);
     event.target.value = "";
+
+    if (!file) {
+      window.alert("Import failed. Select a .json file.");
+      return;
+    }
+
+    await importFromFile(file);
+  }
+
+  function handleFileDragEnter(event: ReactDragEvent<HTMLDivElement>) {
+    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+
+    event.preventDefault();
+    fileDragDepthRef.current += 1;
+    setIsFileDragOver(true);
+  }
+
+  function handleFileDragOver(event: ReactDragEvent<HTMLDivElement>) {
+    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleFileDragLeave(event: ReactDragEvent<HTMLDivElement>) {
+    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+
+    event.preventDefault();
+    fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+    if (fileDragDepthRef.current === 0) {
+      setIsFileDragOver(false);
+    }
+  }
+
+  async function handleFileDrop(event: ReactDragEvent<HTMLDivElement>) {
+    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+
+    event.preventDefault();
+    fileDragDepthRef.current = 0;
+    setIsFileDragOver(false);
+
+    const file = getFirstJsonFile(event.dataTransfer.files);
     if (!file) return;
 
-    try {
-      const text = await file.text();
-      const parsed = parseImportPayload(JSON.parse(text) as unknown);
-
-      if (!parsed) {
-        window.alert("Import failed. Choose a seating export JSON from this app.");
-        return;
-      }
-
-      const { allGuestIds: importedGuestIds } = parseGuestsFromRows(parsed.guestRows);
-      if (!isCompatibleState(parsed.seating.state, importedGuestIds)) {
-        window.alert(
-          "Import failed. The seating snapshot does not match the guest list in the file."
-        );
-        return;
-      }
-
-      onImportSnapshot(parsed.guestRows, parsed.seating);
-    } catch {
-      window.alert("Import failed. The selected file is not valid JSON.");
-    }
+    await importFromFile(file);
   }
 
   // Overlay content while dragging
@@ -520,7 +634,18 @@ function SeatingApp({
       onDragOver={handleDragOver}
       onDragCancel={handleDragCancel}
       onDragEnd={handleDragEnd}>
-      <div className={`app${activeDrag?.kind === "guest" ? " app--guest-dragging" : ""}`}>
+      <div
+        className={[
+          "app",
+          activeDrag?.kind === "guest" ? "app--guest-dragging" : null,
+          isFileDragOver ? "app--file-drop-target" : null,
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        onDragEnter={handleFileDragEnter}
+        onDragOver={handleFileDragOver}
+        onDragLeave={handleFileDragLeave}
+        onDrop={handleFileDrop}>
         <header className="app-header">
           <h1>Seating Assignments</h1>
           <div className="app-stats">
@@ -538,14 +663,6 @@ function SeatingApp({
                 {warnings.length} data {warnings.length === 1 ? "issue" : "issues"}
               </button>
             )}
-            <button className="btn-undo" onClick={undo} disabled={!canUndo}>
-              <Undo2 size={14} aria-hidden="true" />
-              <span className="btn-label">Undo</span>
-            </button>
-            <button className="btn-action" onClick={redo} disabled={!canRedo}>
-              <Redo2 size={14} aria-hidden="true" />
-              <span className="btn-label">Redo</span>
-            </button>
             <button className="btn-reset" onClick={handleReset}>
               <RotateCcw size={14} aria-hidden="true" />
               <span className="btn-label">Reset</span>
@@ -611,7 +728,7 @@ function SeatingApp({
                 ]
                   .filter(Boolean)
                   .join(" ")}>
-                <span className={`guest-name guest-name--host-${overlayGuest.host}`}>
+                <span className={`guest-name guest-name--host-${overlayGuest.host.toLowerCase()}`}>
                   {overlayGuest.fullName}
                 </span>
               </span>
@@ -638,7 +755,7 @@ function SeatingApp({
                       {guestId ? (
                         <div className="guest-chip guest-chip--table">
                           <span
-                            className={`guest-name guest-name--host-${guests.get(guestId)?.host}`}>
+                            className={`guest-name guest-name--host-${(guests.get(guestId)?.host ?? "").toLowerCase()}`}>
                             {guests.get(guestId)?.fullName}
                           </span>
                         </div>
@@ -666,7 +783,7 @@ function SeatingApp({
                       {guestId ? (
                         <div className="guest-chip guest-chip--table">
                           <span
-                            className={`guest-name guest-name--host-${guests.get(guestId)?.host}`}>
+                            className={`guest-name guest-name--host-${(guests.get(guestId)?.host ?? "").toLowerCase()}`}>
                             {guests.get(guestId)?.fullName}
                           </span>
                         </div>
@@ -691,7 +808,7 @@ function SeatingApp({
 
                   return (
                     <span key={id} className="guest-chip guest-chip--sidebar">
-                      <span className={`guest-name guest-name--host-${guest.host}`}>
+                      <span className={`guest-name guest-name--host-${guest.host.toLowerCase()}`}>
                         {guest.fullName}
                       </span>
                     </span>

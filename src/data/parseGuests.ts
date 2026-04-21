@@ -1,6 +1,6 @@
 import type { Guest, GuestInputRow, Party } from "../types";
 
-export const GUEST_SOURCE_SIGNATURE = "json-import-only-v1";
+export const GUEST_SOURCE_SIGNATURE = "json-import-only-v2";
 
 export interface ParsedData {
   guests: Map<string, Guest>;
@@ -53,7 +53,7 @@ export function parseGuestsFromRows(rawRows: GuestInputRow[]): ParsedData {
     party.guestIds.push(guestId);
 
     // Party host follows Stella if any member is Stella's
-    if (row.host === "s") party.host = "s";
+    if (row.host === "Stella") party.host = "Stella";
 
     if (!row.group) {
       warnings.push(`"${row.fullName}" has no group assigned`);

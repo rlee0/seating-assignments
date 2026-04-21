@@ -14,7 +14,7 @@ export function isGuestInputRow(value: unknown): value is GuestInputRow {
   };
 
   return (
-    (candidate.host === "r" || candidate.host === "s") &&
+    (candidate.host === "Ryan" || candidate.host === "Stella") &&
     typeof candidate.household === "string" &&
     typeof candidate.group === "string" &&
     typeof candidate.fullName === "string"
@@ -38,6 +38,34 @@ export function isCompatibleState(state: SeatingState, allGuestIds: string[]): b
     uniqueSavedIds.size === currentIds.size &&
     [...currentIds].every((id) => uniqueSavedIds.has(id))
   );
+}
+
+export function reconcileStateToGuestIds(
+  state: SeatingState,
+  allGuestIds: string[]
+): SeatingState | null {
+  if (state.tables.length !== TABLE_COUNT) return null;
+
+  const allowedGuestIds = new Set(allGuestIds);
+  const seenGuestIds = new Set<string>();
+
+  const tables = state.tables.map((table) => ({
+    ...table,
+    guestIds: table.guestIds.map((guestId) => {
+      if (guestId === null) return null;
+      if (!allowedGuestIds.has(guestId) || seenGuestIds.has(guestId)) return null;
+
+      seenGuestIds.add(guestId);
+      return guestId;
+    }),
+  }));
+
+  const unassigned = allGuestIds.filter((guestId) => !seenGuestIds.has(guestId));
+  return {
+    ...state,
+    tables,
+    unassigned,
+  };
 }
 
 function isSeatingState(value: unknown): value is SeatingState {

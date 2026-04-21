@@ -108,7 +108,7 @@ export default function GuestChip({ guestId, context, className }: Props) {
         ref={guestNameRef}
         className={[
           "guest-name",
-          `guest-name--host-${guest.host}`,
+          `guest-name--host-${guest.host.toLowerCase()}`,
           context === "table" && isNameTruncated ? "is-truncated" : null,
         ]
           .filter(Boolean)

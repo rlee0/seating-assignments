@@ -1,6 +1,6 @@
 // ─── Domain types ────────────────────────────────────────────────────────────
 
-export type Host = "r" | "s";
+export type Host = "Ryan" | "Stella";
 
 export interface GuestInputRow {
   host: Host;
@@ -21,7 +21,7 @@ export interface Party {
   id: string; // slugified Household, unique
   household: string;
   group: string; // primary group (from first member that has one)
-  host: Host; // 'r' = Ryan, 's' = Stella
+  host: Host;
   guestIds: string[]; // ordered list of Guest ids
 }
 
@@ -32,7 +32,7 @@ export const TABLE_CAPACITY = 8;
 export const STORAGE_KEY = "wedding-seating-v1";
 export const GUEST_DATA_STORAGE_KEY = "wedding-guests-v1";
 export const GUEST_DATA_SOURCE_KEY = "wedding-guests-source-v1";
-export const EXPORT_FORMAT_VERSION = 1;
+export const EXPORT_FORMAT_VERSION = 2;
 
 export interface TableState {
   tableNumber: number; // 1-based
@@ -54,6 +54,6 @@ export interface PersistedSeatingData {
 export interface SeatingExportData {
   version: number;
   exportedAt: string;
-  guestRows: GuestInputRow[];
-  seating: PersistedSeatingData;
+  guests: GuestInputRow[];
+  tables: TableState[];
 }
