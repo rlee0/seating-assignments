@@ -13,6 +13,21 @@ function normalizeForSearch(str: string): string {
     .toLowerCase();
 }
 
+const sidebarSortCollator = new Intl.Collator(undefined, { sensitivity: "base" });
+
+function comparePartiesForSidebar(
+  a: { host: string; group: string; household: string },
+  b: { host: string; group: string; household: string }
+): number {
+  const byHost = sidebarSortCollator.compare(a.host, b.host);
+  if (byHost !== 0) return byHost;
+
+  const byGroup = sidebarSortCollator.compare(a.group || "No Group", b.group || "No Group");
+  if (byGroup !== 0) return byGroup;
+
+  return sidebarSortCollator.compare(a.household, b.household);
+}
+
 export default function Sidebar() {
   const { state, parties, guests, selectedGuestId } = useSeating();
   const { searchQuery, setSearchQuery } = useSearch();
@@ -64,10 +79,12 @@ export default function Sidebar() {
     });
   });
 
+  const sortedPartiesWithUnassigned = [...partiesWithUnassigned].sort(comparePartiesForSidebar);
+
   const groupedParties = new Map<string, typeof partiesWithUnassigned>();
   const groupedGuestIds = new Map<string, string[]>();
 
-  for (const party of partiesWithUnassigned) {
+  for (const party of sortedPartiesWithUnassigned) {
     const groupName = party.group || "No Group";
     const groupParties = groupedParties.get(groupName) ?? [];
     groupParties.push(party);

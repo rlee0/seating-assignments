@@ -263,8 +263,8 @@ function SeatingApp({
     canRedo,
     guests,
     parties,
-    allGuestIds,
     warnings,
+    selectedGuestId,
     clearSelectedGuest,
   } = useSeating();
   const [activeDrag, setActiveDrag] = useState<ActiveDragData | null>(null);
@@ -318,13 +318,38 @@ function SeatingApp({
         event.preventDefault();
         redo();
       }
+
+      if (event.key === "Escape") {
+        clearSelectedGuest();
+        (document.activeElement as HTMLElement | null)?.blur();
+      }
+
+      const isDeleteShortcut =
+        isModifierPressed && (event.key === "Backspace" || event.key === "Delete");
+      if (isDeleteShortcut && selectedGuestId) {
+        const isAssigned = !state.unassigned.includes(selectedGuestId);
+        if (isAssigned) {
+          event.preventDefault();
+          dispatch({ type: "REMOVE_GUESTS", guestIds: [selectedGuestId] });
+          clearSelectedGuest();
+        }
+      }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [canRedo, canUndo, redo, undo]);
+  }, [
+    canRedo,
+    canUndo,
+    clearSelectedGuest,
+    dispatch,
+    redo,
+    selectedGuestId,
+    state.unassigned,
+    undo,
+  ]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -499,12 +524,16 @@ function SeatingApp({
     [dispatch, guests, parties, state.unassigned]
   );
 
-  const totalGuests = allGuestIds.length;
-  const assignedCount = state.tables.reduce(
-    (acc, table) =>
-      acc + table.guestIds.filter((guestId): guestId is string => guestId !== null).length,
-    0
-  );
+  let stellaUnassignedCount = 0;
+  let ryanUnassignedCount = 0;
+  for (const guestId of state.unassigned) {
+    const host = guests.get(guestId)?.host;
+    if (host === "Stella") {
+      stellaUnassignedCount += 1;
+    } else if (host === "Ryan") {
+      ryanUnassignedCount += 1;
+    }
+  }
   const unassignedCount = state.unassigned.length;
 
   function handleReset() {
@@ -649,12 +678,10 @@ function SeatingApp({
         <header className="app-header">
           <h1>Seating Assignments</h1>
           <div className="app-stats">
-            <span className="stat">
-              {assignedCount}/{totalGuests} seated
+            <span className="stat stat-host stat-host-stella">
+              {stellaUnassignedCount} unassigned
             </span>
-            {unassignedCount > 0 && (
-              <span className="stat stat-warn">{unassignedCount} unassigned</span>
-            )}
+            <span className="stat stat-host stat-host-ryan">{ryanUnassignedCount} unassigned</span>
           </div>
           <div className="app-actions">
             {warnings.length > 0 && (
@@ -667,13 +694,13 @@ function SeatingApp({
               <RotateCcw size={14} aria-hidden="true" />
               <span className="btn-label">Reset</span>
             </button>
-            <button className="btn-action" onClick={handleExport}>
-              <Download size={14} aria-hidden="true" />
-              <span className="btn-label">Export</span>
-            </button>
             <button className="btn-action" onClick={() => fileInputRef.current?.click()}>
               <Upload size={14} aria-hidden="true" />
               <span className="btn-label">Import</span>
+            </button>
+            <button className="btn-action" onClick={handleExport}>
+              <Download size={14} aria-hidden="true" />
+              <span className="btn-label">Export</span>
             </button>
             <input
               ref={fileInputRef}
