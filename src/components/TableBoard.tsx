@@ -29,11 +29,7 @@ function computePreviewSeatKinds(
   });
 }
 
-export default function TableBoard({
-  activeDragKind,
-  activeDragGuestId,
-  autoSeatPreview,
-}: Props) {
+export default function TableBoard({ activeDragKind, activeDragGuestId, autoSeatPreview }: Props) {
   const { state } = useSeating();
 
   const { setNodeRef: setAutoSeatRef, isOver: isAutoSeatOver } = useDroppable({
@@ -43,6 +39,14 @@ export default function TableBoard({
 
   const tableIds = state.tables.map((table) => `sortable-table-${table.tableNumber}`);
   const showPreview = autoSeatPreview !== null;
+  const isAutoSeatEnabled = activeDragKind !== null;
+
+  const autoSeatTitle = isAutoSeatOver ? "Release to auto-seat" : "Auto-seat guests";
+  const autoSeatCopy = !isAutoSeatEnabled
+    ? "Drag a guest, group, party, or table here to auto-seat them."
+    : isAutoSeatOver
+      ? "We will find the best available seats across tables."
+      : "Drop here to assign guests across tables automatically.";
 
   const previewTablesByNumber = useMemo(() => {
     if (!autoSeatPreview) return null;
@@ -62,7 +66,10 @@ export default function TableBoard({
             isAutoSeatOver ? "is-over" : null,
           ]
             .filter(Boolean)
-            .join(" ")} />
+            .join(" ")}>
+          <h3 className="auto-seat-title">{autoSeatTitle}</h3>
+          <p className="auto-seat-copy">{autoSeatCopy}</p>
+        </section>
 
         <div className="table-grid">
           {state.tables.map((table) => {

@@ -1,8 +1,7 @@
-import type { CSSProperties, MouseEvent, PointerEvent } from "react";
+import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import { CSS } from "@dnd-kit/utilities";
-import { Sparkles } from "lucide-react";
 import { guestChipVariants } from "@/components/ui/chip";
 import { useDraggable } from "@dnd-kit/core";
 import { useSearch } from "../store/SearchContext";
@@ -15,17 +14,57 @@ function normalizeForSearch(str: string): string {
     .toLowerCase();
 }
 
-function getHighlightColor(token: string): { background: string; border: string } {
+const UNIQUE_HUE_COUNT = 360;
+const HUE_STEP = 137;
+
+const hueOrder = Array.from(
+  { length: UNIQUE_HUE_COUNT },
+  (_, i) => (i * HUE_STEP) % UNIQUE_HUE_COUNT
+);
+
+const tokenHueByDomain = new Map<string, Map<string, number>>();
+const usedHuesByDomain = new Map<string, Set<number>>();
+
+function getTokenHue(token: string): number {
+  const separatorIndex = token.indexOf(":");
+  const domain = separatorIndex > -1 ? token.slice(0, separatorIndex) : "default";
+
+  const tokenHueMap = tokenHueByDomain.get(domain) ?? new Map<string, number>();
+  tokenHueByDomain.set(domain, tokenHueMap);
+
+  const existingHue = tokenHueMap.get(token);
+  if (existingHue !== undefined) return existingHue;
+
+  const usedHues = usedHuesByDomain.get(domain) ?? new Set<number>();
+  usedHuesByDomain.set(domain, usedHues);
+
   let hash = 0;
   for (let index = 0; index < token.length; index += 1) {
     hash = (hash << 5) - hash + token.charCodeAt(index);
     hash |= 0;
   }
 
-  const hue = Math.abs(hash) % 360;
+  const start = Math.abs(hash) % UNIQUE_HUE_COUNT;
+  let selectedHue = hueOrder[start];
+
+  for (let offset = 0; offset < UNIQUE_HUE_COUNT; offset += 1) {
+    const candidateHue = hueOrder[(start + offset) % UNIQUE_HUE_COUNT];
+    if (!usedHues.has(candidateHue)) {
+      selectedHue = candidateHue;
+      break;
+    }
+  }
+
+  tokenHueMap.set(token, selectedHue);
+  usedHues.add(selectedHue);
+  return selectedHue;
+}
+
+function getHighlightColor(token: string): { background: string; border: string } {
+  const hue = getTokenHue(token);
   return {
-    background: `hsl(${hue} 76% 86%)`,
-    border: `hsl(${hue} 56% 68%)`,
+    background: `hsl(${hue} 78% 85%)`,
+    border: `hsl(${hue} 58% 64%)`,
   };
 }
 
@@ -49,7 +88,6 @@ export default function GuestChip({
     clearSelectedGuest,
     relatedHouseholdGuestIds,
     relatedGroupGuestIds,
-    autoAssignGuestIds,
   } = useSeating();
   const { searchQuery, isGroupHighlightOn, isHouseholdHighlightOn, isHostHighlightOn } =
     useSearch();
@@ -162,16 +200,6 @@ export default function GuestChip({
     }
   }
 
-  function stopGuestChipAction(event: PointerEvent | MouseEvent) {
-    event.stopPropagation();
-  }
-
-  function handleAutoSeat(event: MouseEvent<HTMLButtonElement>) {
-    stopGuestChipAction(event);
-    if (isDragging) return;
-    autoAssignGuestIds([guestId]);
-  }
-
   return (
     <div
       ref={setNodeRef}
@@ -199,18 +227,6 @@ export default function GuestChip({
           .join(" ")}>
         {guest.fullName}
       </span>
-      {context === "sidebar" ? (
-        <button
-          type="button"
-          className="sidebar-quick-action"
-          aria-label={`Auto-seat ${guest.fullName}`}
-          title="Auto-seat guest"
-          onPointerDown={stopGuestChipAction}
-          onMouseDown={stopGuestChipAction}
-          onClick={handleAutoSeat}>
-          <Sparkles className="sidebar-quick-action-icon" aria-hidden="true" />
-        </button>
-      ) : null}
     </div>
   );
 }

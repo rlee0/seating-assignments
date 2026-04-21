@@ -40,28 +40,27 @@
   --popover-foreground: oklch(0.145 0 0);
 
   /* Actions */
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.55 0.16 257);
+  --primary-foreground: oklch(0.985 0.01 257);
 
   --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
+  --secondary-foreground: oklch(0.3 0 0);
 
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted-foreground: oklch(0.5 0 0);
 
-  --accent: oklch(0.965 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --accent: oklch(0.955 0 0);
+  --accent-foreground: oklch(0.3 0 0);
 
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
 
   /* Chrome */
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.869 0 0);
-  --ring: oklch(0.627 0.15 264.052);
+  --border: oklch(0.9 0.02 250);
+  --input: oklch(0.86 0.02 250);
+  --ring: oklch(0.62 0.14 257);
 
   --radius: 0.5rem;
-
 
   /* Diff preview colors */
   --diff-added-slot-bg: #f4fbf6;

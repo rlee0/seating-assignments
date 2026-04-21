@@ -10,11 +10,11 @@ const guestChipVariants = cva(
         selected:
           "border-transparent bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/85",
         relatedHousehold:
-          "border-transparent bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-700",
+          "border-primary/20 bg-primary/15 text-primary hover:bg-primary/20 active:bg-primary/25",
         relatedGroup:
-          "border-transparent bg-blue-100 text-blue-900 hover:bg-blue-200 active:bg-blue-200",
+          "border-input bg-secondary text-secondary-foreground hover:bg-secondary/80 active:bg-secondary/75",
         relatedBoth:
-          "border-transparent bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-700",
+          "border-primary/20 bg-primary/15 text-primary hover:bg-primary/20 active:bg-primary/25",
         highlighted:
           "border-[var(--guest-chip-highlight-border)] bg-[var(--guest-chip-highlight-bg)] text-slate-900 hover:bg-[var(--guest-chip-highlight-bg)] active:bg-[var(--guest-chip-highlight-bg)]",
         searchMatch:

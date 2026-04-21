@@ -1,11 +1,8 @@
-import { Button } from "@/components/ui/button";
 import { CSS } from "@dnd-kit/utilities";
 import GuestChip from "./GuestChip";
 import { TABLE_CAPACITY } from "../types";
 import type { TableState } from "../types";
-import { X } from "lucide-react";
 import { useDroppable } from "@dnd-kit/core";
-import { useSeating } from "../store/SeatingContext";
 import { useSortable } from "@dnd-kit/sortable";
 
 interface Props {
@@ -16,10 +13,6 @@ interface Props {
   previewSeatKinds?: Array<"added" | "changed" | "deleted" | null>;
   isPreviewMode?: boolean;
   hasTablePreviewChanges?: boolean;
-}
-
-function stopTableDrag(event: React.PointerEvent | React.MouseEvent) {
-  event.stopPropagation();
 }
 
 function SeatSlot({
@@ -90,7 +83,6 @@ export default function TableCard({
   isPreviewMode = false,
   hasTablePreviewChanges = false,
 }: Props) {
-  const { dispatch } = useSeating();
   const {
     attributes,
     listeners,
@@ -111,11 +103,6 @@ export default function TableCard({
   const seatedGuestIds = seated.filter((guestId): guestId is string => guestId !== null);
   const occupancy = seatedGuestIds.length;
   const isFull = occupancy >= TABLE_CAPACITY;
-
-  function handleClearTable() {
-    if (occupancy === 0) return;
-    dispatch({ type: "CLEAR_TABLE", tableNumber: table.tableNumber });
-  }
 
   const topRow = seated.slice(0, 4);
   const bottomRow = seated.slice(4, 8);
@@ -163,18 +150,6 @@ export default function TableCard({
               {occupancy}/{TABLE_CAPACITY}
             </span>
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={`table-action table-clear-btn${occupancy === 0 ? " is-hidden" : ""} w-6 h-6`}
-            aria-label={`Clear ${table.name}`}
-            onPointerDownCapture={stopTableDrag}
-            onClick={handleClearTable}
-            title="Clear table"
-            disabled={occupancy === 0}>
-            <X className="w-3 h-3" aria-hidden="true" />
-          </Button>
         </div>
 
         {/* Bottom 4 seats */}

@@ -496,11 +496,15 @@
   min-height: 19px;
 }
 
-.guest-chip--table.is-highlighted:not(.is-selected):not(.is-related-household):not(.is-related-group) {
+.guest-chip--table.is-highlighted:not(.is-selected):not(.is-related-household):not(
+    .is-related-group
+  ) {
   --guest-chip-bg: var(--guest-chip-highlight-bg, #e8f1fb);
 }
 
-.guest-chip--table.is-highlighted:not(.is-selected):not(.is-related-household):not(.is-related-group)
+.guest-chip--table.is-highlighted:not(.is-selected):not(.is-related-household):not(
+    .is-related-group
+  )
   .guest-name {
   color: #0f172a;
   font-weight: 600;
@@ -611,11 +615,11 @@
 }
 
 .guest-chip.is-related-household {
-  --guest-chip-bg: color-mix(in oklab, var(--primary) 85%, white);
+  --guest-chip-bg: color-mix(in oklab, var(--primary) 15%, white);
 }
 
 .guest-chip.is-related-household .guest-name {
-  color: #fff;
+  color: var(--primary);
 }
 
 /* show in selected/related states regardless of hover */
@@ -623,27 +627,43 @@
 .guest-chip.is-related-household .sidebar-quick-action {
   opacity: 1;
   pointer-events: auto;
-  color: rgba(255, 255, 255, 0.88);
-  border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.12);
+  color: color-mix(in oklab, var(--primary-foreground) 88%, transparent);
+  border-color: color-mix(in oklab, var(--primary-foreground) 18%, transparent);
+  background: color-mix(in oklab, var(--primary-foreground) 12%, transparent);
 }
 
 .guest-chip.is-selected .sidebar-quick-action:hover,
 .guest-chip.is-related-household .sidebar-quick-action:hover {
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.28);
-  background: rgba(255, 255, 255, 0.2);
+  color: var(--primary-foreground);
+  border-color: color-mix(in oklab, var(--primary-foreground) 28%, transparent);
+  background: color-mix(in oklab, var(--primary-foreground) 20%, transparent);
 }
 
 .guest-chip.is-selected .sidebar-quick-action:focus-visible,
 .guest-chip.is-related-household .sidebar-quick-action:focus-visible {
-  outline-color: rgba(255, 255, 255, 0.65);
-  color: #fff;
+  outline-color: color-mix(in oklab, var(--primary-foreground) 65%, transparent);
+  color: var(--primary-foreground);
+}
+
+.guest-chip.is-related-household .sidebar-quick-action {
+  color: color-mix(in oklab, var(--primary) 75%, transparent);
+  border-color: color-mix(in oklab, var(--primary) 18%, transparent);
+  background: color-mix(in oklab, var(--primary) 10%, transparent);
+}
+
+.guest-chip.is-related-household .sidebar-quick-action:hover {
+  color: var(--primary);
+  border-color: color-mix(in oklab, var(--primary) 28%, transparent);
+  background: color-mix(in oklab, var(--primary) 16%, transparent);
+}
+
+.guest-chip.is-related-household .sidebar-quick-action:focus-visible {
+  outline-color: color-mix(in oklab, var(--primary) 45%, transparent);
+  color: var(--primary);
 }
 
 .guest-chip--table.is-selected,
-.guest-chip--table.is-related-household,
-.guest-chip--table.is-related-group {
+.guest-chip--table.is-related-household {
   border-color: transparent;
 }
 
@@ -652,15 +672,15 @@
 }
 
 .guest-chip.is-related-group {
-  --guest-chip-bg: var(--accent);
+  --guest-chip-bg: var(--secondary);
 }
 
 .guest-chip.is-related-both {
-  --guest-chip-bg: color-mix(in oklab, var(--primary) 85%, white);
+  --guest-chip-bg: color-mix(in oklab, var(--primary) 15%, white);
 }
 
 .guest-chip.is-related-both .guest-name {
-  color: #fff;
+  color: var(--primary);
   font-weight: 700;
 }
 
@@ -671,20 +691,20 @@
 .guest-chip.is-related-both .sidebar-quick-action {
   opacity: 1;
   pointer-events: auto;
-  color: rgba(255, 255, 255, 0.88);
-  border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.12);
+  color: color-mix(in oklab, var(--primary) 75%, transparent);
+  border-color: color-mix(in oklab, var(--primary) 18%, transparent);
+  background: color-mix(in oklab, var(--primary) 10%, transparent);
 }
 
 .guest-chip.is-related-both .sidebar-quick-action:hover {
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.28);
-  background: rgba(255, 255, 255, 0.2);
+  color: var(--primary);
+  border-color: color-mix(in oklab, var(--primary) 28%, transparent);
+  background: color-mix(in oklab, var(--primary) 16%, transparent);
 }
 
 .guest-chip.is-related-both .sidebar-quick-action:focus-visible {
-  outline-color: rgba(255, 255, 255, 0.65);
-  color: #fff;
+  outline-color: color-mix(in oklab, var(--primary) 45%, transparent);
+  color: var(--primary);
 }
 
 /* ─── Table board ─────────────────────────────────────────────────────────── */
@@ -979,40 +999,6 @@
 
 .table-label-main:active {
   cursor: grabbing;
-}
-
-.table-action {
-  position: absolute;
-  right: 5px;
-  top: 50%;
-  transform: translateY(-50%);
-  flex-shrink: 0;
-}
-
-.table-clear-btn {
-  color: #c08484;
-}
-
-.table-clear-btn:hover {
-  background: #fef2f2 !important;
-  color: #b91c1c !important;
-}
-
-.table-clear-btn.is-hidden {
-  visibility: hidden;
-}
-
-@media (hover: hover) {
-  .table-clear-btn {
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  .table-card:hover .table-clear-btn,
-  .table-card:focus-within .table-clear-btn {
-    opacity: 1;
-    pointer-events: auto;
-  }
 }
 
 .table-name {

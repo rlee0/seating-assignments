@@ -374,7 +374,7 @@ function SeatingApp({
     function handleDocumentClick(event: MouseEvent) {
       const target = event.target;
       if (!(target instanceof Element)) return;
-      if (!target.closest(".guest-chip")) {
+      if (!target.closest(".guest-chip, .sidebar-selected-guest")) {
         clearSelectedGuest();
       }
     }
