@@ -19,6 +19,7 @@ export type SeatingAction =
       guestIds: string[];
       assignmentMode?: AssignmentMode;
       seatIndex?: number;
+      guestProfiles?: Record<string, GuestProfile>;
     }
   | { type: "SET_GUEST_ANCHORED"; guestId: string; anchored: boolean }
   | {
@@ -182,7 +183,7 @@ function assignGuestsWithOverflow(
 //   3. Group members occupy a contiguous seat block within the row surface (hard).
 //   4. Row capacity is never exceeded (hard).
 //   5. Prefer single-group rows; mixed only when unavoidable.
-//   6. Household members sit next to each other (same side, adjacent slots).
+//   6. Household members sit next to each other (adjacent seat slots).
 //   7. Even spread across rows.
 //   8. Host-side balance as final tie-breaker.
 //   9. Fully deterministic: alphabetical group name → alphabetical household as tiebreak.
@@ -245,15 +246,14 @@ void windowIsFree; // reserved for anchor-table logic
  *
  * Only null slots are writable. Seated guests (locked or not) are never displaced.
  */
-function findBestWindow(
+function findCandidateWindows(
   surface: Array<string | null>,
   len: number,
   groupName: string,
   guestProfiles: Record<string, GuestProfile>
-): number {
+): Array<{ start: number; foreignCount: number }> {
   const capacity = surface.length;
-  let bestStart = -1;
-  let bestForeignCount = Infinity;
+  const candidates: Array<{ start: number; foreignCount: number }> = [];
 
   for (let start = 0; start <= capacity - len; start += 1) {
     let nullCount = 0;
@@ -272,15 +272,16 @@ function findBestWindow(
 
     if (nullCount < len) continue; // not enough empty seats in this window
 
-    if (foreignCount < bestForeignCount) {
-      bestForeignCount = foreignCount;
-      bestStart = start;
-    }
+    candidates.push({ start, foreignCount });
   }
 
-  return bestStart;
-}
+  candidates.sort((a, b) => {
+    if (a.foreignCount !== b.foreignCount) return a.foreignCount - b.foreignCount;
+    return a.start - b.start;
+  });
 
+  return candidates;
+}
 
 /**
  * Place `guestIds` into `surface` starting at `windowStart`.
@@ -293,16 +294,17 @@ function placeGroupIntoWindow(
   windowStart: number,
   guestIds: string[],
   guestProfiles: Record<string, GuestProfile>
-): Array<string | null> {
+): Array<string | null> | null {
   const next = [...surface];
 
-  // Collect null slot indices starting at windowStart — only null slots are writable.
+  // Window length equals group size; only this exact segment is writable.
   const writable: number[] = [];
-  for (let i = windowStart; i < surface.length && writable.length < guestIds.length; i += 1) {
+  for (let i = windowStart; i < windowStart + guestIds.length; i += 1) {
     if (surface[i] === null) writable.push(i);
   }
+  if (writable.length < guestIds.length) return null;
 
-  // Sort guestIds: households together, largest household first, then alphabetical.
+  // Sort households: largest first, then alphabetical household key.
   const householdBuckets = new Map<string, string[]>();
   for (const guestId of guestIds) {
     const hh = guestProfiles[guestId]?.partyId ?? guestId;
@@ -317,35 +319,160 @@ function placeGroupIntoWindow(
     return hhA.localeCompare(hhB);
   });
 
-  // Assign households to contiguous side blocks within the writable slots.
-  // Side A of each table = slots 0-3 (idx % TABLE_CAPACITY < 4), Side B = slots 4-7.
-  // We prefer placing each household on the same side.
-  let wi = 0;
+  const writableByTable = new Map<number, number[]>();
+  for (const idx of writable) {
+    const tableIdx = Math.floor(idx / TABLE_CAPACITY);
+    const slots = writableByTable.get(tableIdx) ?? [];
+    slots.push(idx);
+    writableByTable.set(tableIdx, slots);
+  }
+
+  function getContiguousRun(slots: number[], len: number): number[] | null {
+    if (slots.length < len) return null;
+    const sorted = [...slots].sort((a, b) => a - b);
+
+    for (let start = 0; start <= sorted.length - len; start += 1) {
+      const run = sorted.slice(start, start + len);
+      let contiguous = true;
+      for (let i = 1; i < run.length; i += 1) {
+        if (run[i] !== run[i - 1] + 1) {
+          contiguous = false;
+          break;
+        }
+      }
+      if (contiguous) return run;
+    }
+
+    return null;
+  }
+
   for (const hhGuests of sortedHouseholds) {
-    let placed = false;
-    for (let start = wi; start <= writable.length - hhGuests.length; start += 1) {
-      const run = writable.slice(start, start + hhGuests.length);
-      const sides = run.map((idx) => (idx % TABLE_CAPACITY < 4 ? "A" : "B"));
-      if (sides.every((s) => s === sides[0])) {
-        for (let k = 0; k < hhGuests.length; k += 1) {
-          next[run[k]] = hhGuests[k];
-        }
-        wi = start + hhGuests.length;
-        placed = true;
-        break;
-      }
+    const tableOptions = [...writableByTable.entries()]
+      .map(([tableIdx, slots]) => {
+        const run = getContiguousRun(slots, hhGuests.length);
+        return run ? { tableIdx, run, spare: slots.length - hhGuests.length } : null;
+      })
+      .filter(
+        (entry): entry is { tableIdx: number; run: number[]; spare: number } => entry !== null
+      )
+      .sort((a, b) => {
+        if (a.spare !== b.spare) return a.spare - b.spare;
+        if (a.tableIdx !== b.tableIdx) return a.tableIdx - b.tableIdx;
+        return a.run[0] - b.run[0];
+      });
+
+    const selected = tableOptions[0];
+    if (!selected) return null;
+
+    const { tableIdx, run } = selected;
+    for (let i = 0; i < hhGuests.length; i += 1) {
+      next[run[i]] = hhGuests[i];
     }
-    if (!placed) {
-      for (const guestId of hhGuests) {
-        if (wi < writable.length) {
-          next[writable[wi]] = guestId;
-          wi += 1;
-        }
-      }
-    }
+    const remaining = writableByTable.get(tableIdx)?.filter((slot) => !run.includes(slot)) ?? [];
+    writableByTable.set(tableIdx, remaining);
   }
 
   return next;
+}
+
+function getSplitHouseholds(
+  tables: TableState[],
+  guestProfiles: Record<string, GuestProfile>
+): Set<string> {
+  const householdToTables = new Map<string, Set<number>>();
+
+  for (const table of tables) {
+    for (const guestId of table.guestIds) {
+      if (!guestId) continue;
+      const householdId = guestProfiles[guestId]?.partyId;
+      if (!householdId) continue;
+
+      const tableNumbers = householdToTables.get(householdId) ?? new Set<number>();
+      tableNumbers.add(table.tableNumber);
+      householdToTables.set(householdId, tableNumbers);
+    }
+  }
+
+  const splitHouseholds = new Set<string>();
+  for (const [householdId, tableNumbers] of householdToTables.entries()) {
+    if (tableNumbers.size > 1) splitHouseholds.add(householdId);
+  }
+
+  return splitHouseholds;
+}
+
+function getNonAdjacentHouseholds(
+  tables: TableState[],
+  guestProfiles: Record<string, GuestProfile>
+): Set<string> {
+  const householdToSeats = new Map<string, Array<{ tableNumber: number; seatIdx: number }>>();
+
+  for (const table of tables) {
+    table.guestIds.forEach((guestId, seatIdx) => {
+      if (!guestId) return;
+      const householdId = guestProfiles[guestId]?.partyId;
+      if (!householdId) return;
+
+      const seats = householdToSeats.get(householdId) ?? [];
+      seats.push({ tableNumber: table.tableNumber, seatIdx });
+      householdToSeats.set(householdId, seats);
+    });
+  }
+
+  const nonAdjacent = new Set<string>();
+  for (const [householdId, seats] of householdToSeats.entries()) {
+    if (seats.length <= 1) continue;
+
+    const tableNumbers = new Set(seats.map((s) => s.tableNumber));
+    if (tableNumbers.size !== 1) continue;
+
+    const seatIdxs = seats.map((s) => s.seatIdx).sort((a, b) => a - b);
+    let contiguous = true;
+    for (let i = 1; i < seatIdxs.length; i += 1) {
+      if (seatIdxs[i] !== seatIdxs[i - 1] + 1) {
+        contiguous = false;
+        break;
+      }
+    }
+
+    if (!contiguous) {
+      nonAdjacent.add(householdId);
+    }
+  }
+
+  return nonAdjacent;
+}
+
+function introducesNewHouseholdSplit(
+  previousTables: TableState[],
+  nextTables: TableState[],
+  guestProfiles?: Record<string, GuestProfile>
+): boolean {
+  if (!guestProfiles) return false;
+
+  const previousSplits = getSplitHouseholds(previousTables, guestProfiles);
+  const nextSplits = getSplitHouseholds(nextTables, guestProfiles);
+  for (const householdId of nextSplits) {
+    if (!previousSplits.has(householdId)) return true;
+  }
+
+  return false;
+}
+
+function introducesNewHouseholdAdjacencyViolation(
+  previousTables: TableState[],
+  nextTables: TableState[],
+  guestProfiles?: Record<string, GuestProfile>
+): boolean {
+  if (!guestProfiles) return false;
+
+  const previousViolations = getNonAdjacentHouseholds(previousTables, guestProfiles);
+  const nextViolations = getNonAdjacentHouseholds(nextTables, guestProfiles);
+  for (const householdId of nextViolations) {
+    if (!previousViolations.has(householdId)) return true;
+  }
+
+  return false;
 }
 
 /** Count how many unique FOREIGN group names (groups ≠ excludeGroup) occupy a row surface. */
@@ -408,7 +535,8 @@ function assignGuestsSmart(
   // Groups with no group name are treated as their own solo group keyed by partyId.
   const groupBuckets = new Map<string, string[]>();
   for (const guestId of toSeat) {
-    const key = guestProfiles[guestId]?.group || `__solo_${guestProfiles[guestId]?.partyId ?? guestId}`;
+    const key =
+      guestProfiles[guestId]?.group || `__solo_${guestProfiles[guestId]?.partyId ?? guestId}`;
     const bucket = groupBuckets.get(key) ?? [];
     bucket.push(guestId);
     groupBuckets.set(key, bucket);
@@ -438,7 +566,7 @@ function assignGuestsSmart(
     const needed = groupGuestIds.length;
     const surfaces = getRowSurfaces();
 
-    // Score each row: find the best window in each row, then pick the best row.
+    // Score each row: find the best VIABLE window in each row, then pick the best row.
     // Tier 1: row with only this group (or empty) + a valid window.
     // Tier 2: row with mixed groups but a valid window.
     // Within tier: prefer tightest fit (fewest open seats while still fitting), then earliest row.
@@ -449,62 +577,67 @@ function assignGuestsSmart(
       foreignGroupCount: number;
       openSeats: number;
     }
-    let best: RowOption | null = null;
+    const options: RowOption[] = [];
 
     for (let r = 0; r < numRows; r += 1) {
       const surface = surfaces[r];
       const open = countOpenSeats(surface);
       if (open < needed) continue; // not enough room in this row
 
-      const windowStart = findBestWindow(surface, needed, groupName, guestProfiles);
-      if (windowStart === -1) continue;
+      const windows = findCandidateWindows(surface, needed, groupName, guestProfiles);
+      if (windows.length === 0) continue;
 
       const foreignGroupCount = countGroupsInSurface(surface, lockedSet, guestProfiles, groupName);
-      const option: RowOption = { rowIdx: r, windowStart, foreignGroupCount, openSeats: open };
+      const viableWindow = windows.find(
+        (window) =>
+          placeGroupIntoWindow(surface, window.start, groupGuestIds, guestProfiles) !== null
+      );
+      if (!viableWindow) continue;
 
-      if (!best) { best = option; continue; }
-
-      // Tier 1 beats Tier 2.
-      if (option.foreignGroupCount < best.foreignGroupCount) { best = option; continue; }
-      if (option.foreignGroupCount > best.foreignGroupCount) continue;
-
-      // Same tier: prefer tightest fit (less waste).
-      if (option.openSeats < best.openSeats) { best = option; continue; }
-      if (option.openSeats > best.openSeats) continue;
-
-      // Tie: earlier row wins (determinism).
-      if (option.rowIdx < best.rowIdx) { best = option; }
+      options.push({
+        rowIdx: r,
+        windowStart: viableWindow.start,
+        foreignGroupCount,
+        openSeats: open,
+      });
     }
 
-    if (!best) {
-      // No single-row fit. As a last resort, find any row with enough open seats
-      // and place without contiguous-window guarantee (capacity-only fallback).
-      const surfaces2 = getRowSurfaces();
-      for (let r = 0; r < numRows; r += 1) {
-        const surface = surfaces2[r];
-        const openIdxs = surface.reduce<number[]>((acc, id, i) => {
-          if (id === null) acc.push(i);
-          return acc;
-        }, []);
-        if (openIdxs.length < needed) continue;
-
-        const next = [...surface];
-        groupGuestIds.forEach((guestId, k) => { next[openIdxs[k]] = guestId; });
-        applyRowSurface(next, nextTables.slice(r * TABLES_PER_ROW, (r + 1) * TABLES_PER_ROW), nextTables, r * TABLES_PER_ROW);
-        break;
-      }
+    if (options.length === 0) {
       continue;
     }
 
-    // Place the group into the chosen window with household-side ordering.
-    const surface = surfaces[best.rowIdx];
-    const newSurface = placeGroupIntoWindow(surface, best.windowStart, groupGuestIds, guestProfiles);
-    applyRowSurface(
-      newSurface,
-      nextTables.slice(best.rowIdx * TABLES_PER_ROW, (best.rowIdx + 1) * TABLES_PER_ROW),
-      nextTables,
-      best.rowIdx * TABLES_PER_ROW
-    );
+    options.sort((a, b) => {
+      if (a.foreignGroupCount !== b.foreignGroupCount) {
+        return a.foreignGroupCount - b.foreignGroupCount;
+      }
+      if (a.openSeats !== b.openSeats) {
+        return a.openSeats - b.openSeats;
+      }
+      return a.rowIdx - b.rowIdx;
+    });
+
+    let placed = false;
+    for (const option of options) {
+      const surface = surfaces[option.rowIdx];
+      const newSurface = placeGroupIntoWindow(
+        surface,
+        option.windowStart,
+        groupGuestIds,
+        guestProfiles
+      );
+      if (!newSurface) continue;
+
+      applyRowSurface(
+        newSurface,
+        nextTables.slice(option.rowIdx * TABLES_PER_ROW, (option.rowIdx + 1) * TABLES_PER_ROW),
+        nextTables,
+        option.rowIdx * TABLES_PER_ROW
+      );
+      placed = true;
+      break;
+    }
+
+    if (!placed) continue;
   }
 
   // Only remove from unassigned guests who were actually placed in nextTables.
@@ -513,6 +646,13 @@ function assignGuestsSmart(
     nextTables.flatMap((t) => t.guestIds.filter((id): id is string => id !== null))
   );
   const successfullyPlaced = new Set(toSeat.filter((id) => nowSeatedSet.has(id)));
+
+  if (introducesNewHouseholdSplit(state.tables, nextTables, guestProfiles)) {
+    return state;
+  }
+  if (introducesNewHouseholdAdjacencyViolation(state.tables, nextTables, guestProfiles)) {
+    return state;
+  }
 
   return {
     tables: nextTables,
@@ -548,7 +688,13 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
     }
 
     case "ASSIGN_GUESTS": {
-      const { tableNumber, guestIds, assignmentMode = "single-table", seatIndex } = action;
+      const {
+        tableNumber,
+        guestIds,
+        assignmentMode = "single-table",
+        seatIndex,
+        guestProfiles,
+      } = action;
       const tableIdx = state.tables.findIndex(
         (tableEntry) => tableEntry.tableNumber === tableNumber
       );
@@ -556,7 +702,20 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       if (!table) return state;
 
       if (assignmentMode === "group-overflow") {
-        return assignGuestsWithOverflow(state, tableIdx, guestIds, seatIndex);
+        const overflowState = assignGuestsWithOverflow(state, tableIdx, guestIds, seatIndex);
+        if (introducesNewHouseholdSplit(state.tables, overflowState.tables, guestProfiles)) {
+          return state;
+        }
+        if (
+          introducesNewHouseholdAdjacencyViolation(
+            state.tables,
+            overflowState.tables,
+            guestProfiles
+          )
+        ) {
+          return state;
+        }
+        return overflowState;
       }
 
       const orderedGuestIds = getUniqueGuestIds(guestIds);
@@ -577,8 +736,17 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       const newTables = normalizedTables.map((currentTable, index) =>
         index === tableIdx ? { ...currentTable, guestIds: updatedSeatSlots } : currentTable
       );
+      if (introducesNewHouseholdSplit(state.tables, newTables, guestProfiles)) return state;
+      if (introducesNewHouseholdAdjacencyViolation(state.tables, newTables, guestProfiles)) {
+        return state;
+      }
+
       const newUnassigned = state.unassigned.filter((guestId) => !incomingSet.has(guestId));
-      return { tables: newTables, unassigned: newUnassigned, lockedGuestIds: state.lockedGuestIds ?? [] };
+      return {
+        tables: newTables,
+        unassigned: newUnassigned,
+        lockedGuestIds: state.lockedGuestIds ?? [],
+      };
     }
 
     case "REMOVE_GUESTS": {

@@ -720,6 +720,7 @@ function SeatingApp({
           seatIndex: seatTarget.seatIndex,
           guestIds: [data.guestId],
           assignmentMode: "single-table",
+          guestProfiles,
         });
         return;
       }
@@ -731,6 +732,7 @@ function SeatingApp({
           tableNumber,
           guestIds,
           assignmentMode: data.kind === "group" ? "group-overflow" : "single-table",
+          guestProfiles,
         });
       }
     },

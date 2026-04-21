@@ -138,33 +138,53 @@ describe("household hard constraint", () => {
     }
   });
 
-  it("splits into the fewest chunks when household exceeds any single table capacity", () => {
-    // Create a household larger than TABLE_CAPACITY to force a split
-    // We can simulate this by pre-filling all tables so only 2 seats are free on table 1
-    // and 2 on table 2, but not enough on any single table for 4 members.
-    const household = ["h1", "h2", "h3", "h4"];
-    const filler = Array.from({ length: TABLE_CAPACITY - 2 }, (_, i) => `f${i}`);
-    const allIds = [...filler, ...household];
-    const profiles = makeProfiles([
-      ...filler.map((id) => ({ id, partyId: id })),
-      ...household.map((id) => ({ id, partyId: "hh" })),
-    ]);
-
-    // Seat fillers first to leave only 2 free seats on table 1
-    let state = createInitialState(allIds);
-    state = autoAssign(state, filler, profiles);
-
-    // Now auto-seat the 4-member household — should split into 2+2, not 1+1+1+1
+  it("leaves an oversized household unassigned rather than splitting across tables", () => {
+    const household = Array.from({ length: TABLE_CAPACITY + 1 }, (_, i) => `h${i + 1}`);
+    const profiles = makeProfiles(household.map((id) => ({ id, partyId: "hh" })));
+    const state = createInitialState(household);
     const result = autoAssign(state, household, profiles);
 
-    // Verify no household member ended up isolated from all others on their own table
-    const tableCounts = result.tables.map(
-      (t) => household.filter((id) => t.guestIds.includes(id)).length
-    );
-    const isolatedTables = tableCounts.filter((c) => c === 1);
-    // At most one member per split is acceptable only if unavoidable;
-    // with 4 members and 2-seat chunks available, we expect no isolated singles
-    expect(isolatedTables.length).toBe(0);
+    const seatedHousehold = seatedIds(result).filter((id) => household.includes(id));
+    expect(seatedHousehold.length).toBe(0);
+    expect(result.unassigned).toEqual(expect.arrayContaining(household));
+  });
+
+  it("keeps household members adjacent when auto-seating", () => {
+    const pair = ["h1", "h2"];
+    const blockers = ["b1", "b2"];
+    const all = [...pair, ...blockers];
+
+    const profiles = makeProfiles([
+      ...pair.map((id) => ({ id, partyId: "hh1", group: "Group A" })),
+      ...blockers.map((id) => ({ id, partyId: id, group: "Group B" })),
+    ]);
+
+    let state = createInitialState(all);
+    // Occupy seats 0 and 2 on table 1, leaving non-adjacent openings there.
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["b1"],
+      seatIndex: 0,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["b2"],
+      seatIndex: 2,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+
+    const result = autoAssign(state, pair, profiles);
+    const homeTable = result.tables.find((t) => t.guestIds.includes("h1"))!;
+    const h1Idx = homeTable.guestIds.indexOf("h1");
+    const h2Idx = homeTable.guestIds.indexOf("h2");
+
+    expect(homeTable.guestIds).toContain("h2");
+    expect(Math.abs(h1Idx - h2Idx)).toBe(1);
   });
 });
 
@@ -230,6 +250,69 @@ describe("group cohesion regression", () => {
 
     const homeTable = result.tables.find((t) => t.guestIds.includes("p1"))!;
     expect(homeTable.guestIds).toContain("p2");
+  });
+
+  it("rejects manual reassignment that would split a seated household", () => {
+    const household = ["g1", "g2"];
+    const profiles = makeProfiles(household.map((id) => ({ id, partyId: "hh1" })));
+
+    let state = createInitialState(household);
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: household,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+
+    const result = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 2,
+      guestIds: ["g1"],
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+
+    expect(result).toEqual(state);
+  });
+
+  it("rejects manual seating that puts same-household members non-adjacent", () => {
+    const allIds = ["g1", "g2", "x1"];
+    const profiles = makeProfiles([
+      { id: "g1", partyId: "hh2" },
+      { id: "g2", partyId: "hh2" },
+      { id: "x1", partyId: "x1" },
+    ]);
+
+    let state = createInitialState(allIds);
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["x1"],
+      seatIndex: 1,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g1"],
+      seatIndex: 0,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+
+    const result = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g2"],
+      seatIndex: 2,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+
+    expect(result).toEqual(state);
   });
 });
 
