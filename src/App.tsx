@@ -1,17 +1,12 @@
 import "./App.css";
 
 import {
-  closestCenter,
-  type CollisionDetection,
   DndContext,
-  DragEndEvent,
-  DragMoveEvent,
   DragOverlay,
-  DragOverEvent,
-  DragStartEvent,
   PointerSensor,
   TouchSensor,
-  pointerWithin,
+  type DragEndEvent,
+  type DragStartEvent,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
@@ -51,294 +46,13 @@ import {
   type SeatingExportData,
   type TableState,
 } from "./types";
-import { type GuestProfile, seatingReducer } from "./store/reducer";
+import { type GuestProfile } from "./store/reducer";
+import { dndCollisionDetection } from "./dnd/collision";
+import { parseDragIntent, resolveDropTarget } from "./dnd/parsers";
+import { routeDrop } from "./dnd/router";
+import type { DragKind } from "./dnd/types";
 
-type ActiveDragData =
-  | { kind: "party"; partyId: string; origin: "sidebar" }
-  | {
-      kind: "guest";
-      guestId: string;
-      origin: "sidebar" | "table";
-      tableNumber?: number;
-      seatIndex?: number;
-    }
-  | { kind: "group"; groupName: string; origin: "sidebar" }
-  | { kind: "table"; tableNumber: number; name: string; origin: "table" };
-
-interface AutoSeatPreview {
-  tables: TableState[];
-}
-
-function isUnassignedDropTarget(targetId: string): boolean {
-  return targetId === "unassigned" || targetId === "unassigned-panel";
-}
-
-function isActiveDragData(value: unknown): value is ActiveDragData {
-  if (!value || typeof value !== "object") return false;
-
-  const maybeData = value as Record<string, unknown>;
-  if (maybeData.origin !== "sidebar" && maybeData.origin !== "table") return false;
-
-  if (maybeData.kind === "guest") return typeof maybeData.guestId === "string";
-  if (maybeData.kind === "party") {
-    return maybeData.origin === "sidebar" && typeof maybeData.partyId === "string";
-  }
-  if (maybeData.kind === "group") {
-    return maybeData.origin === "sidebar" && typeof maybeData.groupName === "string";
-  }
-
-  return (
-    maybeData.kind === "table" &&
-    maybeData.origin === "table" &&
-    typeof maybeData.tableNumber === "number" &&
-    typeof maybeData.name === "string"
-  );
-}
-
-function getPointerCoordinatesFromEvent(
-  event: Event | null | undefined
-): { x: number; y: number } | null {
-  if (!event) return null;
-
-  const maybeMouseEvent = event as MouseEvent;
-  if (typeof maybeMouseEvent.clientX === "number" && typeof maybeMouseEvent.clientY === "number") {
-    return { x: maybeMouseEvent.clientX, y: maybeMouseEvent.clientY };
-  }
-
-  const maybeTouchEvent = event as TouchEvent;
-  const touch = maybeTouchEvent.touches?.[0] ?? maybeTouchEvent.changedTouches?.[0];
-  if (touch) {
-    return { x: touch.clientX, y: touch.clientY };
-  }
-
-  return null;
-}
-
-function getUnassignedGuestIdsForParty(
-  partyId: string,
-  parties: ParsedData["parties"],
-  unassignedSet: Set<string>
-): string[] {
-  const party = parties.get(partyId);
-  if (!party) return [];
-
-  return party.guestIds.filter((guestId) => unassignedSet.has(guestId));
-}
-
-function getUnassignedGuestIdsForGroup(
-  groupName: string,
-  parties: ParsedData["parties"],
-  unassignedSet: Set<string>
-): string[] {
-  const guestIds: string[] = [];
-
-  for (const party of parties.values()) {
-    if ((party.group || "No Group") !== groupName) continue;
-
-    guestIds.push(...party.guestIds.filter((guestId) => unassignedSet.has(guestId)));
-  }
-
-  return guestIds;
-}
-
-function resolveDragGuestIds(
-  data: ActiveDragData,
-  parties: ParsedData["parties"],
-  unassignedGuestIds: string[],
-  includeAssignedMembers = false
-): string[] {
-  const unassignedSet = new Set(unassignedGuestIds);
-
-  switch (data.kind) {
-    case "guest":
-      return [data.guestId];
-    case "party":
-      return includeAssignedMembers
-        ? (parties.get(data.partyId)?.guestIds ?? [])
-        : getUnassignedGuestIdsForParty(data.partyId, parties, unassignedSet);
-    case "group":
-      if (includeAssignedMembers) {
-        const guestIds: string[] = [];
-
-        for (const party of parties.values()) {
-          if ((party.group || "No Group") !== data.groupName) continue;
-          guestIds.push(...party.guestIds);
-        }
-
-        return guestIds;
-      }
-
-      return getUnassignedGuestIdsForGroup(data.groupName, parties, unassignedSet);
-    case "table":
-      return [];
-  }
-}
-
-function parseSeatTarget(targetId: string): { tableNumber: number; seatIndex: number } | null {
-  if (!targetId.startsWith("seat-")) return null;
-
-  const [, tableToken, seatToken] = targetId.split("-");
-  const tableNumber = Number.parseInt(tableToken, 10);
-  const seatIndex = Number.parseInt(seatToken, 10);
-
-  if (Number.isNaN(tableNumber) || Number.isNaN(seatIndex)) return null;
-  return { tableNumber, seatIndex };
-}
-
-function parseGuestTargetId(targetId: string): string | null {
-  if (!targetId.startsWith("guest-")) return null;
-
-  const guestId = targetId.slice("guest-".length);
-  return guestId || null;
-}
-
-function findSeatForGuestId(
-  guestId: string,
-  tables: Array<{ tableNumber: number; guestIds: Array<string | null> }>
-): { tableNumber: number; seatIndex: number } | null {
-  for (const table of tables) {
-    const seatIndex = table.guestIds.findIndex((id) => id === guestId);
-    if (seatIndex !== -1) {
-      return { tableNumber: table.tableNumber, seatIndex };
-    }
-  }
-
-  return null;
-}
-
-function getDropProbePoint(
-  pointerPosition: { x: number; y: number } | null,
-  draggedRect: { left: number; top: number; width: number; height: number } | null
-): { x: number; y: number } | null {
-  if (pointerPosition) return pointerPosition;
-  if (!draggedRect) return null;
-
-  return {
-    x: draggedRect.left + draggedRect.width / 2,
-    y: draggedRect.top + draggedRect.height / 2,
-  };
-}
-
-function findSeatTargetFromElement(
-  element: Element | null
-): { tableNumber: number; seatIndex: number } | null {
-  const seatId = element?.closest<HTMLElement>(".seat-slot")?.dataset.seatId;
-  if (!seatId) return null;
-
-  return parseSeatTarget(seatId);
-}
-
-function parseTableNumber(targetId: string): number | null {
-  if (targetId.startsWith("sortable-table-")) {
-    return parseInt(targetId.slice("sortable-table-".length), 10);
-  }
-
-  if (targetId.startsWith("table-")) {
-    return parseInt(targetId.slice(6), 10);
-  }
-
-  return null;
-}
-
-function getSeatedGuestIdsForTable(
-  tableNumber: number,
-  tables: Array<{ tableNumber: number; guestIds: Array<string | null> }>
-): string[] {
-  const table = tables.find((entry) => entry.tableNumber === tableNumber);
-  if (!table) return [];
-  return table.guestIds.filter((guestId): guestId is string => guestId !== null);
-}
-
-function resolveDraggedGuestId(
-  data: Extract<ActiveDragData, { kind: "guest" }>,
-  tables: Array<{ tableNumber: number; guestIds: Array<string | null> }>
-): string {
-  if (data.origin === "table") {
-    const sourceTable = tables.find((table) => table.tableNumber === data.tableNumber);
-    if (sourceTable && typeof data.seatIndex === "number") {
-      const seatGuestId = sourceTable.guestIds[data.seatIndex];
-      if (typeof seatGuestId === "string") {
-        return seatGuestId;
-      }
-    }
-  }
-
-  return data.guestId;
-}
-
-function hasSeatLayoutChanges(leftTables: TableState[], rightTables: TableState[]): boolean {
-  if (leftTables.length !== rightTables.length) return true;
-
-  for (let index = 0; index < leftTables.length; index += 1) {
-    const left = leftTables[index];
-    const right = rightTables[index];
-
-    if (left.tableNumber !== right.tableNumber) return true;
-    if (left.guestIds.length !== right.guestIds.length) return true;
-
-    for (let seatIndex = 0; seatIndex < left.guestIds.length; seatIndex += 1) {
-      if (left.guestIds[seatIndex] !== right.guestIds[seatIndex]) return true;
-    }
-  }
-
-  return false;
-}
-
-function resolveDropTargetId(
-  over: DragEndEvent["over"],
-  pointerPosition: { x: number; y: number } | null
-): string | null {
-  if (over) return String(over.id);
-  if (!pointerPosition) return null;
-
-  const elementAtPointer = document.elementFromPoint(pointerPosition.x, pointerPosition.y);
-  if (!elementAtPointer) return null;
-  if (elementAtPointer.closest(".sidebar")) {
-    return "unassigned-panel";
-  }
-
-  return null;
-}
-
-function isSidebarElement(element: Element | null): boolean {
-  return element?.closest(".sidebar") != null;
-}
-
-function isPointInsideRect(
-  point: { x: number; y: number },
-  rect: { left: number; right: number; top: number; bottom: number }
-): boolean {
-  return (
-    point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom
-  );
-}
-
-function didDropInsideSidebar(
-  pointerPosition: { x: number; y: number } | null,
-  draggedRect: { left: number; top: number; width: number; height: number } | null
-): boolean {
-  const sidebar = document.querySelector<HTMLElement>(".sidebar");
-  if (!sidebar) return false;
-
-  const sidebarRect = sidebar.getBoundingClientRect();
-
-  if (pointerPosition && isPointInsideRect(pointerPosition, sidebarRect)) {
-    return true;
-  }
-
-  if (draggedRect) {
-    const centerPoint = {
-      x: draggedRect.left + draggedRect.width / 2,
-      y: draggedRect.top + draggedRect.height / 2,
-    };
-
-    if (isPointInsideRect(centerPoint, sidebarRect)) {
-      return true;
-    }
-  }
-
-  return document.querySelector(".sidebar:hover") !== null;
-}
+// ─── Utility functions ────────────────────────────────────────────────────────
 
 function buildGuestProfiles(
   guests: ParsedData["guests"],
@@ -374,7 +88,6 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 function getInitialGuestRows(): GuestInputRow[] {
   const sourceSignature = getGuestSourceSignature();
-
   return loadPersistedGuestRows(sourceSignature) ?? [];
 }
 
@@ -408,11 +121,12 @@ function parseImportPayload(value: unknown): {
     tables?: unknown;
   };
 
-  if (candidate.version !== EXPORT_FORMAT_VERSION) {
-    return null;
-  }
+  if (candidate.version !== EXPORT_FORMAT_VERSION) return null;
 
-  if (!Array.isArray(candidate.guests) || !candidate.guests.every((row) => isGuestInputRow(row))) {
+  if (
+    !Array.isArray(candidate.guests) ||
+    !candidate.guests.every((row) => isGuestInputRow(row))
+  ) {
     return null;
   }
 
@@ -464,6 +178,8 @@ function getFirstJsonFile(files: FileList | null): File | null {
   return null;
 }
 
+// ─── SeatingApp ───────────────────────────────────────────────────────────────
+
 function SeatingApp({
   guestRows,
   onImportSnapshot,
@@ -487,61 +203,33 @@ function SeatingApp({
     selectedGuestId,
     clearSelectedGuest,
   } = useSeating();
-  const [activeDrag, setActiveDrag] = useState<ActiveDragData | null>(null);
-  const [showRemoveHint, setShowRemoveHint] = useState(false);
-  const [dragOverlayWidth, setDragOverlayWidth] = useState<number | null>(null);
-  const removeHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const removeHintActiveRef = useRef(false);
-  const isDraggedGuestSeatedRef = useRef(false);
+
+  // ── Drag state ──────────────────────────────────────────────────────────────
+  const [activeDragKind, setActiveDragKind] = useState<DragKind | null>(null);
+  const [activeDragGuestId, setActiveDragGuestId] = useState<string | null>(null);
+  /** Tracks the latest pointer position for seat-level probe during drag-end. */
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
+
+  // ── Other state ─────────────────────────────────────────────────────────────
   const [showWarnings, setShowWarnings] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<"sidebar" | "tables">("sidebar");
-  const [hoverTargetId, setHoverTargetId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const fileDragDepthRef = useRef(0);
   const [isFileDragOver, setIsFileDragOver] = useState(false);
-  const latestPointerPositionRef = useRef<{ x: number; y: number } | null>(null);
-  const activeDragOriginRef = useRef<"sidebar" | "table" | null>(null);
-  const activeSidebarScrollContainerRef = useRef<HTMLElement | null>(null);
-  const isDragOverSidebarDropzoneRef = useRef(false);
+
   const guestProfiles = useMemo(() => buildGuestProfiles(guests, parties), [guests, parties]);
 
-  const updateRemoveHint = useCallback((isVisible: boolean) => {
-    removeHintActiveRef.current = isVisible;
-    setShowRemoveHint(isVisible);
-  }, []);
-
+  // ── Pointer tracking for seat-level probe ────────────────────────────────────
   useEffect(() => {
-    function handleDocumentClick(event: MouseEvent) {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      if (!target.closest(".guest-chip, .sidebar-selected-guest")) {
-        clearSelectedGuest();
-      }
-    }
-    document.addEventListener("click", handleDocumentClick);
-    return () => {
-      document.removeEventListener("click", handleDocumentClick);
-    };
-  }, [clearSelectedGuest]);
-
-  useEffect(() => {
-    if (!activeDrag) return;
+    if (!activeDragKind) return;
 
     const handlePointerMove = (event: PointerEvent) => {
-      latestPointerPositionRef.current = {
-        x: event.clientX,
-        y: event.clientY,
-      };
+      pointerRef.current = { x: event.clientX, y: event.clientY };
     };
 
     const handleTouchMove = (event: TouchEvent) => {
       const touch = event.touches[0] ?? event.changedTouches[0];
-      if (!touch) return;
-
-      latestPointerPositionRef.current = {
-        x: touch.clientX,
-        y: touch.clientY,
-      };
+      if (touch) pointerRef.current = { x: touch.clientX, y: touch.clientY };
     };
 
     window.addEventListener("pointermove", handlePointerMove, { passive: true });
@@ -551,17 +239,18 @@ function SeatingApp({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("touchmove", handleTouchMove);
     };
-  }, [activeDrag]);
+  }, [activeDragKind]);
 
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────────
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       const isModifierPressed = event.metaKey || event.ctrlKey;
-      const isDeleteKey = event.key === "Backspace" || event.key === "Delete";
       const isFindShortcut =
         isModifierPressed && !event.shiftKey && event.key.toLowerCase() === "f";
       const isZKey = event.key.toLowerCase() === "z";
       const isUndoShortcut = isModifierPressed && !event.shiftKey && isZKey;
       const isRedoShortcut = isModifierPressed && event.shiftKey && isZKey;
+      const isDeleteKey = event.key === "Backspace" || event.key === "Delete";
 
       if (isFindShortcut) {
         const searchInput = document.querySelector<HTMLInputElement>("[data-app-search='true']");
@@ -573,9 +262,7 @@ function SeatingApp({
         return;
       }
 
-      if (event.altKey || isEditableTarget(event.target)) {
-        return;
-      }
+      if (event.altKey || isEditableTarget(event.target)) return;
 
       if (isUndoShortcut && canUndo) {
         event.preventDefault();
@@ -603,504 +290,62 @@ function SeatingApp({
     }
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [
-    canRedo,
-    canUndo,
-    clearSelectedGuest,
-    dispatch,
-    redo,
-    selectedGuestId,
-    state.unassigned,
-    undo,
-  ]);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [canRedo, canUndo, clearSelectedGuest, dispatch, redo, selectedGuestId, state.unassigned, undo]);
 
+  // ── Click-to-deselect guest ───────────────────────────────────────────────────
+  useEffect(() => {
+    function handleDocumentClick(event: MouseEvent) {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (!target.closest(".guest-chip, .sidebar-selected-guest")) {
+        clearSelectedGuest();
+      }
+    }
+    document.addEventListener("click", handleDocumentClick);
+    return () => document.removeEventListener("click", handleDocumentClick);
+  }, [clearSelectedGuest]);
+
+  // ── dnd-kit sensors ───────────────────────────────────────────────────────────
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, {
-      activationConstraint: { delay: 200, tolerance: 5 },
-    })
+    useSensor(PointerSensor, { activationConstraint: { distance: 3 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } })
   );
 
-  const autoScrollOptions = useMemo(
-    () => ({
-      canScroll: (element: Element) => {
-        if (!(element instanceof HTMLElement)) {
-          return false;
-        }
-
-        const sidebarScrollContainer = activeSidebarScrollContainerRef.current;
-        const isSidebarScrollableElement =
-          sidebarScrollContainer !== null &&
-          (element === sidebarScrollContainer || sidebarScrollContainer.contains(element));
-
-        if (isSidebarScrollableElement) {
-          if (activeDragOriginRef.current !== "sidebar") {
-            return false;
-          }
-
-          return isDragOverSidebarDropzoneRef.current;
-        }
-
-        return true;
-      },
-    }),
-    []
-  );
-
-  // For table drags: consider only sortable-table targets so reordering cannot collide with seats.
-  // For guest drags: prefer the exact seat under the pointer before falling back
-  // to table-level targets, while still excluding sortable-table-N containers so the board
-  // does not reorder.
-  // For party/group drags: only resolve to table-level targets.
-  const collisionDetection = useCallback<CollisionDetection>((args) => {
-    const data = isActiveDragData(args.active.data.current) ? args.active.data.current : null;
-    const kind = data?.kind;
-    if (kind === "table") {
-      return closestCenter({
-        ...args,
-        droppableContainers: args.droppableContainers.filter((container) => {
-          const id = String(container.id);
-          return (
-            id.startsWith("sortable-table-") ||
-            id === "auto-seat" ||
-            id === "unassigned" ||
-            id === "unassigned-panel"
-          );
-        }),
-      });
-    }
-
-    const baseContainers = args.droppableContainers.filter((container) => {
-      const id = String(container.id);
-
-      if (id.startsWith("sortable-table-")) return false;
-      return true;
-    });
-
-    if (kind === "guest") {
-      const seatContainers = baseContainers.filter((container) =>
-        String(container.id).startsWith("seat-")
-      );
-      const seatCollisions = pointerWithin({
-        ...args,
-        droppableContainers: seatContainers,
-      });
-
-      if (seatCollisions.length > 0) {
-        return seatCollisions;
-      }
-
-      const nonSeatContainers = baseContainers.filter(
-        (container) => !String(container.id).startsWith("seat-")
-      );
-
-      const sidebarTargets = nonSeatContainers.filter((container) =>
-        isUnassignedDropTarget(String(container.id))
-      );
-
-      // When dragging a seated guest from a table, prefer sidebar drop targets
-      // so unassign intent wins over nearby table-level containers.
-      if (data?.origin === "table" && sidebarTargets.length > 0) {
-        const sidebarPointerCollisions = pointerWithin({
-          ...args,
-          droppableContainers: sidebarTargets,
-        });
-
-        if (sidebarPointerCollisions.length > 0) {
-          return sidebarPointerCollisions;
-        }
-      }
-
-      const pointerCollisions = pointerWithin({
-        ...args,
-        droppableContainers: nonSeatContainers,
-      });
-
-      if (pointerCollisions.length > 0) {
-        return pointerCollisions;
-      }
-
-      // If no exact collisions, fall back to closestCenter for unassigned targets
-      // This allows dragging from distant tables to the sidebar
-      const unassignedTargets = sidebarTargets;
-
-      if (unassignedTargets.length > 0) {
-        return closestCenter({
-          ...args,
-          droppableContainers: unassignedTargets,
-        });
-      }
-
-      return [];
-    }
-
-    return pointerWithin({
-      ...args,
-      droppableContainers: baseContainers.filter(
-        (container) => !String(container.id).startsWith("seat-")
-      ),
-    });
+  // ── Drag handlers ─────────────────────────────────────────────────────────────
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    const intent = parseDragIntent(event.active.data.current);
+    if (!intent) return;
+    setActiveDragKind(intent.kind);
+    setActiveDragGuestId(intent.kind === "guest" ? intent.guestId : null);
   }, []);
-
-  const handleDragStart = useCallback(
-    (event: DragStartEvent) => {
-      const data = isActiveDragData(event.active.data.current) ? event.active.data.current : null;
-      const pointer = getPointerCoordinatesFromEvent(event.activatorEvent);
-      latestPointerPositionRef.current = pointer;
-      activeDragOriginRef.current = data?.origin ?? null;
-      if (data?.origin === "sidebar") {
-        const targetAtPointer = pointer
-          ? document
-              .elementFromPoint(pointer.x, pointer.y)
-              ?.closest<HTMLElement>(".sidebar-dropzone")
-          : null;
-
-        activeSidebarScrollContainerRef.current =
-          targetAtPointer ?? document.querySelector<HTMLElement>(".sidebar-dropzone");
-        isDragOverSidebarDropzoneRef.current = true;
-      } else {
-        activeSidebarScrollContainerRef.current = null;
-        isDragOverSidebarDropzoneRef.current = false;
-      }
-
-      setActiveDrag(data);
-      setHoverTargetId(null);
-      setDragOverlayWidth(event.active.rect.current.initial?.width ?? null);
-      updateRemoveHint(false);
-      if (data?.kind === "guest") {
-        isDraggedGuestSeatedRef.current = !state.unassigned.includes(data.guestId);
-      } else {
-        isDraggedGuestSeatedRef.current = false;
-      }
-    },
-    [state.unassigned, updateRemoveHint]
-  );
-
-  const handleDragMove = useCallback((event: DragMoveEvent) => {
-    const pointer = getPointerCoordinatesFromEvent(event.activatorEvent);
-    if (!pointer) return;
-
-    latestPointerPositionRef.current = pointer;
-  }, []);
-
-  const handleDragOver = useCallback(
-    (event: DragOverEvent) => {
-      const targetId = event.over ? String(event.over.id) : null;
-      setHoverTargetId(targetId);
-      isDragOverSidebarDropzoneRef.current = targetId !== null && isUnassignedDropTarget(targetId);
-      if (!isDraggedGuestSeatedRef.current) return;
-      if (removeHintTimerRef.current !== null) {
-        clearTimeout(removeHintTimerRef.current);
-        removeHintTimerRef.current = null;
-      }
-      if (event.over) {
-        updateRemoveHint(false);
-      } else {
-        removeHintTimerRef.current = setTimeout(() => {
-          updateRemoveHint(true);
-          removeHintTimerRef.current = null;
-        }, 500);
-      }
-    },
-    [updateRemoveHint]
-  );
 
   const handleDragCancel = useCallback(() => {
-    if (removeHintTimerRef.current !== null) {
-      clearTimeout(removeHintTimerRef.current);
-      removeHintTimerRef.current = null;
-    }
-    isDraggedGuestSeatedRef.current = false;
-    setHoverTargetId(null);
-    setActiveDrag(null);
-    setDragOverlayWidth(null);
-    latestPointerPositionRef.current = null;
-    activeDragOriginRef.current = null;
-    activeSidebarScrollContainerRef.current = null;
-    isDragOverSidebarDropzoneRef.current = false;
-    updateRemoveHint(false);
-  }, [updateRemoveHint]);
+    setActiveDragKind(null);
+    setActiveDragGuestId(null);
+    pointerRef.current = null;
+  }, []);
 
   const handleDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
-      if (removeHintTimerRef.current !== null) {
-        clearTimeout(removeHintTimerRef.current);
-        removeHintTimerRef.current = null;
-      }
-      const pointerAtDrop = latestPointerPositionRef.current;
-      const draggedRectAtDrop =
-        active.rect.current.translated ?? active.rect.current.initial ?? null;
-      const activeId = String(active.id);
-      const activeGuestId = activeId.startsWith("guest-") ? activeId.slice("guest-".length) : null;
-      const overId = over ? String(over.id) : null;
-      const willRemove = !over && isDraggedGuestSeatedRef.current && removeHintActiveRef.current;
-      isDraggedGuestSeatedRef.current = false;
-      const data = isActiveDragData(active.data.current) ? active.data.current : null;
-      const draggedGuestId =
-        data?.kind === "guest" ? resolveDraggedGuestId(data, state.tables) : null;
-      setActiveDrag(null);
-      setHoverTargetId(null);
-      setDragOverlayWidth(null);
-      latestPointerPositionRef.current = null;
-      activeDragOriginRef.current = null;
-      activeSidebarScrollContainerRef.current = null;
-      isDragOverSidebarDropzoneRef.current = false;
-      updateRemoveHint(false);
+      setActiveDragKind(null);
+      setActiveDragGuestId(null);
+      const ptr = pointerRef.current;
+      pointerRef.current = null;
 
-      if (willRemove && draggedGuestId) {
-        dispatch({ type: "REMOVE_GUESTS", guestIds: [draggedGuestId] });
-        return;
-      }
+      const intent = parseDragIntent(active.data.current);
+      if (!intent) return;
 
-      if (
-        activeGuestId &&
-        guests.has(activeGuestId) &&
-        (isUnassignedDropTarget(overId ?? "") ||
-          didDropInsideSidebar(pointerAtDrop, draggedRectAtDrop))
-      ) {
-        dispatch({ type: "REMOVE_GUESTS", guestIds: [activeGuestId] });
-        return;
-      }
+      const target = resolveDropTarget(over, ptr);
+      if (!target) return;
 
-      if (!data) return;
-
-      if (
-        draggedGuestId &&
-        data.origin === "table" &&
-        didDropInsideSidebar(pointerAtDrop, draggedRectAtDrop)
-      ) {
-        dispatch({ type: "REMOVE_GUESTS", guestIds: [draggedGuestId] });
-        return;
-      }
-
-      let targetId = resolveDropTargetId(over, pointerAtDrop);
-      if (data.kind === "guest" && data.origin === "table" && pointerAtDrop) {
-        const elementAtPointer = document.elementFromPoint(pointerAtDrop.x, pointerAtDrop.y);
-        if (isSidebarElement(elementAtPointer)) {
-          targetId = "unassigned-panel";
-        }
-      }
-      if (!targetId) return;
-
-      if (data.kind === "table") {
-        if (isUnassignedDropTarget(targetId)) {
-          dispatch({ type: "CLEAR_TABLE", tableNumber: data.tableNumber });
-          return;
-        }
-
-        if (targetId === "auto-seat") {
-          const guestIds = getSeatedGuestIdsForTable(data.tableNumber, state.tables);
-          if (guestIds.length > 0) {
-            dispatch({ type: "AUTO_ASSIGN_GUESTS", guestIds, guestProfiles });
-          }
-          return;
-        }
-
-        const overTableNumber = parseTableNumber(targetId);
-        if (overTableNumber == null) return;
-
-        dispatch({
-          type: "SWAP_TABLES",
-          activeTableNumber: data.tableNumber,
-          overTableNumber,
-        });
-        return;
-      }
-
-      const includeAssignedMembersForTargetedTableDrop =
-        (data.kind === "party" || data.kind === "group") && parseTableNumber(targetId) != null;
-      const guestIds = resolveDragGuestIds(
-        data,
-        parties,
-        state.unassigned,
-        includeAssignedMembersForTargetedTableDrop
-      );
-      if (data.kind === "guest" && (!draggedGuestId || !guests.has(draggedGuestId))) return;
-      if (data.kind !== "guest" && guestIds.length === 0) return;
-      if (data.kind === "guest" && !draggedGuestId) return;
-
-      if (isUnassignedDropTarget(targetId)) {
-        // Move guest(s) back to unassigned pool
-        if (data.kind === "guest") {
-          dispatch({ type: "REMOVE_GUESTS", guestIds: [draggedGuestId!] });
-        } else if (data.kind === "party" || data.kind === "group") {
-          dispatch({ type: "REMOVE_GUESTS", guestIds });
-        }
-        return;
-      }
-
-      if (targetId === "auto-seat") {
-        dispatch({ type: "AUTO_ASSIGN_GUESTS", guestIds, guestProfiles });
-        return;
-      }
-
-      if (data.kind === "guest") {
-        let seatTarget =
-          parseSeatTarget(targetId) ??
-          (() => {
-            const targetGuestId = parseGuestTargetId(targetId);
-            return targetGuestId ? findSeatForGuestId(targetGuestId, state.tables) : null;
-          })();
-
-        if (!seatTarget) {
-          const probePoint = getDropProbePoint(pointerAtDrop, draggedRectAtDrop);
-          if (probePoint) {
-            const elementAtProbe = document.elementFromPoint(probePoint.x, probePoint.y);
-            seatTarget = findSeatTargetFromElement(elementAtProbe);
-          }
-        }
-
-        if (seatTarget) {
-          dispatch({
-            type: "ASSIGN_GUESTS",
-            tableNumber: seatTarget.tableNumber,
-            seatIndex: seatTarget.seatIndex,
-            guestIds: [draggedGuestId!],
-            assignmentMode: "single-table",
-            guestProfiles,
-          });
-          return;
-        }
-      }
-
-      const tableNumber = parseTableNumber(targetId);
-      if (tableNumber != null) {
-        dispatch({
-          type: "AUTO_ASSIGN_GUESTS",
-          guestIds,
-          guestProfiles,
-          targetTableNumber: tableNumber,
-          targetScope: "target-and-adjacent",
-        });
-      }
+      const action = routeDrop(intent, target, { state, guestProfiles, parties });
+      if (action) dispatch(action);
     },
-    [dispatch, guestProfiles, guests, parties, state.tables, state.unassigned, updateRemoveHint]
+    [dispatch, guestProfiles, parties, state]
   );
 
-  const dragHoverPreview = useMemo<AutoSeatPreview | null>(() => {
-    if (!activeDrag || !hoverTargetId) return null;
-
-    let previewState = state;
-
-    if (activeDrag.kind === "table") {
-      if (hoverTargetId === "auto-seat") {
-        const previewGuestIds = getSeatedGuestIdsForTable(activeDrag.tableNumber, state.tables);
-        if (previewGuestIds.length === 0) return null;
-
-        previewState = seatingReducer(state, {
-          type: "AUTO_ASSIGN_GUESTS",
-          guestIds: previewGuestIds,
-          guestProfiles,
-        });
-      } else {
-        const overTableNumber = parseTableNumber(hoverTargetId);
-        if (overTableNumber == null) return null;
-
-        previewState = seatingReducer(state, {
-          type: "SWAP_TABLES",
-          activeTableNumber: activeDrag.tableNumber,
-          overTableNumber,
-        });
-      }
-    } else {
-      const includeAssignedMembersForTargetedTablePreview =
-        (activeDrag.kind === "party" || activeDrag.kind === "group") &&
-        parseTableNumber(hoverTargetId) != null;
-      const previewGuestIds = resolveDragGuestIds(
-        activeDrag,
-        parties,
-        state.unassigned,
-        includeAssignedMembersForTargetedTablePreview
-      );
-      if (activeDrag.kind === "guest" && !guests.has(activeDrag.guestId)) return null;
-      if (activeDrag.kind !== "guest" && previewGuestIds.length === 0) return null;
-
-      if (hoverTargetId === "auto-seat") {
-        previewState = seatingReducer(state, {
-          type: "AUTO_ASSIGN_GUESTS",
-          guestIds: previewGuestIds,
-          guestProfiles,
-        });
-      } else if (isUnassignedDropTarget(hoverTargetId)) {
-        const guestIdsToRemove =
-          activeDrag.kind === "guest" ? [activeDrag.guestId] : previewGuestIds;
-        previewState = seatingReducer(state, {
-          type: "REMOVE_GUESTS",
-          guestIds: guestIdsToRemove,
-        });
-      } else {
-        if (activeDrag.kind === "guest") {
-          const seatTarget =
-            parseSeatTarget(hoverTargetId) ??
-            (() => {
-              const targetGuestId = parseGuestTargetId(hoverTargetId);
-              return targetGuestId ? findSeatForGuestId(targetGuestId, state.tables) : null;
-            })();
-          if (seatTarget) {
-            previewState = seatingReducer(state, {
-              type: "ASSIGN_GUESTS",
-              tableNumber: seatTarget.tableNumber,
-              seatIndex: seatTarget.seatIndex,
-              guestIds: [activeDrag.guestId],
-              assignmentMode: "single-table",
-              guestProfiles,
-            });
-          } else {
-            const tableNumber = parseTableNumber(hoverTargetId);
-            if (tableNumber == null) return null;
-
-            previewState = seatingReducer(state, {
-              type: "AUTO_ASSIGN_GUESTS",
-              guestIds: previewGuestIds,
-              guestProfiles,
-              targetTableNumber: tableNumber,
-              targetScope: "target-and-adjacent",
-            });
-          }
-        } else {
-          const tableNumber = parseTableNumber(hoverTargetId);
-          if (tableNumber == null) return null;
-
-          previewState = seatingReducer(state, {
-            type: "AUTO_ASSIGN_GUESTS",
-            guestIds: previewGuestIds,
-            guestProfiles,
-            targetTableNumber: tableNumber,
-            targetScope: "target-and-adjacent",
-          });
-        }
-      }
-    }
-
-    if (!hasSeatLayoutChanges(state.tables, previewState.tables)) return null;
-
-    return { tables: previewState.tables };
-  }, [activeDrag, guestProfiles, guests, hoverTargetId, parties, state]);
-
-  const unassignedCount = state.unassigned.length;
-
-  function handleReset() {
-    if (window.confirm("Reset all seating assignments? This will clear all table placements.")) {
-      onReset();
-    }
-  }
-
-  function handleExport() {
-    const payload = buildExportPayload(guestRows, snapshot);
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-
-    link.href = url;
-    link.download = buildExportFilename();
-    link.click();
-
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-  }
-
+  // ── File import/export ────────────────────────────────────────────────────────
   const importFromFile = useCallback(
     async (file: File) => {
       try {
@@ -1114,11 +359,7 @@ function SeatingApp({
 
         const { allGuestIds: importedGuestIds } = parseGuestsFromRows(parsed.guests);
         const reconciledState = reconcileStateToGuestIds(
-          {
-            tables: parsed.tables,
-            unassigned: [],
-            lockedGuestIds: [],
-          },
+          { tables: parsed.tables, unassigned: [], lockedGuestIds: [] },
           importedGuestIds
         );
 
@@ -1158,7 +399,6 @@ function SeatingApp({
 
   function handleFileDragEnter(event: ReactDragEvent<HTMLDivElement>) {
     if (!Array.from(event.dataTransfer.types).includes("Files")) return;
-
     event.preventDefault();
     fileDragDepthRef.current += 1;
     setIsFileDragOver(true);
@@ -1166,24 +406,19 @@ function SeatingApp({
 
   function handleFileDragOver(event: ReactDragEvent<HTMLDivElement>) {
     if (!Array.from(event.dataTransfer.types).includes("Files")) return;
-
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
   }
 
   function handleFileDragLeave(event: ReactDragEvent<HTMLDivElement>) {
     if (!Array.from(event.dataTransfer.types).includes("Files")) return;
-
     event.preventDefault();
     fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
-    if (fileDragDepthRef.current === 0) {
-      setIsFileDragOver(false);
-    }
+    if (fileDragDepthRef.current === 0) setIsFileDragOver(false);
   }
 
   async function handleFileDrop(event: ReactDragEvent<HTMLDivElement>) {
     if (!Array.from(event.dataTransfer.types).includes("Files")) return;
-
     event.preventDefault();
     fileDragDepthRef.current = 0;
     setIsFileDragOver(false);
@@ -1194,35 +429,42 @@ function SeatingApp({
     await importFromFile(file);
   }
 
-  // Overlay content while dragging
-  const overlayGuest = activeDrag?.kind === "guest" ? guests.get(activeDrag.guestId) : null;
-  const overlayParty = activeDrag?.kind === "party" ? parties.get(activeDrag.partyId) : null;
-  const overlayTable =
-    activeDrag?.kind === "table"
-      ? (state.tables.find((table) => table.tableNumber === activeDrag.tableNumber) ?? null)
-      : null;
-  const overlayOccupancy = overlayTable
-    ? overlayTable.guestIds.filter((id) => id !== null).length
-    : 0;
-  const overlayGuestIds = activeDrag
-    ? resolveDragGuestIds(activeDrag, parties, state.unassigned)
-    : [];
+  function handleReset() {
+    if (window.confirm("Reset all seating assignments? This will clear all table placements.")) {
+      onReset();
+    }
+  }
 
+  function handleExport() {
+    const payload = buildExportPayload(guestRows, snapshot);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = buildExportFilename();
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  const unassignedCount = state.unassigned.length;
+  const overlayGuest =
+    activeDragKind === "guest" && activeDragGuestId
+      ? (guests.get(activeDragGuestId) ?? null)
+      : null;
+
+  // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <DndContext
       sensors={sensors}
-      autoScroll={autoScrollOptions}
-      collisionDetection={collisionDetection}
+      collisionDetection={dndCollisionDetection}
       onDragStart={handleDragStart}
-      onDragMove={handleDragMove}
-      onDragOver={handleDragOver}
       onDragCancel={handleDragCancel}
       onDragEnd={handleDragEnd}>
       <div
         className={[
           "app",
-          activeDrag ? "app--dragging" : null,
-          activeDrag?.kind === "guest" ? "app--guest-dragging" : null,
+          activeDragKind ? "app--dragging" : null,
+          activeDragKind === "guest" ? "app--guest-dragging" : null,
           isFileDragOver ? "app--file-drop-target" : null,
         ]
           .filter(Boolean)
@@ -1285,9 +527,9 @@ function SeatingApp({
         <div className={`app-body app-body--${mobilePanel}`}>
           <Sidebar />
           <TableBoard
-            activeDragKind={activeDrag?.kind ?? null}
-            activeDragGuestId={activeDrag?.kind === "guest" ? activeDrag.guestId : null}
-            autoSeatPreview={dragHoverPreview}
+            activeDragKind={activeDragKind}
+            activeDragGuestId={activeDragGuestId}
+            autoSeatPreview={null}
           />
         </div>
 
@@ -1308,108 +550,17 @@ function SeatingApp({
 
         <DragOverlay dropAnimation={null}>
           {overlayGuest && (
-            <div className="drag-overlay-guest-wrap">
-              <span
-                className={[
-                  "guest-chip",
-                  activeDrag?.kind === "guest" && activeDrag.origin === "table"
-                    ? "guest-chip--table"
-                    : "guest-chip--sidebar",
-                  "drag-overlay-guest-chip",
-                  showRemoveHint ? "drag-overlay-guest-chip--remove" : null,
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                style={
-                  activeDrag?.kind === "guest" && activeDrag.origin === "table" && dragOverlayWidth
-                    ? { width: `${dragOverlayWidth}px` }
-                    : undefined
-                }>
-                <span className="guest-name">{overlayGuest.fullName}</span>
-              </span>
-            </div>
-          )}
-          {overlayTable && activeDrag?.kind === "table" && (
-            <div className="table-card-shell drag-overlay-table-shell">
-              <div
-                className={["table-card", overlayOccupancy >= TABLE_CAPACITY ? "is-full" : null]
-                  .filter(Boolean)
-                  .join(" ")}
-                style={dragOverlayWidth ? { width: `${dragOverlayWidth}px` } : undefined}>
-                <div className="table-seats table-seats-top">
-                  {overlayTable.guestIds.slice(0, 4).map((guestId, i) => (
-                    <div
-                      key={`overlay-top-${i}`}
-                      className={["seat-slot", guestId ? "seat-occupied" : "seat-empty"].join(" ")}>
-                      {guestId ? (
-                        <div className="guest-chip guest-chip--table">
-                          <span className="guest-name">{guests.get(guestId)?.fullName}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="table-label">
-                  <div className="table-label-main">
-                    <span className="table-name">{overlayTable.name}</span>
-                    <span
-                      className={`table-occupancy${overlayOccupancy >= TABLE_CAPACITY ? " full" : ""}`}>
-                      {overlayOccupancy}/{TABLE_CAPACITY}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="table-seats table-seats-bottom">
-                  {overlayTable.guestIds.slice(4, 8).map((guestId, i) => (
-                    <div
-                      key={`overlay-bottom-${i}`}
-                      className={["seat-slot", guestId ? "seat-occupied" : "seat-empty"].join(" ")}>
-                      {guestId ? (
-                        <div className="guest-chip guest-chip--table">
-                          <span className="guest-name">{guests.get(guestId)?.fullName}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-          {overlayParty && activeDrag?.kind === "party" && (
-            <div
-              className="party-card drag-overlay-party-card"
-              style={dragOverlayWidth ? { width: `${dragOverlayWidth}px` } : undefined}>
-              <div className="party-card-header">
-                <span className="party-name">{overlayParty.household}</span>
-              </div>
-              <div className="party-members">
-                {overlayGuestIds.map((id) => {
-                  const guest = guests.get(id);
-                  if (!guest) return null;
-
-                  return (
-                    <span key={id} className="guest-chip guest-chip--sidebar">
-                      <span className="guest-name">{guest.fullName}</span>
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-          {activeDrag?.kind === "group" && (
-            <div className="group-card drag-overlay-group-card">
-              <div className="group-card-header">
-                <span className="group-name">{activeDrag.groupName || "No Group"}</span>
-                <span className="group-count">{overlayGuestIds.length}</span>
-              </div>
-            </div>
+            <span className="guest-chip guest-chip--sidebar drag-overlay-guest-chip">
+              <span className="guest-name">{overlayGuest.fullName}</span>
+            </span>
           )}
         </DragOverlay>
       </div>
     </DndContext>
   );
 }
+
+// ─── App (root) ───────────────────────────────────────────────────────────────
 
 export default function App() {
   const [guestRows, setGuestRows] = useState<GuestInputRow[]>(() => getInitialGuestRows());

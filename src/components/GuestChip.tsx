@@ -1,4 +1,4 @@
-import type { CSSProperties, MouseEvent } from "react";
+import type { CSSProperties } from "react";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 
 import { CSS } from "@dnd-kit/utilities";
@@ -247,13 +247,6 @@ export default function GuestChip({
     }
   }
 
-  function handleMouseDown(event: MouseEvent<HTMLDivElement>) {
-    if (!shouldShowHovercard) return;
-
-    // Prevent focus-on-click so the hover card only opens via deliberate hover.
-    event.preventDefault();
-  }
-
   const chip = (
     <div
       ref={setNodeRef}
@@ -272,7 +265,6 @@ export default function GuestChip({
         .filter(Boolean)
         .join(" ")}
       title={shouldShowHovercard ? undefined : guest.fullName}
-      onMouseDown={handleMouseDown}
       onClick={handleSelectGuest}
       {...listeners}
       {...attributes}>

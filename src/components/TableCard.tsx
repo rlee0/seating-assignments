@@ -16,7 +16,7 @@ import { useSortable } from "@dnd-kit/sortable";
 
 interface Props {
   table: TableState;
-  activeDragKind: "party" | "guest" | "group" | "table" | null;
+  activeDragKind: "household" | "guest" | "group" | "table" | null;
   activeDragGuestId: string | null;
   displayGuestIds?: Array<string | null>;
   previewSeatKinds?: Array<"added" | "changed" | "deleted" | null>;
@@ -41,7 +41,7 @@ function SeatSlot({
   tableNumber: number;
   seatIndex: number;
   guestId: string | null;
-  activeDragKind: "party" | "guest" | "group" | "table" | null;
+  activeDragKind: "household" | "guest" | "group" | "table" | null;
   activeDragGuestId: string | null;
   isPreviewMode: boolean;
   previewSeatKind: "added" | "changed" | "deleted" | null;

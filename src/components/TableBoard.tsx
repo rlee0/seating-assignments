@@ -17,7 +17,7 @@ export interface AutoSeatPreview {
 }
 
 interface Props {
-  activeDragKind: "party" | "guest" | "group" | "table" | null;
+  activeDragKind: "household" | "guest" | "group" | "table" | null;
   activeDragGuestId: string | null;
   autoSeatPreview: AutoSeatPreview | null;
 }
