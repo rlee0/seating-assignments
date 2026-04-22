@@ -60,9 +60,6 @@ export default function Sidebar() {
   const normalizedQuery = useMemo(() => normalizeForSearch(searchQuery.trim()), [searchQuery]);
 
   const { setNodeRef, isOver } = useDroppable({ id: "unassigned" });
-  const { setNodeRef: setPanelNodeRef, isOver: isPanelOver } = useDroppable({
-    id: "unassigned-panel",
-  });
   const dropzoneRef = useRef<HTMLDivElement | null>(null);
 
   const setDropzoneRef = useCallback(
@@ -173,9 +170,7 @@ export default function Sidebar() {
     selectedGuestId != null && (state.lockedGuestIds ?? []).includes(selectedGuestId);
 
   return (
-    <aside
-      ref={setPanelNodeRef}
-      className={["sidebar", isPanelOver ? "is-over" : null].filter(Boolean).join(" ")}>
+    <aside className="sidebar">
       <div className="sidebar-search-row">
         <div className="sidebar-search-controls">
           <div className="sidebar-search-wrap">
@@ -284,9 +279,7 @@ export default function Sidebar() {
       </div>
       <div
         ref={setDropzoneRef}
-        className={["sidebar-dropzone", isOver || isPanelOver ? "is-over" : null]
-          .filter(Boolean)
-          .join(" ")}>
+        className={["sidebar-dropzone", isOver ? "is-over" : null].filter(Boolean).join(" ")}>
         {state.unassigned.length === 0 ? (
           <div className="sidebar-empty">All guests are seated ✓</div>
         ) : partiesWithUnassigned.length === 0 ? (

@@ -453,28 +453,21 @@
   --guest-chip-bg: var(--secondary);
   transition:
     background 0.12s ease,
-    border-color 0.12s ease,
-    opacity 0.12s ease;
+    border-color 0.12s ease;
 }
 
 .guest-chip:active {
   cursor: grabbing;
 }
 
-.guest-chip.is-dragging {
-  opacity: 0.3;
-}
-
 .guest-chip.is-dimmed {
-  opacity: 0.35;
   --guest-chip-bg: #e5e7eb;
   background-color: #e5e7eb;
   border-color: #cbd5e1;
   color: #64748b;
   transition:
     background 0.12s ease,
-    border-color 0.12s ease,
-    opacity 0.12s ease;
+    border-color 0.12s ease;
 }
 
 .guest-chip.is-dimmed .guest-name {
@@ -586,6 +579,7 @@
   display: block;
   overflow: hidden;
   white-space: nowrap;
+  text-overflow: ellipsis;
   flex: 1;
   min-width: 0;
   font-size: 12px;
@@ -596,61 +590,6 @@
 .guest-chip--table .guest-name {
   font-size: 11px;
   line-height: 1.2;
-}
-
-.guest-chip--table .guest-name.is-truncated {
-  --guest-chip-fade-width: 8px;
-  padding-right: var(--guest-chip-fade-width);
-  -webkit-mask-image: linear-gradient(
-    to right,
-    #000 0,
-    #000 calc(100% - var(--guest-chip-fade-width)),
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to right,
-    #000 0,
-    #000 calc(100% - var(--guest-chip-fade-width)),
-    transparent 100%
-  );
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-size: 100% 100%;
-  mask-size: 100% 100%;
-}
-
-.app--dragging .guest-chip--table .guest-name.is-truncated {
-  padding-right: 0;
-  -webkit-mask-image: none;
-  mask-image: none;
-}
-
-.app--dragging .guest-chip--table .guest-name.is-truncated::after {
-  content: none;
-}
-
-@supports not (
-  (-webkit-mask-image: linear-gradient(to right, #000, transparent)) or
-    (mask-image: linear-gradient(to right, #000, transparent))
-) {
-  .guest-chip--table .guest-name.is-truncated {
-    padding-right: 0;
-  }
-
-  .guest-chip--table .guest-name.is-truncated::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: 8px;
-    height: 100%;
-    pointer-events: none;
-    background: linear-gradient(
-      to right,
-      color-mix(in oklch, var(--guest-chip-bg) 0%, transparent),
-      var(--guest-chip-bg)
-    );
-  }
 }
 
 .guest-chip.is-selected {
@@ -1186,11 +1125,13 @@
   min-width: max-content;
   overflow: visible;
   white-space: nowrap;
-  padding-right: 0;
 }
 
-.drag-overlay-guest-chip .guest-name::after {
-  display: none;
+.drag-overlay-guest-chip.guest-chip--table .guest-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .drag-overlay-guest-chip--remove {

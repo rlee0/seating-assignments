@@ -55,7 +55,13 @@ import { type GuestProfile, seatingReducer } from "./store/reducer";
 
 type ActiveDragData =
   | { kind: "party"; partyId: string; origin: "sidebar" }
-  | { kind: "guest"; guestId: string; origin: "sidebar" | "table" }
+  | {
+      kind: "guest";
+      guestId: string;
+      origin: "sidebar" | "table";
+      tableNumber?: number;
+      seatIndex?: number;
+    }
   | { kind: "group"; groupName: string; origin: "sidebar" }
   | { kind: "table"; tableNumber: number; name: string; origin: "table" };
 
@@ -138,7 +144,8 @@ function getUnassignedGuestIdsForGroup(
 function resolveDragGuestIds(
   data: ActiveDragData,
   parties: ParsedData["parties"],
-  unassignedGuestIds: string[]
+  unassignedGuestIds: string[],
+  includeAssignedMembers = false
 ): string[] {
   const unassignedSet = new Set(unassignedGuestIds);
 
@@ -146,8 +153,21 @@ function resolveDragGuestIds(
     case "guest":
       return [data.guestId];
     case "party":
-      return getUnassignedGuestIdsForParty(data.partyId, parties, unassignedSet);
+      return includeAssignedMembers
+        ? (parties.get(data.partyId)?.guestIds ?? [])
+        : getUnassignedGuestIdsForParty(data.partyId, parties, unassignedSet);
     case "group":
+      if (includeAssignedMembers) {
+        const guestIds: string[] = [];
+
+        for (const party of parties.values()) {
+          if ((party.group || "No Group") !== data.groupName) continue;
+          guestIds.push(...party.guestIds);
+        }
+
+        return guestIds;
+      }
+
       return getUnassignedGuestIdsForGroup(data.groupName, parties, unassignedSet);
     case "table":
       return [];
@@ -163,6 +183,49 @@ function parseSeatTarget(targetId: string): { tableNumber: number; seatIndex: nu
 
   if (Number.isNaN(tableNumber) || Number.isNaN(seatIndex)) return null;
   return { tableNumber, seatIndex };
+}
+
+function parseGuestTargetId(targetId: string): string | null {
+  if (!targetId.startsWith("guest-")) return null;
+
+  const guestId = targetId.slice("guest-".length);
+  return guestId || null;
+}
+
+function findSeatForGuestId(
+  guestId: string,
+  tables: Array<{ tableNumber: number; guestIds: Array<string | null> }>
+): { tableNumber: number; seatIndex: number } | null {
+  for (const table of tables) {
+    const seatIndex = table.guestIds.findIndex((id) => id === guestId);
+    if (seatIndex !== -1) {
+      return { tableNumber: table.tableNumber, seatIndex };
+    }
+  }
+
+  return null;
+}
+
+function getDropProbePoint(
+  pointerPosition: { x: number; y: number } | null,
+  draggedRect: { left: number; top: number; width: number; height: number } | null
+): { x: number; y: number } | null {
+  if (pointerPosition) return pointerPosition;
+  if (!draggedRect) return null;
+
+  return {
+    x: draggedRect.left + draggedRect.width / 2,
+    y: draggedRect.top + draggedRect.height / 2,
+  };
+}
+
+function findSeatTargetFromElement(
+  element: Element | null
+): { tableNumber: number; seatIndex: number } | null {
+  const seatId = element?.closest<HTMLElement>(".seat-slot")?.dataset.seatId;
+  if (!seatId) return null;
+
+  return parseSeatTarget(seatId);
 }
 
 function parseTableNumber(targetId: string): number | null {
@@ -186,6 +249,23 @@ function getSeatedGuestIdsForTable(
   return table.guestIds.filter((guestId): guestId is string => guestId !== null);
 }
 
+function resolveDraggedGuestId(
+  data: Extract<ActiveDragData, { kind: "guest" }>,
+  tables: Array<{ tableNumber: number; guestIds: Array<string | null> }>
+): string {
+  if (data.origin === "table") {
+    const sourceTable = tables.find((table) => table.tableNumber === data.tableNumber);
+    if (sourceTable && typeof data.seatIndex === "number") {
+      const seatGuestId = sourceTable.guestIds[data.seatIndex];
+      if (typeof seatGuestId === "string") {
+        return seatGuestId;
+      }
+    }
+  }
+
+  return data.guestId;
+}
+
 function hasSeatLayoutChanges(leftTables: TableState[], rightTables: TableState[]): boolean {
   if (leftTables.length !== rightTables.length) return true;
 
@@ -202,6 +282,62 @@ function hasSeatLayoutChanges(leftTables: TableState[], rightTables: TableState[
   }
 
   return false;
+}
+
+function resolveDropTargetId(
+  over: DragEndEvent["over"],
+  pointerPosition: { x: number; y: number } | null
+): string | null {
+  if (over) return String(over.id);
+  if (!pointerPosition) return null;
+
+  const elementAtPointer = document.elementFromPoint(pointerPosition.x, pointerPosition.y);
+  if (!elementAtPointer) return null;
+  if (elementAtPointer.closest(".sidebar")) {
+    return "unassigned-panel";
+  }
+
+  return null;
+}
+
+function isSidebarElement(element: Element | null): boolean {
+  return element?.closest(".sidebar") != null;
+}
+
+function isPointInsideRect(
+  point: { x: number; y: number },
+  rect: { left: number; right: number; top: number; bottom: number }
+): boolean {
+  return (
+    point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom
+  );
+}
+
+function didDropInsideSidebar(
+  pointerPosition: { x: number; y: number } | null,
+  draggedRect: { left: number; top: number; width: number; height: number } | null
+): boolean {
+  const sidebar = document.querySelector<HTMLElement>(".sidebar");
+  if (!sidebar) return false;
+
+  const sidebarRect = sidebar.getBoundingClientRect();
+
+  if (pointerPosition && isPointInsideRect(pointerPosition, sidebarRect)) {
+    return true;
+  }
+
+  if (draggedRect) {
+    const centerPoint = {
+      x: draggedRect.left + draggedRect.width / 2,
+      y: draggedRect.top + draggedRect.height / 2,
+    };
+
+    if (isPointInsideRect(centerPoint, sidebarRect)) {
+      return true;
+    }
+  }
+
+  return document.querySelector(".sidebar:hover") !== null;
 }
 
 function buildGuestProfiles(
@@ -557,12 +693,48 @@ function SeatingApp({
         return seatCollisions;
       }
 
-      return pointerWithin({
+      const nonSeatContainers = baseContainers.filter(
+        (container) => !String(container.id).startsWith("seat-")
+      );
+
+      const sidebarTargets = nonSeatContainers.filter((container) =>
+        isUnassignedDropTarget(String(container.id))
+      );
+
+      // When dragging a seated guest from a table, prefer sidebar drop targets
+      // so unassign intent wins over nearby table-level containers.
+      if (data?.origin === "table" && sidebarTargets.length > 0) {
+        const sidebarPointerCollisions = pointerWithin({
+          ...args,
+          droppableContainers: sidebarTargets,
+        });
+
+        if (sidebarPointerCollisions.length > 0) {
+          return sidebarPointerCollisions;
+        }
+      }
+
+      const pointerCollisions = pointerWithin({
         ...args,
-        droppableContainers: baseContainers.filter(
-          (container) => !String(container.id).startsWith("seat-")
-        ),
+        droppableContainers: nonSeatContainers,
       });
+
+      if (pointerCollisions.length > 0) {
+        return pointerCollisions;
+      }
+
+      // If no exact collisions, fall back to closestCenter for unassigned targets
+      // This allows dragging from distant tables to the sidebar
+      const unassignedTargets = sidebarTargets;
+
+      if (unassignedTargets.length > 0) {
+        return closestCenter({
+          ...args,
+          droppableContainers: unassignedTargets,
+        });
+      }
+
+      return [];
     }
 
     return pointerWithin({
@@ -658,9 +830,17 @@ function SeatingApp({
         clearTimeout(removeHintTimerRef.current);
         removeHintTimerRef.current = null;
       }
+      const pointerAtDrop = latestPointerPositionRef.current;
+      const draggedRectAtDrop =
+        active.rect.current.translated ?? active.rect.current.initial ?? null;
+      const activeId = String(active.id);
+      const activeGuestId = activeId.startsWith("guest-") ? activeId.slice("guest-".length) : null;
+      const overId = over ? String(over.id) : null;
       const willRemove = !over && isDraggedGuestSeatedRef.current && removeHintActiveRef.current;
       isDraggedGuestSeatedRef.current = false;
       const data = isActiveDragData(active.data.current) ? active.data.current : null;
+      const draggedGuestId =
+        data?.kind === "guest" ? resolveDraggedGuestId(data, state.tables) : null;
       setActiveDrag(null);
       setHoverTargetId(null);
       setDragOverlayWidth(null);
@@ -670,13 +850,40 @@ function SeatingApp({
       isDragOverSidebarDropzoneRef.current = false;
       updateRemoveHint(false);
 
-      if (willRemove && data?.kind === "guest") {
-        dispatch({ type: "REMOVE_GUESTS", guestIds: [data.guestId] });
+      if (willRemove && draggedGuestId) {
+        dispatch({ type: "REMOVE_GUESTS", guestIds: [draggedGuestId] });
         return;
       }
 
-      if (!data || !over) return;
-      const targetId = String(over.id);
+      if (
+        activeGuestId &&
+        guests.has(activeGuestId) &&
+        (isUnassignedDropTarget(overId ?? "") ||
+          didDropInsideSidebar(pointerAtDrop, draggedRectAtDrop))
+      ) {
+        dispatch({ type: "REMOVE_GUESTS", guestIds: [activeGuestId] });
+        return;
+      }
+
+      if (!data) return;
+
+      if (
+        draggedGuestId &&
+        data.origin === "table" &&
+        didDropInsideSidebar(pointerAtDrop, draggedRectAtDrop)
+      ) {
+        dispatch({ type: "REMOVE_GUESTS", guestIds: [draggedGuestId] });
+        return;
+      }
+
+      let targetId = resolveDropTargetId(over, pointerAtDrop);
+      if (data.kind === "guest" && data.origin === "table" && pointerAtDrop) {
+        const elementAtPointer = document.elementFromPoint(pointerAtDrop.x, pointerAtDrop.y);
+        if (isSidebarElement(elementAtPointer)) {
+          targetId = "unassigned-panel";
+        }
+      }
+      if (!targetId) return;
 
       if (data.kind === "table") {
         if (isUnassignedDropTarget(targetId)) {
@@ -696,21 +903,29 @@ function SeatingApp({
         if (overTableNumber == null) return;
 
         dispatch({
-          type: "MOVE_TABLE",
+          type: "SWAP_TABLES",
           activeTableNumber: data.tableNumber,
           overTableNumber,
         });
         return;
       }
 
-      const guestIds = resolveDragGuestIds(data, parties, state.unassigned);
-      if (data.kind === "guest" && !guests.has(data.guestId)) return;
+      const includeAssignedMembersForTargetedTableDrop =
+        (data.kind === "party" || data.kind === "group") && parseTableNumber(targetId) != null;
+      const guestIds = resolveDragGuestIds(
+        data,
+        parties,
+        state.unassigned,
+        includeAssignedMembersForTargetedTableDrop
+      );
+      if (data.kind === "guest" && (!draggedGuestId || !guests.has(draggedGuestId))) return;
       if (data.kind !== "guest" && guestIds.length === 0) return;
+      if (data.kind === "guest" && !draggedGuestId) return;
 
       if (isUnassignedDropTarget(targetId)) {
         // Move guest(s) back to unassigned pool
         if (data.kind === "guest") {
-          dispatch({ type: "REMOVE_GUESTS", guestIds: [data.guestId] });
+          dispatch({ type: "REMOVE_GUESTS", guestIds: [draggedGuestId!] });
         } else if (data.kind === "party" || data.kind === "group") {
           dispatch({ type: "REMOVE_GUESTS", guestIds });
         }
@@ -723,13 +938,27 @@ function SeatingApp({
       }
 
       if (data.kind === "guest") {
-        const seatTarget = parseSeatTarget(targetId);
+        let seatTarget =
+          parseSeatTarget(targetId) ??
+          (() => {
+            const targetGuestId = parseGuestTargetId(targetId);
+            return targetGuestId ? findSeatForGuestId(targetGuestId, state.tables) : null;
+          })();
+
+        if (!seatTarget) {
+          const probePoint = getDropProbePoint(pointerAtDrop, draggedRectAtDrop);
+          if (probePoint) {
+            const elementAtProbe = document.elementFromPoint(probePoint.x, probePoint.y);
+            seatTarget = findSeatTargetFromElement(elementAtProbe);
+          }
+        }
+
         if (seatTarget) {
           dispatch({
             type: "ASSIGN_GUESTS",
             tableNumber: seatTarget.tableNumber,
             seatIndex: seatTarget.seatIndex,
-            guestIds: [data.guestId],
+            guestIds: [draggedGuestId!],
             assignmentMode: "single-table",
             guestProfiles,
           });
@@ -744,7 +973,7 @@ function SeatingApp({
           guestIds,
           guestProfiles,
           targetTableNumber: tableNumber,
-          targetScope: data.kind === "guest" ? "target-only" : "target-and-adjacent",
+          targetScope: "target-and-adjacent",
         });
       }
     },
@@ -757,18 +986,35 @@ function SeatingApp({
     let previewState = state;
 
     if (activeDrag.kind === "table") {
-      if (hoverTargetId !== "auto-seat") return null;
+      if (hoverTargetId === "auto-seat") {
+        const previewGuestIds = getSeatedGuestIdsForTable(activeDrag.tableNumber, state.tables);
+        if (previewGuestIds.length === 0) return null;
 
-      const previewGuestIds = getSeatedGuestIdsForTable(activeDrag.tableNumber, state.tables);
-      if (previewGuestIds.length === 0) return null;
+        previewState = seatingReducer(state, {
+          type: "AUTO_ASSIGN_GUESTS",
+          guestIds: previewGuestIds,
+          guestProfiles,
+        });
+      } else {
+        const overTableNumber = parseTableNumber(hoverTargetId);
+        if (overTableNumber == null) return null;
 
-      previewState = seatingReducer(state, {
-        type: "AUTO_ASSIGN_GUESTS",
-        guestIds: previewGuestIds,
-        guestProfiles,
-      });
+        previewState = seatingReducer(state, {
+          type: "SWAP_TABLES",
+          activeTableNumber: activeDrag.tableNumber,
+          overTableNumber,
+        });
+      }
     } else {
-      const previewGuestIds = resolveDragGuestIds(activeDrag, parties, state.unassigned);
+      const includeAssignedMembersForTargetedTablePreview =
+        (activeDrag.kind === "party" || activeDrag.kind === "group") &&
+        parseTableNumber(hoverTargetId) != null;
+      const previewGuestIds = resolveDragGuestIds(
+        activeDrag,
+        parties,
+        state.unassigned,
+        includeAssignedMembersForTargetedTablePreview
+      );
       if (activeDrag.kind === "guest" && !guests.has(activeDrag.guestId)) return null;
       if (activeDrag.kind !== "guest" && previewGuestIds.length === 0) return null;
 
@@ -787,7 +1033,12 @@ function SeatingApp({
         });
       } else {
         if (activeDrag.kind === "guest") {
-          const seatTarget = parseSeatTarget(hoverTargetId);
+          const seatTarget =
+            parseSeatTarget(hoverTargetId) ??
+            (() => {
+              const targetGuestId = parseGuestTargetId(hoverTargetId);
+              return targetGuestId ? findSeatForGuestId(targetGuestId, state.tables) : null;
+            })();
           if (seatTarget) {
             previewState = seatingReducer(state, {
               type: "ASSIGN_GUESTS",
@@ -806,7 +1057,7 @@ function SeatingApp({
               guestIds: previewGuestIds,
               guestProfiles,
               targetTableNumber: tableNumber,
-              targetScope: "target-only",
+              targetScope: "target-and-adjacent",
             });
           }
         } else {

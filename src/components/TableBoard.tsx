@@ -1,5 +1,4 @@
 import { SortableContext } from "@dnd-kit/sortable";
-import type { ClientRect } from "@dnd-kit/core";
 import type { Transform } from "@dnd-kit/utilities";
 
 import TableCard from "./TableCard";
@@ -8,30 +7,8 @@ import { useDroppable } from "@dnd-kit/core";
 import { useMemo } from "react";
 import { useSeating } from "../store/SeatingContext";
 
-// Only the table being swapped into animates to the dragged table's position;
-// all other tables stay put, avoiding the list-reorder "shift" effect.
-function swapSortingStrategy({
-  activeIndex,
-  index,
-  rects,
-  overIndex,
-}: {
-  activeIndex: number;
-  index: number;
-  rects: ClientRect[];
-  overIndex: number;
-}): Transform | null {
-  if (index === overIndex && activeIndex !== overIndex) {
-    const activeRect = rects[activeIndex];
-    const overRect = rects[index];
-    if (!activeRect || !overRect) return null;
-    return {
-      x: activeRect.left - overRect.left,
-      y: activeRect.top - overRect.top,
-      scaleX: 1,
-      scaleY: 1,
-    };
-  }
+// Tables no longer reorder on drop — disable all sortable position animations.
+function swapSortingStrategy(): Transform | null {
   return null;
 }
 

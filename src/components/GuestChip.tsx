@@ -1,6 +1,5 @@
 import type { CSSProperties, MouseEvent } from "react";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { useEffect, useRef, useState } from "react";
 
 import { CSS } from "@dnd-kit/utilities";
 import { guestChipVariants } from "@/components/ui/chip";
@@ -112,6 +111,8 @@ function getHighlightTokenForGuest(
 interface Props {
   guestId: string;
   context: "sidebar" | "table";
+  tableNumber?: number;
+  seatIndex?: number;
   className?: string;
   suppressStateStyles?: boolean;
 }
@@ -119,6 +120,8 @@ interface Props {
 export default function GuestChip({
   guestId,
   context,
+  tableNumber,
+  seatIndex,
   className,
   suppressStateStyles = false,
 }: Props) {
@@ -134,41 +137,17 @@ export default function GuestChip({
   } = useSeating();
   const { searchQuery, isGroupHighlightOn, isHouseholdHighlightOn, isHostHighlightOn } =
     useSearch();
-  const guestNameRef = useRef<HTMLSpanElement | null>(null);
-  const [isNameTruncated, setIsNameTruncated] = useState(false);
   const guest = guests.get(guestId);
   const selectedGuest = selectedGuestId ? guests.get(selectedGuestId) : null;
   const isAnchored = (state.lockedGuestIds ?? []).includes(guestId);
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `guest-${guestId}`,
-    data: { kind: "guest", guestId, origin: context },
+    data:
+      context === "table" && typeof tableNumber === "number" && typeof seatIndex === "number"
+        ? { kind: "guest", guestId, origin: context, tableNumber, seatIndex }
+        : { kind: "guest", guestId, origin: context },
   });
-
-  useEffect(() => {
-    if (!guest || context !== "table") {
-      setIsNameTruncated(false);
-      return;
-    }
-
-    const node = guestNameRef.current;
-    if (!node) return;
-
-    const updateIsTruncated = () => {
-      setIsNameTruncated(node.scrollWidth > node.clientWidth + 1);
-    };
-
-    updateIsTruncated();
-
-    if (typeof ResizeObserver !== "undefined") {
-      const resizeObserver = new ResizeObserver(updateIsTruncated);
-      resizeObserver.observe(node);
-      return () => resizeObserver.disconnect();
-    }
-
-    window.addEventListener("resize", updateIsTruncated);
-    return () => window.removeEventListener("resize", updateIsTruncated);
-  }, [context, guest, selectedGuestId]);
 
   if (!guest) return null;
 
@@ -297,13 +276,7 @@ export default function GuestChip({
       onClick={handleSelectGuest}
       {...listeners}
       {...attributes}>
-      <span
-        ref={guestNameRef}
-        className={["guest-name", context === "table" && isNameTruncated ? "is-truncated" : null]
-          .filter(Boolean)
-          .join(" ")}>
-        {guest.fullName}
-      </span>
+      <span className="guest-name">{guest.fullName}</span>
     </div>
   );
 

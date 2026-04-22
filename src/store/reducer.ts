@@ -30,10 +30,20 @@ export type SeatingAction =
     }
   | { type: "REMOVE_GUESTS"; guestIds: string[] }
   | { type: "CLEAR_TABLE"; tableNumber: number }
-  | { type: "MOVE_TABLE"; activeTableNumber: number; overTableNumber: number }
+  | {
+      type: "MOVE_TABLE";
+      activeTableNumber: number;
+      overTableNumber: number;
+      guestProfiles?: Record<string, GuestProfile>;
+    }
+  | {
+      type: "SWAP_TABLES";
+      activeTableNumber: number;
+      overTableNumber: number;
+    }
   | { type: "TOGGLE_SEAT_DISABLED"; tableNumber: number; seatIndex: number }
-  | { type: "LOCK_TABLE_GUESTS"; tableNumber: number }
-  | { type: "DISABLE_EMPTY_TABLE_SEATS"; tableNumber: number };
+  | { type: "TOGGLE_TABLE_GUEST_LOCKS"; tableNumber: number }
+  | { type: "TOGGLE_EMPTY_TABLE_SEATS"; tableNumber: number };
 
 function createEmptySeatSlots(): Array<string | null> {
   return Array<string | null>(TABLE_CAPACITY).fill(null);
@@ -1444,9 +1454,7 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
             if (introducesNewHouseholdSplit(state.tables, nextTables, guestProfiles)) {
               return state;
             }
-            if (
-              introducesNewHouseholdAdjacencyViolation(state.tables, nextTables, guestProfiles)
-            ) {
+            if (introducesNewHouseholdAdjacencyViolation(state.tables, nextTables, guestProfiles)) {
               return state;
             }
             if (introducesNewGroupRowIsolation(state.tables, nextTables, guestProfiles)) {
@@ -1581,25 +1589,43 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       };
     }
 
-    case "LOCK_TABLE_GUESTS": {
+    case "TOGGLE_TABLE_GUEST_LOCKS": {
       const table = state.tables.find((t) => t.tableNumber === action.tableNumber);
       if (!table) return state;
-      const guestIdsToLock = table.guestIds.filter((id): id is string => id !== null);
-      if (guestIdsToLock.length === 0) return state;
-      const nextLockedGuestIds = [...new Set([...(state.lockedGuestIds ?? []), ...guestIdsToLock])];
+      const seatedGuestIds = table.guestIds.filter((id): id is string => id !== null);
+      if (seatedGuestIds.length === 0) return state;
+      const currentLocked = new Set(state.lockedGuestIds ?? []);
+      const allLocked = seatedGuestIds.every((id) => currentLocked.has(id));
+      const nextLockedGuestIds = allLocked
+        ? (state.lockedGuestIds ?? []).filter((id) => !seatedGuestIds.includes(id))
+        : [...new Set([...(state.lockedGuestIds ?? []), ...seatedGuestIds])];
       return { ...state, lockedGuestIds: nextLockedGuestIds };
     }
 
-    case "DISABLE_EMPTY_TABLE_SEATS": {
+    case "TOGGLE_EMPTY_TABLE_SEATS": {
       const tableIdx = state.tables.findIndex((t) => t.tableNumber === action.tableNumber);
       if (tableIdx === -1) return state;
       const table = state.tables[tableIdx];
       const currentDisabled = new Set(table.disabledSeats ?? []);
-      const emptyIndexes = table.guestIds
-        .map((id, i) => (id === null && !currentDisabled.has(i) ? i : -1))
+      const disabledEmptyIndexes = table.guestIds
+        .map((id, i) => (id === null && currentDisabled.has(i) ? i : -1))
         .filter((i) => i !== -1);
-      if (emptyIndexes.length === 0) return state;
-      const nextDisabled = [...currentDisabled, ...emptyIndexes];
+
+      // If there are disabled empty seats, enable them; otherwise disable current empty seats.
+      const nextDisabled =
+        disabledEmptyIndexes.length > 0
+          ? [...currentDisabled].filter((index) => !disabledEmptyIndexes.includes(index))
+          : [
+              ...currentDisabled,
+              ...table.guestIds
+                .map((id, i) => (id === null && !currentDisabled.has(i) ? i : -1))
+                .filter((i) => i !== -1),
+            ];
+
+      if (nextDisabled.length === (table.disabledSeats ?? []).length) {
+        return state;
+      }
+
       const nextTables = state.tables.map((t, i) =>
         i === tableIdx ? { ...t, disabledSeats: nextDisabled } : t
       );
@@ -1617,9 +1643,79 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       );
       if (activeIndex === -1 || overIndex === -1) return state;
 
-      const swapped = [...state.tables];
-      [swapped[activeIndex], swapped[overIndex]] = [swapped[overIndex], swapped[activeIndex]];
-      return { ...state, tables: swapped };
+      const lockedSet = new Set(state.lockedGuestIds ?? []);
+      const activeTable = state.tables[activeIndex];
+      const overTable = state.tables[overIndex];
+      const disabledOverSeats = new Set(overTable.disabledSeats ?? []);
+
+      const nextTables = state.tables.map((t) => ({ ...t, guestIds: [...t.guestIds] }));
+      const nextActiveGuestIds = nextTables[activeIndex].guestIds;
+      const nextOverGuestIds = nextTables[overIndex].guestIds;
+
+      const needsAutoseat: string[] = [];
+
+      for (let seatIdx = 0; seatIdx < TABLE_CAPACITY; seatIdx += 1) {
+        const guestId = activeTable.guestIds[seatIdx];
+        if (!guestId || lockedSet.has(guestId)) continue;
+
+        nextActiveGuestIds[seatIdx] = null;
+
+        if (nextOverGuestIds[seatIdx] === null && !disabledOverSeats.has(seatIdx)) {
+          nextOverGuestIds[seatIdx] = guestId;
+        } else {
+          needsAutoseat.push(guestId);
+        }
+      }
+
+      const intermediateState: SeatingState = { ...state, tables: nextTables };
+
+      if (needsAutoseat.length === 0) return intermediateState;
+
+      if (action.guestProfiles) {
+        return assignGuestsSmart(intermediateState, needsAutoseat, action.guestProfiles, {
+          targetTableNumber: action.overTableNumber,
+          targetScope: "target-and-adjacent",
+        });
+      }
+
+      return assignGuestsWithOverflow(intermediateState, overIndex, needsAutoseat);
+    }
+
+    case "SWAP_TABLES": {
+      if (action.activeTableNumber === action.overTableNumber) return state;
+
+      const activeIndex = state.tables.findIndex(
+        (table) => table.tableNumber === action.activeTableNumber
+      );
+      const overIndex = state.tables.findIndex(
+        (table) => table.tableNumber === action.overTableNumber
+      );
+      if (activeIndex === -1 || overIndex === -1) return state;
+
+      const activeTable = state.tables[activeIndex];
+      const overTable = state.tables[overIndex];
+
+      const nextTables = state.tables.map((table, index) => {
+        if (index === activeIndex) {
+          return {
+            ...table,
+            guestIds: [...overTable.guestIds],
+            disabledSeats: overTable.disabledSeats ? [...overTable.disabledSeats] : [],
+          };
+        }
+
+        if (index === overIndex) {
+          return {
+            ...table,
+            guestIds: [...activeTable.guestIds],
+            disabledSeats: activeTable.disabledSeats ? [...activeTable.disabledSeats] : [],
+          };
+        }
+
+        return table;
+      });
+
+      return { ...state, tables: nextTables };
     }
 
     default:

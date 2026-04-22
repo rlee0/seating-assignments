@@ -317,6 +317,44 @@ describe("group cohesion regression", () => {
   });
 });
 
+describe("manual seat assignment flows", () => {
+  it("assigns an unassigned guest to an empty seat and removes them from unassigned", () => {
+    const state = createInitialState(["g1"]);
+
+    const result = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g1"],
+      seatIndex: 3,
+      assignmentMode: "single-table",
+    });
+
+    expect(seatsAt(result, 1)[3]).toBe("g1");
+    expect(result.unassigned).not.toContain("g1");
+  });
+
+  it("does not place an unassigned guest onto an occupied seat", () => {
+    let state = createInitialState(["g1", "g2"]);
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g1"],
+      seatIndex: 0,
+      assignmentMode: "single-table",
+    });
+
+    const result = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g2"],
+      seatIndex: 0,
+      assignmentMode: "single-table",
+    });
+
+    expect(result).toEqual(state);
+  });
+});
+
 describe("anchoring behavior", () => {
   it("does not anchor guests automatically when manually assigned", () => {
     const state = createInitialState(["g1"]);
@@ -349,6 +387,50 @@ describe("anchoring behavior", () => {
     });
 
     expect(unanchored.lockedGuestIds).not.toContain("g1");
+  });
+});
+
+describe("remove guests", () => {
+  it("removes a seated guest, returns them to unassigned, and clears lock", () => {
+    const profiles = makeProfiles([{ id: "g1", partyId: "p1" }]);
+
+    let state = createInitialState(["g1"]);
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g1"],
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+    state = seatingReducer(state, {
+      type: "SET_GUEST_ANCHORED",
+      guestId: "g1",
+      anchored: true,
+    });
+
+    const result = seatingReducer(state, {
+      type: "REMOVE_GUESTS",
+      guestIds: ["g1"],
+    });
+
+    expect(seatsAt(result, 1).filter(Boolean)).toEqual([]);
+    expect(result.unassigned).toContain("g1");
+    expect(result.lockedGuestIds).not.toContain("g1");
+  });
+
+  it("keeps unassigned unique when removing the same guest repeatedly", () => {
+    const initial = createInitialState(["g1"]);
+
+    const once = seatingReducer(initial, {
+      type: "REMOVE_GUESTS",
+      guestIds: ["g1"],
+    });
+    const twice = seatingReducer(once, {
+      type: "REMOVE_GUESTS",
+      guestIds: ["g1"],
+    });
+
+    expect(twice.unassigned.filter((id) => id === "g1")).toHaveLength(1);
   });
 });
 
@@ -993,83 +1075,393 @@ describe("single-seat drag swap", () => {
     expect(seatsAt(result, 1)[0]).toBe("g2");
     expect(result.unassigned).toEqual([]);
   });
-});
 
-// ─── MOVE_TABLE (swap) ────────────────────────────────────────────────────────
+  it("rejects swap when the target guest is locked", () => {
+    const allIds = ["g1", "g2"];
+    const profiles = makeProfiles([
+      { id: "g1", partyId: "p1", group: "Group A" },
+      { id: "g2", partyId: "p2", group: "Group B" },
+    ]);
 
-describe("MOVE_TABLE swap semantics", () => {
-  it("exchanges positions of exactly the two involved tables, leaving all others unchanged", () => {
-    const guestIds = ["g1", "g2", "g3"];
-    const state = createInitialState(guestIds);
-
-    // Manually seat guests so we can distinguish table contents.
-    const seatedState = seatingReducer(state, {
+    let state = createInitialState(allIds);
+    state = seatingReducer(state, {
       type: "ASSIGN_GUESTS",
       tableNumber: 1,
       guestIds: ["g1"],
+      seatIndex: 0,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 2,
+      guestIds: ["g2"],
+      seatIndex: 0,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+    // Lock the target guest — swap must be rejected.
+    state = seatingReducer(state, {
+      type: "SET_GUEST_ANCHORED",
+      guestId: "g2",
+      anchored: true,
+    });
+
+    const result = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 2,
+      guestIds: ["g1"],
+      seatIndex: 0,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+
+    // Both guests must stay in place.
+    expect(seatsAt(result, 1)[0]).toBe("g1");
+    expect(seatsAt(result, 2)[0]).toBe("g2");
+  });
+
+  it("rejects swap when the dragged guest is locked", () => {
+    const allIds = ["g1", "g2"];
+    const profiles = makeProfiles([
+      { id: "g1", partyId: "p1", group: "Group A" },
+      { id: "g2", partyId: "p2", group: "Group B" },
+    ]);
+
+    let state = createInitialState(allIds);
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g1"],
+      seatIndex: 0,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 2,
+      guestIds: ["g2"],
+      seatIndex: 0,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+    // Lock the dragged guest — swap must be rejected.
+    state = seatingReducer(state, {
+      type: "SET_GUEST_ANCHORED",
+      guestId: "g1",
+      anchored: true,
+    });
+
+    const result = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 2,
+      guestIds: ["g1"],
+      seatIndex: 0,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+
+    expect(seatsAt(result, 1)[0]).toBe("g1");
+    expect(seatsAt(result, 2)[0]).toBe("g2");
+  });
+
+  // Flow 3: unassigned guest dropped on a full table finds an adjacent table
+  it("seats an unassigned guest on an adjacent table when the target table is full", () => {
+    const blockers = Array.from({ length: TABLE_CAPACITY }, (_, i) => `b${i + 1}`);
+    const allIds = [...blockers, "g1"];
+    const profiles = makeProfiles([
+      ...blockers.map((id) => ({ id, partyId: id })),
+      { id: "g1", partyId: "p1" },
+    ]);
+
+    let state = createInitialState(allIds);
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 2,
+      guestIds: blockers,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+
+    const result = seatingReducer(state, {
+      type: "AUTO_ASSIGN_GUESTS",
+      guestIds: ["g1"],
+      guestProfiles: profiles,
+      targetTableNumber: 2,
+      targetScope: "target-and-adjacent",
+    });
+
+    // g1 should land on table 1 or 3 (same row, adjacent to target table 2)
+    const placedTable = result.tables.find((t) => t.guestIds.includes("g1"));
+    expect(placedTable).toBeDefined();
+    expect(placedTable!.tableNumber).not.toBe(2); // target is full
+    expect(result.unassigned).not.toContain("g1");
+  });
+
+  // Flow 6: already-seated guest dropped on a full table re-seats at an adjacent table
+  it("re-seats a seated guest on an adjacent table when the target table is full", () => {
+    const blockers = Array.from({ length: TABLE_CAPACITY }, (_, i) => `b${i + 1}`);
+    const allIds = [...blockers, "g1"];
+    const profiles = makeProfiles([
+      ...blockers.map((id) => ({ id, partyId: id })),
+      { id: "g1", partyId: "p1" },
+    ]);
+
+    let state = createInitialState(allIds);
+    // Seat g1 at table 5 (far from target)
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 5,
+      guestIds: ["g1"],
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+    // Fill target table 2 completely
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 2,
+      guestIds: blockers,
+      assignmentMode: "single-table",
+      guestProfiles: profiles,
+    });
+
+    const result = seatingReducer(state, {
+      type: "AUTO_ASSIGN_GUESTS",
+      guestIds: ["g1"],
+      guestProfiles: profiles,
+      targetTableNumber: 2,
+      targetScope: "target-and-adjacent",
+      allowReseatIncoming: true,
+    } as Parameters<typeof seatingReducer>[1]);
+
+    // g1 should vacate table 5 and land near table 2
+    expect(seatsAt(result, 5).filter(Boolean)).toEqual([]);
+    const placedTable = result.tables.find((t) => t.guestIds.includes("g1"));
+    expect(placedTable).toBeDefined();
+    expect(placedTable!.tableNumber).not.toBe(2); // target is full
+  });
+});
+
+// ─── SWAP_TABLES ───────────────────────────────────────────────────────────────
+
+describe("SWAP_TABLES semantics", () => {
+  it("swaps guest assignments and disabled seats while keeping identity fields fixed", () => {
+    let state = createInitialState(["g1", "g2"]);
+
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g1"],
+      seatIndex: 0,
       assignmentMode: "single-table",
     });
-    const seatedState2 = seatingReducer(seatedState, {
+    state = seatingReducer(state, {
       type: "ASSIGN_GUESTS",
       tableNumber: 3,
       guestIds: ["g2"],
+      seatIndex: 1,
       assignmentMode: "single-table",
     });
+    state = {
+      ...state,
+      tables: state.tables.map((table) => {
+        if (table.tableNumber === 1) {
+          return { ...table, name: "Alpha", disabledSeats: [2, 4] };
+        }
+        if (table.tableNumber === 3) {
+          return { ...table, name: "Bravo", disabledSeats: [0] };
+        }
+        return table;
+      }),
+    };
 
-    const before1 = seatedState2.tables.find((t) => t.tableNumber === 1)!.guestIds;
-    const before3 = seatedState2.tables.find((t) => t.tableNumber === 3)!.guestIds;
-    const before2 = seatedState2.tables.find((t) => t.tableNumber === 2)!.guestIds;
+    const beforeTable1 = state.tables.find((table) => table.tableNumber === 1)!;
+    const beforeTable3 = state.tables.find((table) => table.tableNumber === 3)!;
 
-    const result = seatingReducer(seatedState2, {
-      type: "MOVE_TABLE",
+    const result = seatingReducer(state, {
+      type: "SWAP_TABLES",
       activeTableNumber: 1,
       overTableNumber: 3,
     });
 
-    // Table 1 and 3 swap grid positions (their entry moves in the array).
-    const indexOfOriginal1 = result.tables.findIndex((t) => t.tableNumber === 1);
-    const indexOfOriginal3 = result.tables.findIndex((t) => t.tableNumber === 3);
-    const originalIndex1 = seatedState2.tables.findIndex((t) => t.tableNumber === 1);
-    const originalIndex3 = seatedState2.tables.findIndex((t) => t.tableNumber === 3);
+    const afterTable1 = result.tables.find((table) => table.tableNumber === 1)!;
+    const afterTable3 = result.tables.find((table) => table.tableNumber === 3)!;
 
-    expect(indexOfOriginal1).toBe(originalIndex3);
-    expect(indexOfOriginal3).toBe(originalIndex1);
+    expect(afterTable1.tableNumber).toBe(1);
+    expect(afterTable3.tableNumber).toBe(3);
+    expect(afterTable1.name).toBe(beforeTable1.name);
+    expect(afterTable3.name).toBe(beforeTable3.name);
 
-    // Table 2 (bystander) stays in its original array slot.
-    const indexOfOriginal2 = result.tables.findIndex((t) => t.tableNumber === 2);
-    const originalIndex2 = seatedState2.tables.findIndex((t) => t.tableNumber === 2);
-    expect(indexOfOriginal2).toBe(originalIndex2);
-
-    // Guest seating is preserved and travels with each table.
-    expect(result.tables[indexOfOriginal1].guestIds).toEqual(before1);
-    expect(result.tables[indexOfOriginal3].guestIds).toEqual(before3);
-    expect(result.tables[indexOfOriginal2].guestIds).toEqual(before2);
+    expect(afterTable1.guestIds).toEqual(beforeTable3.guestIds);
+    expect(afterTable3.guestIds).toEqual(beforeTable1.guestIds);
+    expect(afterTable1.disabledSeats).toEqual(beforeTable3.disabledSeats);
+    expect(afterTable3.disabledSeats).toEqual(beforeTable1.disabledSeats);
   });
 
   it("is a no-op when the active and over table are the same", () => {
     const state = createInitialState(["g1"]);
     const result = seatingReducer(state, {
-      type: "MOVE_TABLE",
+      type: "SWAP_TABLES",
       activeTableNumber: 2,
       overTableNumber: 2,
     });
     expect(result).toBe(state);
   });
+});
 
-  it("is symmetrical: swapping A→B then B→A returns the original order", () => {
-    const state = createInitialState(["g1", "g2"]);
-    const after = seatingReducer(state, {
-      type: "MOVE_TABLE",
-      activeTableNumber: 1,
-      overTableNumber: 5,
+describe("TOGGLE_EMPTY_TABLE_SEATS", () => {
+  it("disables all currently empty seats when none are disabled", () => {
+    const guestIds = ["g1"];
+    let state = createInitialState(guestIds);
+
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g1"],
+      seatIndex: 0,
+      assignmentMode: "single-table",
     });
-    const restored = seatingReducer(after, {
-      type: "MOVE_TABLE",
-      activeTableNumber: 1,
-      overTableNumber: 5,
+
+    const result = seatingReducer(state, {
+      type: "TOGGLE_EMPTY_TABLE_SEATS",
+      tableNumber: 1,
     });
-    expect(restored.tables.map((t) => t.tableNumber)).toEqual(
-      state.tables.map((t) => t.tableNumber)
-    );
+
+    expect(result.tables[0].disabledSeats).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("enables previously disabled empty seats when invoked again", () => {
+    const guestIds = ["g1"];
+    let state = createInitialState(guestIds);
+
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g1"],
+      seatIndex: 0,
+      assignmentMode: "single-table",
+    });
+
+    const disabled = seatingReducer(state, {
+      type: "TOGGLE_EMPTY_TABLE_SEATS",
+      tableNumber: 1,
+    });
+
+    const enabled = seatingReducer(disabled, {
+      type: "TOGGLE_EMPTY_TABLE_SEATS",
+      tableNumber: 1,
+    });
+
+    expect(enabled.tables[0].disabledSeats).toEqual([]);
+  });
+});
+
+describe("TOGGLE_TABLE_GUEST_LOCKS", () => {
+  it("locks all seated guests when none are locked", () => {
+    let state = createInitialState(["g1", "g2"]);
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g1", "g2"],
+      assignmentMode: "single-table",
+    });
+
+    const result = seatingReducer(state, {
+      type: "TOGGLE_TABLE_GUEST_LOCKS",
+      tableNumber: 1,
+    });
+
+    expect(result.lockedGuestIds).toContain("g1");
+    expect(result.lockedGuestIds).toContain("g2");
+  });
+
+  it("locks remaining guests when only some are locked", () => {
+    let state = createInitialState(["g1", "g2"]);
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g1", "g2"],
+      assignmentMode: "single-table",
+    });
+    state = seatingReducer(state, {
+      type: "SET_GUEST_ANCHORED",
+      guestId: "g1",
+      anchored: true,
+    });
+
+    const result = seatingReducer(state, {
+      type: "TOGGLE_TABLE_GUEST_LOCKS",
+      tableNumber: 1,
+    });
+
+    expect(result.lockedGuestIds).toContain("g1");
+    expect(result.lockedGuestIds).toContain("g2");
+  });
+
+  it("unlocks all seated guests when all are locked", () => {
+    let state = createInitialState(["g1", "g2"]);
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g1", "g2"],
+      assignmentMode: "single-table",
+    });
+    state = seatingReducer(state, {
+      type: "TOGGLE_TABLE_GUEST_LOCKS",
+      tableNumber: 1,
+    });
+
+    const result = seatingReducer(state, {
+      type: "TOGGLE_TABLE_GUEST_LOCKS",
+      tableNumber: 1,
+    });
+
+    expect(result.lockedGuestIds).not.toContain("g1");
+    expect(result.lockedGuestIds).not.toContain("g2");
+  });
+
+  it("is a no-op when the table has no seated guests", () => {
+    const state = createInitialState(["g1"]);
+
+    const result = seatingReducer(state, {
+      type: "TOGGLE_TABLE_GUEST_LOCKS",
+      tableNumber: 1,
+    });
+
+    expect(result).toBe(state);
+  });
+
+  it("preserves locks for guests seated at other tables", () => {
+    let state = createInitialState(["g1", "g2"]);
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 1,
+      guestIds: ["g1"],
+      assignmentMode: "single-table",
+    });
+    state = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 2,
+      guestIds: ["g2"],
+      assignmentMode: "single-table",
+    });
+    state = seatingReducer(state, {
+      type: "SET_GUEST_ANCHORED",
+      guestId: "g2",
+      anchored: true,
+    });
+
+    // Lock table 1 guests, then unlock them
+    state = seatingReducer(state, {
+      type: "TOGGLE_TABLE_GUEST_LOCKS",
+      tableNumber: 1,
+    });
+    const result = seatingReducer(state, {
+      type: "TOGGLE_TABLE_GUEST_LOCKS",
+      tableNumber: 1,
+    });
+
+    expect(result.lockedGuestIds).not.toContain("g1");
+    expect(result.lockedGuestIds).toContain("g2");
   });
 });

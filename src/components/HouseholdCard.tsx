@@ -23,10 +23,8 @@ export default function HouseholdCard({ party }: Props) {
   return (
     <div
       ref={setNodeRef}
-      {...listeners}
-      {...attributes}
       className={["party-card", isDragging ? "is-dragging" : null].filter(Boolean).join(" ")}>
-      <div className="party-card-header">
+      <div className="party-card-header" {...listeners} {...attributes}>
         <span className="party-name">{party.household}</span>
       </div>
       <div className="party-members">
