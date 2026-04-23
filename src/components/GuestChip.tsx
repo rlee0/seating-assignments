@@ -6,7 +6,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { Pencil, Trash2 } from "lucide-react";
+import { Crown, House, Layers3, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CSS } from "@dnd-kit/utilities";
@@ -483,15 +483,24 @@ export default function GuestChip({
 
         <dl className="space-y-2 text-xs">
           <div className="grid grid-cols-[72px_1fr] items-start gap-x-2 gap-y-0.5">
-            <dt className="text-muted-foreground">Household</dt>
+            <dt className="flex items-center gap-1.5 text-muted-foreground">
+              <House className="h-3 w-3" aria-hidden="true" />
+              <span>Household</span>
+            </dt>
             <dd className="min-w-0 font-medium text-foreground">{householdName}</dd>
           </div>
           <div className="grid grid-cols-[72px_1fr] items-start gap-x-2 gap-y-0.5">
-            <dt className="text-muted-foreground">Group</dt>
+            <dt className="flex items-center gap-1.5 text-muted-foreground">
+              <Layers3 className="h-3 w-3" aria-hidden="true" />
+              <span>Group</span>
+            </dt>
             <dd className="min-w-0 font-medium text-foreground">{groupName}</dd>
           </div>
           <div className="grid grid-cols-[72px_1fr] items-start gap-x-2 gap-y-0.5">
-            <dt className="text-muted-foreground">Host</dt>
+            <dt className="flex items-center gap-1.5 text-muted-foreground">
+              <Crown className="h-3 w-3" aria-hidden="true" />
+              <span>Host</span>
+            </dt>
             <dd className="min-w-0 font-medium text-foreground">{hostName}</dd>
           </div>
           <div className="grid grid-cols-[72px_1fr] items-start gap-x-2 gap-y-0.5">

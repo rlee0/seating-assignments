@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { User, UserPlus } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,7 @@ export default function GuestDialog({
   }, [initialValues, open]);
 
   const title = mode === "create" ? "Add Guest" : "Edit Guest";
+  const TitleIcon = mode === "create" ? UserPlus : User;
   const description =
     mode === "create"
       ? "Full name is required. Host, household, and group can be selected from existing values or entered as new ones."
@@ -62,7 +64,10 @@ export default function GuestDialog({
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+          <DialogTitle className="flex items-center gap-1.5">
+            <TitleIcon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            <span>{title}</span>
+          </DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <form
@@ -92,11 +97,12 @@ export default function GuestDialog({
             </Alert>
           ) : null}
 
-          <div className="grid gap-1.5">
+          <div className="grid gap-2">
             <Label htmlFor={fullNameId}>Full Name</Label>
             <Input
               id={fullNameId}
               name="guest-full-name"
+              className="h-8 text-xs"
               autoFocus
               autoComplete="off"
               data-1p-ignore="true"

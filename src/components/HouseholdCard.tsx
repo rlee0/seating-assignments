@@ -1,4 +1,6 @@
 import GuestChip from "./GuestChip";
+import { House } from "lucide-react";
+
 import type { Party } from "../types";
 import { cn } from "../lib/utils";
 import { useDraggable } from "@dnd-kit/core";
@@ -51,6 +53,7 @@ export default function HouseholdCard({ party, onEditGuest, onDeleteGuest }: Pro
         isDragging ? "opacity-0" : null
       )}>
       <div className="flex min-w-0 items-center gap-2 px-3 py-2.5 select-none">
+        <House className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-card-foreground">
           {party.household}
         </span>

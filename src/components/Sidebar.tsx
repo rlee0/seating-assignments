@@ -1,4 +1,4 @@
-import { Plus, Search } from "lucide-react";
+import { Crown, House, Layers3, Search, UserPlus, Users } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
@@ -149,11 +149,12 @@ export default function Sidebar({
       className="flex w-65 shrink-0 flex-col overflow-hidden overflow-x-clip border-r border-sidebar-border bg-sidebar overscroll-x-none *:min-w-0">
       <div className="relative shrink-0 border-b border-sidebar-border bg-sidebar p-3">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            Guests
+          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            <Users className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Guests</span>
           </p>
           <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={onAddGuest}>
-            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            <UserPlus className="h-3.5 w-3.5" aria-hidden="true" />
             <span>Add Guest</span>
           </Button>
         </div>
@@ -199,7 +200,8 @@ export default function Sidebar({
             value="group"
             className={highlightToggleItemClass}
             title="Highlight guests in the same group">
-            Group
+            <Layers3 className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Group</span>
           </ToggleGroupItem>
           <ToggleGroupItem
             key={`household-toggle-${householdPulseNonce}`}
@@ -209,18 +211,23 @@ export default function Sidebar({
               householdPulseNonce > 0 && "animate-[pulse_280ms_ease-out_2]"
             )}
             title="Highlight guests in the same household">
-            Household
+            <House className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Household</span>
           </ToggleGroupItem>
           <ToggleGroupItem
             value="host"
             className={highlightToggleItemClass}
             title="Highlight seated guests by host">
-            Host
+            <Crown className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Host</span>
           </ToggleGroupItem>
         </ToggleGroup>
       </div>
       <div className="flex shrink-0 items-center justify-between border-b border-sidebar-border px-3 py-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-        <span>Unassigned</span>
+        <span className="flex items-center gap-1.5">
+          <Users className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>Unassigned</span>
+        </span>
         <span className="font-medium normal-case tracking-normal">{unassignedSummary}</span>
       </div>
       <div

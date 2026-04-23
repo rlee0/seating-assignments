@@ -53,7 +53,7 @@ export default function CreatableComboboxField({
   }, [options, value]);
 
   return (
-    <div className="grid gap-1.5">
+    <div className="grid gap-2">
       <Label htmlFor={inputId}>{label}</Label>
       <Popover
         open={open}
@@ -68,6 +68,7 @@ export default function CreatableComboboxField({
             <Input
               id={inputId}
               ref={inputRef}
+              className="h-8 pr-9 text-xs"
               value={value}
               placeholder={placeholder}
               autoComplete="off"
@@ -99,7 +100,7 @@ export default function CreatableComboboxField({
               type="button"
               variant="ghost"
               size="icon"
-              className="absolute right-1 top-1 h-8 w-8 text-muted-foreground"
+              className="absolute right-0.5 top-0.5 h-7 w-7 text-muted-foreground"
               onClick={() => {
                 setOpen((current) => {
                   const nextOpen = !current;
