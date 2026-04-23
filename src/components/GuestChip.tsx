@@ -14,6 +14,14 @@ import type { CSSProperties } from "react";
 import { cn } from "../lib/utils";
 import { guestChipVariants } from "@/components/ui/chip";
 import { useDraggable } from "@dnd-kit/core";
+import {
+  assignTokenSlots,
+  buildHighlightColor,
+  createHighlightPalettes,
+  getDomainFromToken,
+  type HighlightDomain,
+  type PaletteSlot,
+} from "@/lib/palette";
 import { useSearch } from "../store/SearchContext";
 import { useSeating } from "../store/SeatingContext";
 
@@ -44,81 +52,17 @@ function normalizeForSearch(str: string): string {
     .toLowerCase();
 }
 
-// 20 evenly-spaced hues at 18° intervals — one per group with no near-duplicates
-const GROUP_PALETTE_HUES = [
-  0, 18, 36, 54, 72, 90, 108, 126, 144, 162, 180, 198, 216, 234, 252, 270, 288, 306, 324, 342,
-];
-// Step of 11 is coprime to 20, giving golden-angle-like distribution across the palette
-const groupHueOrder = Array.from(
-  { length: GROUP_PALETTE_HUES.length },
-  (_, i) => GROUP_PALETTE_HUES[(i * 11) % GROUP_PALETTE_HUES.length]
-);
-
-// 120 golden-angle hues (137.508° step) for households — stays well-distributed
-// regardless of how many distinct households exist
-const GOLDEN_ANGLE = 137.508;
-const householdHueOrder = Array.from({ length: 120 }, (_, i) =>
-  Math.round((i * GOLDEN_ANGLE) % 360)
-);
-
-const domainHueOrders: Record<string, number[]> = {
-  group: groupHueOrder,
-  household: householdHueOrder,
-};
-const DEFAULT_HUE_ORDER = groupHueOrder;
-
-const tokenHueByDomain = new Map<string, Map<string, number>>();
-const usedHuesByDomain = new Map<string, Set<number>>();
-
-function getTokenHue(token: string): number {
-  const separatorIndex = token.indexOf(":");
-  const domain = separatorIndex > -1 ? token.slice(0, separatorIndex) : "default";
-
-  const tokenHueMap = tokenHueByDomain.get(domain) ?? new Map<string, number>();
-  tokenHueByDomain.set(domain, tokenHueMap);
-
-  const existingHue = tokenHueMap.get(token);
-  if (existingHue !== undefined) return existingHue;
-
-  const usedHues = usedHuesByDomain.get(domain) ?? new Set<number>();
-  usedHuesByDomain.set(domain, usedHues);
-
-  const hueOrder = domainHueOrders[domain] ?? DEFAULT_HUE_ORDER;
-  const paletteSize = hueOrder.length;
-
-  let hash = 0;
-  for (let index = 0; index < token.length; index += 1) {
-    hash = (hash << 5) - hash + token.charCodeAt(index);
-    hash |= 0;
-  }
-
-  const start = Math.abs(hash) % paletteSize;
-  let selectedHue = hueOrder[start];
-
-  for (let offset = 0; offset < paletteSize; offset += 1) {
-    const candidateHue = hueOrder[(start + offset) % paletteSize];
-    if (!usedHues.has(candidateHue)) {
-      selectedHue = candidateHue;
-      break;
-    }
-  }
-
-  tokenHueMap.set(token, selectedHue);
-  usedHues.add(selectedHue);
-  return selectedHue;
-}
-
-function getHighlightColor(token: string): {
+function getHighlightColor(
+  token: string,
+  slotAssignments: Record<HighlightDomain, Map<string, PaletteSlot>>
+): {
   background: string;
   border: string;
   solid: string;
 } {
-  const hue = getTokenHue(token);
-  return {
-    background: `oklch(0.88 0.1 ${hue})`,
-    border: `oklch(0.72 0.15 ${hue})`,
-    solid: `oklch(0.62 0.17 ${hue})`,
-  };
+  const domain = getDomainFromToken(token);
+  const slot = slotAssignments[domain].get(token) ?? slotAssignments.default.get(token);
+  return buildHighlightColor(slot ?? { hue: 0, tier: 0 });
 }
 
 function getHighlightTokenForGuest(
@@ -335,14 +279,64 @@ export default function GuestChip({
   const isRelatedHousehold = relatedHouseholdGuestIds.has(guestId);
   const isRelatedGroup = relatedGroupGuestIds.has(guestId);
 
+  const domainCounts = useMemo(() => {
+    const groupLabels = new Set<string>();
+    const householdIds = new Set<string>();
+    const hostLabels = new Set<string>();
+
+    for (const profile of guests.values()) {
+      groupLabels.add(profile.group || "No Group");
+      householdIds.add(profile.partyId);
+      hostLabels.add(profile.host || "Unknown");
+    }
+
+    return {
+      group: Math.max(1, groupLabels.size),
+      household: Math.max(1, householdIds.size),
+      host: Math.max(1, hostLabels.size),
+    };
+  }, [guests]);
+
+  const palettes = useMemo(
+    () => createHighlightPalettes(domainCounts),
+    [domainCounts.group, domainCounts.household, domainCounts.host]
+  );
+
+  const slotAssignments = useMemo(() => {
+    const tokensByDomain: Record<HighlightDomain, string[]> = {
+      group: [],
+      household: [],
+      host: [],
+      default: [],
+    };
+
+    for (const profile of guests.values()) {
+      tokensByDomain.group.push(`group:${profile.group || "No Group"}`);
+      tokensByDomain.household.push(`household:${profile.partyId}`);
+      tokensByDomain.host.push(`host:${profile.host || "Unknown"}`);
+    }
+
+    const groupAssignments = assignTokenSlots(tokensByDomain.group, palettes.group);
+    const householdAssignments = assignTokenSlots(tokensByDomain.household, palettes.household);
+    const hostAssignments = assignTokenSlots(tokensByDomain.host, palettes.host);
+
+    return {
+      group: groupAssignments,
+      household: householdAssignments,
+      host: hostAssignments,
+      default: groupAssignments,
+    } as Record<HighlightDomain, Map<string, PaletteSlot>>;
+  }, [guests, palettes.group, palettes.household, palettes.host]);
+
   const highlightColors = useMemo(
-    () => (highlightToken ? getHighlightColor(highlightToken) : null),
-    [highlightToken]
+    () => (highlightToken ? getHighlightColor(highlightToken, slotAssignments) : null),
+    [highlightToken, slotAssignments]
   );
 
   const selectedHighlightColors = useMemo(
-    () => (selectedHighlightToken ? getHighlightColor(selectedHighlightToken) : null),
-    [selectedHighlightToken]
+    () =>
+      selectedHighlightToken ? getHighlightColor(selectedHighlightToken, slotAssignments) : null,
+    [selectedHighlightToken, slotAssignments]
   );
 
   let isHighlighted = false;
