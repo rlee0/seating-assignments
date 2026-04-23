@@ -1,7 +1,7 @@
-import type { CSSProperties } from "react";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 
 import { CSS } from "@dnd-kit/utilities";
+import type { CSSProperties } from "react";
 import { guestChipVariants } from "@/components/ui/chip";
 import { useDraggable } from "@dnd-kit/core";
 import { useSearch } from "../store/SearchContext";
@@ -200,7 +200,7 @@ export default function GuestChip({
   }
 
   if (isAnchored) {
-    style.borderColor = "#dc2626";
+    style.borderColor = "var(--destructive)";
   }
 
   const hasInlineStyle = Object.keys(style).length > 0;

@@ -8,17 +8,17 @@ const guestChipVariants = cva(
         default:
           "border-input bg-secondary text-secondary-foreground hover:bg-secondary/80 active:bg-secondary/75",
         selected:
-          "border-[var(--guest-chip-selected-color,var(--primary))] bg-[var(--guest-chip-selected-color,var(--primary))] text-white hover:bg-[var(--guest-chip-selected-color,var(--primary))] active:bg-[var(--guest-chip-selected-color,var(--primary))]",
+          "border-[var(--guest-chip-selected-color,var(--primary))] bg-[var(--guest-chip-selected-color,var(--primary))] text-primary-foreground hover:bg-[var(--guest-chip-selected-color,var(--primary))] active:bg-[var(--guest-chip-selected-color,var(--primary))]",
         relatedHousehold:
           "border-[var(--guest-chip-selected-color,var(--primary))] bg-[var(--guest-chip-bg,var(--secondary))] text-secondary-foreground hover:bg-[var(--guest-chip-bg,var(--secondary))] active:bg-[var(--guest-chip-bg,var(--secondary))]",
         relatedGroup:
-          "border-[var(--guest-chip-selected-color,var(--primary))] bg-white text-[var(--guest-chip-selected-color,var(--primary))] hover:bg-white active:bg-white",
+          "border-[var(--guest-chip-selected-color,var(--primary))] bg-card text-[var(--guest-chip-selected-color,var(--primary))] hover:bg-card active:bg-card",
         relatedBoth:
           "border-[var(--guest-chip-selected-color,var(--primary))] bg-[var(--guest-chip-bg,var(--secondary))] text-secondary-foreground hover:bg-[var(--guest-chip-bg,var(--secondary))] active:bg-[var(--guest-chip-bg,var(--secondary))]",
         highlighted:
-          "border-[var(--guest-chip-highlight-border)] bg-[var(--guest-chip-highlight-bg)] text-slate-900 hover:bg-[var(--guest-chip-highlight-bg)] active:bg-[var(--guest-chip-highlight-bg)]",
+          "border-[var(--guest-chip-highlight-border)] bg-[var(--guest-chip-highlight-bg)] text-[var(--guest-chip-highlight-fg)] hover:bg-[var(--guest-chip-highlight-bg)] active:bg-[var(--guest-chip-highlight-bg)]",
         searchMatch:
-          "border-amber-200 bg-amber-50 text-amber-950 hover:bg-amber-100 active:bg-amber-100",
+          "border-[var(--search-match-border)] bg-[var(--search-match-bg)] text-[var(--search-match-fg)] hover:bg-[var(--search-match-bg)] active:bg-[var(--search-match-bg)]",
       },
       context: {
         sidebar: "w-auto",

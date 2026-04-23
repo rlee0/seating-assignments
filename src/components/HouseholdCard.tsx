@@ -23,11 +23,21 @@ export default function HouseholdCard({ party }: Props) {
   return (
     <div
       ref={setNodeRef}
-      className={["party-card", isDragging ? "is-dragging" : null].filter(Boolean).join(" ")}>
-      <div className="party-card-header" {...listeners} {...attributes}>
-        <span className="party-name">{party.household}</span>
+      className={[
+        "party-card rounded-lg border border-border bg-card transition-colors",
+        isDragging ? "is-dragging" : null,
+      ]
+        .filter(Boolean)
+        .join(" ")}>
+      <div
+        className="party-card-header flex min-w-0 cursor-grab items-center gap-2 px-3 py-2.5 select-none active:cursor-grabbing"
+        {...listeners}
+        {...attributes}>
+        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-card-foreground">
+          {party.household}
+        </span>
       </div>
-      <div className="party-members">
+      <div className="party-members flex flex-wrap gap-1 px-3 pb-2">
         {unassignedGuestIds.map((id) => (
           <GuestChip key={id} guestId={id} context="sidebar" />
         ))}

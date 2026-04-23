@@ -11,7 +11,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { AlertTriangle, Download, RotateCcw, Upload } from "lucide-react";
+import { AlertTriangle, Download, Moon, RotateCcw, Sun, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SeatingProvider, useSeating } from "./store/SeatingContext";
 import { SearchProvider } from "./store/SearchContext";
@@ -31,13 +31,17 @@ import TableBoard from "./components/TableBoard";
 import { getGuestSourceSignature, parseGuestsFromRows, type ParsedData } from "./data/parseGuests";
 import {
   clearPersistedAppState,
+  applyTheme,
   isCompatibleState,
   isGuestInputRow,
   loadPersistedGuestRows,
+  resolvePreferredTheme,
   reconcileStateToGuestIds,
   saveGuestDataSourceSignature,
   savePersistedGuestRows,
   savePersistedSeating,
+  saveTheme,
+  type AppTheme,
 } from "./store/localStorage";
 import {
   EXPORT_FORMAT_VERSION,
@@ -183,10 +187,14 @@ function SeatingApp({
   guestRows,
   onImportSnapshot,
   onReset,
+  theme,
+  onThemeToggle,
 }: {
   guestRows: GuestInputRow[];
   onImportSnapshot: (nextGuestRows: GuestInputRow[], snapshot: PersistedSeatingData) => void;
   onReset: () => void;
+  theme: AppTheme;
+  onThemeToggle: () => void;
 }) {
   const {
     state,
@@ -566,12 +574,16 @@ function SeatingApp({
         <header className="app-header">
           <h1>Seating Assignments</h1>
           <div className="app-actions">
+            <Button type="button" variant="outline" size="sm" onClick={onThemeToggle}>
+              {theme === "dark" ? <Sun size={14} aria-hidden="true" /> : <Moon size={14} aria-hidden="true" />}
+              <span className="btn-label">{theme === "dark" ? "Light" : "Dark"}</span>
+            </Button>
             {warnings.length > 0 && (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="border-yellow-300 bg-yellow-50 text-yellow-900 hover:bg-yellow-100 hover:border-yellow-400"
+                className="border-amber-500/30 bg-amber-500/10 text-amber-700 hover:border-amber-500/45 hover:bg-amber-500/15 dark:text-amber-300"
                 onClick={() => setShowWarnings((v) => !v)}>
                 <AlertTriangle size={14} aria-hidden="true" />
                 {warnings.length} data {warnings.length === 1 ? "issue" : "issues"}
@@ -655,8 +667,14 @@ function SeatingApp({
 export default function App() {
   const [guestRows, setGuestRows] = useState<GuestInputRow[]>(() => getInitialGuestRows());
   const [providerVersion, setProviderVersion] = useState(0);
+  const [theme, setTheme] = useState<AppTheme>(() => resolvePreferredTheme());
   const parsedData = useMemo(() => parseGuestsFromRows(guestRows), [guestRows]);
   const sourceSignature = getGuestSourceSignature();
+
+  useEffect(() => {
+    applyTheme(theme);
+    saveTheme(theme);
+  }, [theme]);
 
   useEffect(() => {
     saveGuestDataSourceSignature(sourceSignature);
@@ -687,6 +705,8 @@ export default function App() {
           guestRows={guestRows}
           onImportSnapshot={handleImportSnapshot}
           onReset={handleResetApp}
+          theme={theme}
+          onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
         />
       </SeatingProvider>
     </SearchProvider>

@@ -178,7 +178,7 @@ export default function Sidebar() {
             <Search className="sidebar-search-icon" aria-hidden="true" />
             <Input
               type="search"
-              className="h-8 pl-8 text-[13px]"
+              className="h-8 pl-8 text-xs"
               data-app-search="true"
               placeholder="Search guests, households, groups"
               value={searchQuery}
@@ -192,9 +192,7 @@ export default function Sidebar() {
                 <Filter aria-hidden="true" />
                 <span>Filter</span>
                 {activeHostFilterCount > 0 ? (
-                  <Badge
-                    className="h-4.5 min-w-4.5 rounded-full px-1.5 text-[11px] leading-4.5"
-                    variant="default">
+                  <Badge className="h-5 min-w-5 rounded-full px-1.5 text-[11px] leading-5" variant="default">
                     {activeHostFilterCount}
                   </Badge>
                 ) : null}

@@ -2,6 +2,38 @@ import { GUEST_DATA_SOURCE_KEY, GUEST_DATA_STORAGE_KEY, STORAGE_KEY, TABLE_COUNT
 import type { GuestInputRow, PersistedSeatingData, SeatingState } from "../types";
 
 export const MAX_UNDO_HISTORY = 100;
+export const THEME_STORAGE_KEY = "seating-theme";
+export type AppTheme = "light" | "dark";
+
+export function resolvePreferredTheme(): AppTheme {
+  try {
+    const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+    if (storedTheme === "light" || storedTheme === "dark") {
+      return storedTheme;
+    }
+  } catch {
+    // Ignore storage errors and fall back to system preference.
+  }
+
+  if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    return "dark";
+  }
+
+  return "light";
+}
+
+export function applyTheme(theme: AppTheme): void {
+  document.documentElement.classList.toggle("dark", theme === "dark");
+  document.documentElement.style.colorScheme = theme;
+}
+
+export function saveTheme(theme: AppTheme): void {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {
+    // Ignore storage errors silently
+  }
+}
 
 export function isGuestInputRow(value: unknown): value is GuestInputRow {
   if (!value || typeof value !== "object") return false;
