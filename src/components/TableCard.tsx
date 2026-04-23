@@ -200,9 +200,7 @@ function SeatSlot({
               </>
             )}
           </ContextMenuItem>
-          <ContextMenuItem
-            className="text-destructive focus:bg-destructive/10 focus:text-destructive"
-            onSelect={onUnassign}>
+          <ContextMenuItem onSelect={onUnassign}>
             <UserMinus className="mr-2 h-4 w-4" />
             Unassign guest
           </ContextMenuItem>
@@ -488,7 +486,6 @@ export default function TableCard({
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
-            className="text-destructive focus:bg-destructive/10 focus:text-destructive"
             disabled={occupancy === 0}
             onSelect={() => dispatch({ type: "CLEAR_TABLE", tableNumber: table.tableNumber })}>
             <Eraser className="mr-2 h-4 w-4" />

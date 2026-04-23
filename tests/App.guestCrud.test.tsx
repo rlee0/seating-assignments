@@ -136,6 +136,9 @@ describe("guest CRUD flows", () => {
     fireEvent.change(within(dialog).getByLabelText(/full name/i), {
       target: { value: "Jordan Lee" },
     });
+    fireEvent.change(within(dialog).getByLabelText(/^host$/i), {
+      target: { value: "Ryan" },
+    });
     fireEvent.change(within(dialog).getByLabelText(/^household$/i), {
       target: { value: "Lee Family" },
     });
@@ -150,6 +153,7 @@ describe("guest CRUD flows", () => {
     await waitFor(() => {
       const stored = localStorage.getItem(GUEST_DATA_STORAGE_KEY);
       expect(stored).toContain("Jordan Lee");
+      expect(stored).toContain('"host":"Ryan"');
       expect(stored).toContain('"id":"g0"');
     });
   });
@@ -166,6 +170,7 @@ describe("guest CRUD flows", () => {
     fireEvent.click(await screen.findByText(/edit guest/i));
     const dialog = screen.getByRole("dialog", { name: /edit guest/i });
     fireEvent.change(within(dialog).getByLabelText(/full name/i), { target: { value: "Alicia" } });
+    fireEvent.change(within(dialog).getByLabelText(/^host$/i), { target: { value: "Taylor" } });
     fireEvent.change(within(dialog).getByLabelText(/^household$/i), { target: { value: "Beta" } });
     fireEvent.change(within(dialog).getByLabelText(/^group$/i), { target: { value: "Family" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /save changes/i }));
@@ -173,6 +178,10 @@ describe("guest CRUD flows", () => {
     await screen.findByText("Alicia");
     expect(screen.queryByText("Alice")).toBeNull();
     expect(screen.getByText("Beta")).not.toBeNull();
+
+    await waitFor(() => {
+      expect(localStorage.getItem(GUEST_DATA_STORAGE_KEY)).toContain('"host":"Taylor"');
+    });
   });
 
   it("deletes a seated guest from the seat context menu", async () => {

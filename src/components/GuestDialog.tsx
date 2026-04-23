@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 
 export interface GuestFormValues {
   fullName: string;
+  host: string;
   household: string;
   group: string;
 }
@@ -24,6 +25,7 @@ interface Props {
   open: boolean;
   mode: "create" | "edit";
   initialValues: GuestFormValues;
+  hostOptions: string[];
   householdOptions: string[];
   groupOptions: string[];
   onClose: () => void;
@@ -34,6 +36,7 @@ export default function GuestDialog({
   open,
   mode,
   initialValues,
+  hostOptions,
   householdOptions,
   groupOptions,
   onClose,
@@ -52,8 +55,8 @@ export default function GuestDialog({
   const title = mode === "create" ? "Add Guest" : "Edit Guest";
   const description =
     mode === "create"
-      ? "Full name is required. Household and group can be selected from existing values or entered as new ones."
-      : "Update the guest details. Household and group can be selected from existing values or entered as new ones.";
+      ? "Full name is required. Host, household, and group can be selected from existing values or entered as new ones."
+      : "Update the guest details. Host, household, and group can be selected from existing values or entered as new ones.";
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
@@ -70,6 +73,7 @@ export default function GuestDialog({
 
             const nextValues = {
               fullName: values.fullName.trim(),
+              host: values.host.trim(),
               household: values.household.trim(),
               group: values.group.trim(),
             };
@@ -103,6 +107,14 @@ export default function GuestDialog({
               placeholder="e.g. Jordan Lee"
             />
           </div>
+
+          <CreatableComboboxField
+            label="Host"
+            value={values.host}
+            options={hostOptions}
+            placeholder="Select existing or type a new host"
+            onChange={(nextValue) => setValues((current) => ({ ...current, host: nextValue }))}
+          />
 
           <CreatableComboboxField
             label="Household"

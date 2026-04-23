@@ -685,6 +685,13 @@ function SeatingApp({
       ].sort((left, right) => optionCollator.compare(left, right)),
     [guestRows, optionCollator]
   );
+  const hostOptions = useMemo(
+    () =>
+      [...new Set(guestRows.map((row) => row.host.trim()).filter((value) => value.length > 0))].sort(
+        (left, right) => optionCollator.compare(left, right)
+      ),
+    [guestRows, optionCollator]
+  );
   const householdHostByName = useMemo(() => {
     const map = new Map<string, string>();
     for (const party of parties.values()) {
@@ -707,10 +714,11 @@ function SeatingApp({
       editingGuestRow
         ? {
             fullName: editingGuestRow.fullName,
+            host: editingGuestRow.host,
             household: editingGuestRow.household,
             group: editingGuestRow.group,
           }
-        : { fullName: "", household: "", group: "" },
+        : { fullName: "", host: "", household: "", group: "" },
     [editingGuestRow]
   );
 
@@ -753,7 +761,7 @@ function SeatingApp({
                   fullName: values.fullName,
                   household: values.household,
                   group: values.group,
-                  host: resolveGuestHost(values.household, row.host),
+                  host: values.host || resolveGuestHost(values.household, row.host),
                 }
               : row
           )
@@ -766,7 +774,7 @@ function SeatingApp({
             fullName: values.fullName,
             household: values.household,
             group: values.group,
-            host: resolveGuestHost(values.household, ""),
+            host: values.host || resolveGuestHost(values.household, ""),
           },
         ]);
       }
@@ -1310,6 +1318,7 @@ function SeatingApp({
           open={guestDialogState !== null}
           mode={guestDialogState?.mode ?? "create"}
           initialValues={guestDialogInitialValues}
+          hostOptions={hostOptions}
           householdOptions={householdOptions}
           groupOptions={groupOptions}
           onClose={() => setGuestDialogState(null)}
