@@ -6,6 +6,7 @@ import {
   PointerSensor,
   TouchSensor,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
   useSensor,
   useSensors,
@@ -14,6 +15,7 @@ import { AlertTriangle, Download, RotateCcw, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SeatingProvider, useSeating } from "./store/SeatingContext";
 import { SearchProvider } from "./store/SearchContext";
+import { Alert, AlertDescription, AlertTitle } from "./components/ui/alert";
 import {
   useCallback,
   useEffect,
@@ -46,11 +48,11 @@ import {
   type SeatingExportData,
   type TableState,
 } from "./types";
-import { type GuestProfile } from "./store/reducer";
+import { seatingReducer, type GuestProfile } from "./store/reducer";
 import { dndCollisionDetection } from "./dnd/collision";
 import { parseDragIntent, resolveDropTarget } from "./dnd/parsers";
 import { routeDrop } from "./dnd/router";
-import type { DragKind } from "./dnd/types";
+import type { DragIntent, DragKind } from "./dnd/types";
 
 // ─── Utility functions ────────────────────────────────────────────────────────
 
@@ -123,10 +125,7 @@ function parseImportPayload(value: unknown): {
 
   if (candidate.version !== EXPORT_FORMAT_VERSION) return null;
 
-  if (
-    !Array.isArray(candidate.guests) ||
-    !candidate.guests.every((row) => isGuestInputRow(row))
-  ) {
+  if (!Array.isArray(candidate.guests) || !candidate.guests.every((row) => isGuestInputRow(row))) {
     return null;
   }
 
@@ -205,10 +204,17 @@ function SeatingApp({
   } = useSeating();
 
   // ── Drag state ──────────────────────────────────────────────────────────────
-  const [activeDragKind, setActiveDragKind] = useState<DragKind | null>(null);
-  const [activeDragGuestId, setActiveDragGuestId] = useState<string | null>(null);
+  const [activeDragIntent, setActiveDragIntent] = useState<DragIntent | null>(null);
+  const [autoSeatPreview, setAutoSeatPreview] = useState<{
+    tables: import("./types").TableState[];
+  } | null>(null);
   /** Tracks the latest pointer position for seat-level probe during drag-end. */
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Derived drag state passed down to child components.
+  const activeDragKind: DragKind | null = activeDragIntent?.kind ?? null;
+  const activeDragGuestId: string | null =
+    activeDragIntent?.kind === "guest" ? activeDragIntent.guestId : null;
 
   // ── Other state ─────────────────────────────────────────────────────────────
   const [showWarnings, setShowWarnings] = useState(false);
@@ -221,7 +227,7 @@ function SeatingApp({
 
   // ── Pointer tracking for seat-level probe ────────────────────────────────────
   useEffect(() => {
-    if (!activeDragKind) return;
+    if (!activeDragIntent) return;
 
     const handlePointerMove = (event: PointerEvent) => {
       pointerRef.current = { x: event.clientX, y: event.clientY };
@@ -239,7 +245,7 @@ function SeatingApp({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("touchmove", handleTouchMove);
     };
-  }, [activeDragKind]);
+  }, [activeDragIntent]);
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -291,7 +297,16 @@ function SeatingApp({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [canRedo, canUndo, clearSelectedGuest, dispatch, redo, selectedGuestId, state.unassigned, undo]);
+  }, [
+    canRedo,
+    canUndo,
+    clearSelectedGuest,
+    dispatch,
+    redo,
+    selectedGuestId,
+    state.unassigned,
+    undo,
+  ]);
 
   // ── Click-to-deselect guest ───────────────────────────────────────────────────
   useEffect(() => {
@@ -316,20 +331,47 @@ function SeatingApp({
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const intent = parseDragIntent(event.active.data.current);
     if (!intent) return;
-    setActiveDragKind(intent.kind);
-    setActiveDragGuestId(intent.kind === "guest" ? intent.guestId : null);
+    setActiveDragIntent(intent);
   }, []);
 
   const handleDragCancel = useCallback(() => {
-    setActiveDragKind(null);
-    setActiveDragGuestId(null);
+    setActiveDragIntent(null);
+    setAutoSeatPreview(null);
     pointerRef.current = null;
   }, []);
 
+  const handleDragOver = useCallback(
+    ({ active, over }: DragOverEvent) => {
+      if (!over) {
+        setAutoSeatPreview(null);
+        return;
+      }
+      const intent = parseDragIntent(active.data.current);
+      if (!intent) {
+        setAutoSeatPreview(null);
+        return;
+      }
+      // Only preview table-level and autoseat drops — seat drops are single-slot.
+      const target = resolveDropTarget(over, null);
+      if (!target || target.type === "seat" || target.type === "unassigned") {
+        setAutoSeatPreview(null);
+        return;
+      }
+      const action = routeDrop(intent, target, { state, guestProfiles, parties });
+      if (!action) {
+        setAutoSeatPreview(null);
+        return;
+      }
+      const previewState = seatingReducer(state, action);
+      setAutoSeatPreview({ tables: previewState.tables });
+    },
+    [guestProfiles, parties, state]
+  );
+
   const handleDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
-      setActiveDragKind(null);
-      setActiveDragGuestId(null);
+      setActiveDragIntent(null);
+      setAutoSeatPreview(null);
       const ptr = pointerRef.current;
       pointerRef.current = null;
 
@@ -447,10 +489,57 @@ function SeatingApp({
   }
 
   const unassignedCount = state.unassigned.length;
-  const overlayGuest =
-    activeDragKind === "guest" && activeDragGuestId
-      ? (guests.get(activeDragGuestId) ?? null)
-      : null;
+
+  // ── Overlay content ───────────────────────────────────────────────────────
+  const overlayContent = useMemo(() => {
+    if (!activeDragIntent) return null;
+
+    if (activeDragIntent.kind === "guest") {
+      const guest = guests.get(activeDragIntent.guestId);
+      if (!guest) return null;
+      return (
+        <span className="guest-chip guest-chip--sidebar drag-overlay-guest-chip">
+          <span className="guest-name">{guest.fullName}</span>
+        </span>
+      );
+    }
+
+    if (activeDragIntent.kind === "household") {
+      const party = parties.get(activeDragIntent.partyId);
+      if (!party) return null;
+      const memberCount = party.guestIds.length;
+      return (
+        <div className="drag-overlay-party">
+          <div className="drag-overlay-party-name">{party.household}</div>
+          <div className="drag-overlay-party-count">{memberCount} guests</div>
+        </div>
+      );
+    }
+
+    if (activeDragIntent.kind === "group") {
+      const memberCount = Array.from(guests.values()).filter(
+        (g) => g.group === activeDragIntent.groupName
+      ).length;
+      return (
+        <div className="drag-overlay-group">
+          <div className="drag-overlay-group-name">{activeDragIntent.groupName}</div>
+          <div className="drag-overlay-group-count">{memberCount} guests</div>
+        </div>
+      );
+    }
+
+    if (activeDragIntent.kind === "table") {
+      const table = state.tables.find((t) => t.tableNumber === activeDragIntent.tableNumber);
+      const occupiedCount = table ? table.guestIds.filter(Boolean).length : 0;
+      return (
+        <div className="drag-overlay-table">
+          {activeDragIntent.name} &mdash; {occupiedCount} guests
+        </div>
+      );
+    }
+
+    return null;
+  }, [activeDragIntent, guests, parties, state.tables]);
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
@@ -459,6 +548,7 @@ function SeatingApp({
       collisionDetection={dndCollisionDetection}
       onDragStart={handleDragStart}
       onDragCancel={handleDragCancel}
+      onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}>
       <div
         className={[
@@ -515,12 +605,18 @@ function SeatingApp({
         </header>
 
         {showWarnings && (
-          <div className="warnings-panel">
-            {warnings.map((w, i) => (
-              <div key={i} className="warning-item">
-                {w}
-              </div>
-            ))}
+          <div className="px-4 pb-2">
+            <Alert className="max-h-32 overflow-y-auto" variant="destructive">
+              <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+              <AlertTitle>Data issues</AlertTitle>
+              <AlertDescription>
+                <ul className="list-disc space-y-1 pl-4">
+                  {warnings.map((warning, index) => (
+                    <li key={index}>{warning}</li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
           </div>
         )}
 
@@ -529,7 +625,7 @@ function SeatingApp({
           <TableBoard
             activeDragKind={activeDragKind}
             activeDragGuestId={activeDragGuestId}
-            autoSeatPreview={null}
+            autoSeatPreview={autoSeatPreview}
           />
         </div>
 
@@ -548,13 +644,7 @@ function SeatingApp({
           </button>
         </div>
 
-        <DragOverlay dropAnimation={null}>
-          {overlayGuest && (
-            <span className="guest-chip guest-chip--sidebar drag-overlay-guest-chip">
-              <span className="guest-name">{overlayGuest.fullName}</span>
-            </span>
-          )}
-        </DragOverlay>
+        <DragOverlay dropAnimation={null}>{overlayContent}</DragOverlay>
       </div>
     </DndContext>
   );

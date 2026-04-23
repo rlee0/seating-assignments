@@ -28,6 +28,7 @@ function SeatSlot({
   tableNumber,
   seatIndex,
   guestId,
+  guestFullName,
   activeDragKind,
   activeDragGuestId,
   isPreviewMode,
@@ -41,6 +42,8 @@ function SeatSlot({
   tableNumber: number;
   seatIndex: number;
   guestId: string | null;
+  /** Full name used in preview mode to avoid registering a duplicate useDraggable ID that kills the active drag. */
+  guestFullName: string | null;
   activeDragKind: "household" | "guest" | "group" | "table" | null;
   activeDragGuestId: string | null;
   isPreviewMode: boolean;
@@ -83,19 +86,33 @@ function SeatSlot({
         .filter(Boolean)
         .join(" ")}>
       {!isDisabled && guestId ? (
-        <GuestChip
-          guestId={guestId}
-          context="table"
-          tableNumber={tableNumber}
-          seatIndex={seatIndex}
-          className={[
-            isOriginSeat ? "guest-chip--origin-hidden" : null,
-            previewSeatKind ? `guest-chip--preview-${previewSeatKind}` : null,
-          ]
-            .filter(Boolean)
-            .join(" ")}
-          suppressStateStyles={isPreviewMode}
-        />
+        // In preview mode render a plain non-draggable chip to prevent registering a
+        // second useDraggable with the same ID as the active drag, which kills the session.
+        isPreviewMode ? (
+          <div
+            className={[
+              "guest-chip",
+              "guest-chip--table",
+              previewSeatKind ? `guest-chip--preview-${previewSeatKind}` : null,
+            ]
+              .filter(Boolean)
+              .join(" ")}>
+            <span className="guest-name">{guestFullName ?? ""}</span>
+          </div>
+        ) : (
+          <GuestChip
+            guestId={guestId}
+            context="table"
+            tableNumber={tableNumber}
+            seatIndex={seatIndex}
+            className={[
+              isOriginSeat ? "guest-chip--origin-hidden" : null,
+              previewSeatKind ? `guest-chip--preview-${previewSeatKind}` : null,
+            ]
+              .filter(Boolean)
+              .join(" ")}
+          />
+        )
       ) : null}
     </div>
   );
@@ -140,7 +157,7 @@ export default function TableCard({
   isPreviewMode = false,
   hasTablePreviewChanges = false,
 }: Props) {
-  const { dispatch, state } = useSeating();
+  const { dispatch, state, guests } = useSeating();
   const lockedSet = new Set(state.lockedGuestIds);
   const {
     attributes,
@@ -204,6 +221,7 @@ export default function TableCard({
                   tableNumber={table.tableNumber}
                   seatIndex={i}
                   guestId={guestId}
+                  guestFullName={guestId ? (guests.get(guestId)?.fullName ?? null) : null}
                   activeDragKind={activeDragKind}
                   activeDragGuestId={activeDragGuestId}
                   isPreviewMode={isPreviewMode}
@@ -254,6 +272,7 @@ export default function TableCard({
                     tableNumber={table.tableNumber}
                     seatIndex={seatIndex}
                     guestId={guestId}
+                    guestFullName={guestId ? (guests.get(guestId)?.fullName ?? null) : null}
                     activeDragKind={activeDragKind}
                     activeDragGuestId={activeDragGuestId}
                     isPreviewMode={isPreviewMode}

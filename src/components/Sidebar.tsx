@@ -1,9 +1,3 @@
-import { Filter, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
-
-import { Button } from "@/components/ui/button";
-import GroupCard from "./GroupCard";
-import HouseholdCard from "./HouseholdCard";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -13,6 +7,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Filter, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import GroupCard from "./GroupCard";
+import HouseholdCard from "./HouseholdCard";
 import { Input } from "@/components/ui/input";
 import { chipToggleVariants } from "@/components/ui/chip";
 import { useDroppable } from "@dnd-kit/core";
@@ -191,7 +192,11 @@ export default function Sidebar() {
                 <Filter aria-hidden="true" />
                 <span>Filter</span>
                 {activeHostFilterCount > 0 ? (
-                  <span className="sidebar-filter-count">{activeHostFilterCount}</span>
+                  <Badge
+                    className="h-4.5 min-w-4.5 rounded-full px-1.5 text-[11px] leading-4.5"
+                    variant="default">
+                    {activeHostFilterCount}
+                  </Badge>
                 ) : null}
               </Button>
             </DropdownMenuTrigger>
@@ -275,7 +280,9 @@ export default function Sidebar() {
       </div>
       <div className="sidebar-header">
         <span>Unassigned</span>
-        <span className="sidebar-count">{state.unassigned.length}</span>
+        <Badge variant="secondary" className="h-auto rounded-full px-1.5 py-0 text-[11px]">
+          {state.unassigned.length}
+        </Badge>
       </div>
       <div
         ref={setDropzoneRef}

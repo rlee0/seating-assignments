@@ -51,23 +51,6 @@
   display: none;
 }
 
-/* ─── Warnings panel ──────────────────────────────────────────────────────── */
-
-.warnings-panel {
-  background: #fffbeb;
-  border-bottom: 1px solid #fcd34d;
-  padding: 8px 16px;
-  font-size: 12px;
-  color: #78350f;
-  max-height: 120px;
-  overflow-y: auto;
-  flex-shrink: 0;
-}
-
-.warning-item + .warning-item {
-  margin-top: 2px;
-}
-
 /* ─── Body ────────────────────────────────────────────────────────────────── */
 
 .app-body {
@@ -161,18 +144,6 @@
   height: 14px;
 }
 
-.sidebar-filter-count {
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: #111827;
-  color: #fff;
-  font-size: 11px;
-  line-height: 18px;
-  text-align: center;
-}
-
 .sidebar-filter-menu {
   width: 18rem;
 }
@@ -213,14 +184,6 @@
   margin: 0;
   font-size: 12px;
   color: #6b7280;
-}
-
-.sidebar-count {
-  background: #e5e5e5;
-  border-radius: 10px;
-  padding: 2px 6px;
-  font-size: 11px;
-  color: #666;
 }
 
 .sidebar-dropzone {
