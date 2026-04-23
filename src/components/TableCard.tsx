@@ -5,9 +5,20 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "./ui/context-menu";
+import {
+  Eraser,
+  Lock,
+  LockOpen,
+  Pencil,
+  ToggleLeft,
+  ToggleRight,
+  Trash2,
+  UserMinus,
+} from "lucide-react";
 
 import { CSS } from "@dnd-kit/utilities";
 import GuestChip from "./GuestChip";
+import type { GuestSwapPreview } from "./TableBoard";
 import { TABLE_CAPACITY } from "../types";
 import type { TableState } from "../types";
 import { cn } from "../lib/utils";
@@ -19,6 +30,9 @@ interface Props {
   table: TableState;
   activeDragKind: "household" | "guest" | "group" | "table" | null;
   activeDragGuestId: string | null;
+  guestSwapPreview: GuestSwapPreview | null;
+  onEditGuest: (guestId: string) => void;
+  onDeleteGuest: (guestId: string) => void;
   displayGuestIds?: Array<string | null>;
   previewSeatKinds?: Array<"added" | "changed" | "deleted" | null>;
   isPreviewMode?: boolean;
@@ -32,6 +46,7 @@ function SeatSlot({
   guestFullName,
   activeDragKind,
   activeDragGuestId,
+  guestSwapPreview,
   isPreviewMode,
   previewSeatKind,
   isDisabled,
@@ -39,6 +54,8 @@ function SeatSlot({
   onToggleDisabled,
   onToggleLock,
   onUnassign,
+  onEditGuest,
+  onDeleteGuest,
 }: {
   tableNumber: number;
   seatIndex: number;
@@ -47,6 +64,7 @@ function SeatSlot({
   guestFullName: string | null;
   activeDragKind: "household" | "guest" | "group" | "table" | null;
   activeDragGuestId: string | null;
+  guestSwapPreview: GuestSwapPreview | null;
   isPreviewMode: boolean;
   previewSeatKind: "added" | "changed" | "deleted" | null;
   isDisabled: boolean;
@@ -54,6 +72,8 @@ function SeatSlot({
   onToggleDisabled: () => void;
   onToggleLock: () => void;
   onUnassign: () => void;
+  onEditGuest: (guestId: string) => void;
+  onDeleteGuest: (guestId: string) => void;
 }) {
   const isOriginSeat =
     !isPreviewMode &&
@@ -75,6 +95,17 @@ function SeatSlot({
   });
 
   const isSeatOver = !isDisabled && activeDragKind === "guest" && droppable.isOver;
+  const isSwapTarget = isSeatOver && !isVisuallyEmpty;
+  const isSwapOriginPreview =
+    isOriginSeat &&
+    guestSwapPreview?.sourceTableNumber === tableNumber &&
+    guestSwapPreview?.sourceSeatIndex === seatIndex &&
+    guestSwapPreview?.sourceGuestId === guestId;
+  const renderedGuestId = isSwapTarget
+    ? activeDragGuestId
+    : isSwapOriginPreview
+      ? guestSwapPreview.targetGuestId
+      : guestId;
 
   const previewChipClass =
     previewSeatKind === "added"
@@ -107,20 +138,31 @@ function SeatSlot({
         previewSeatKind === "deleted" &&
           "bg-(--diff-deleted-slot-bg) shadow-[inset_0_0_0_1px_var(--diff-deleted-border)]"
       )}>
-      {!isDisabled && guestId ? (
+      {!isDisabled && renderedGuestId ? (
         <GuestChip
-          guestId={guestId}
+          guestId={renderedGuestId}
           context="table"
           tableNumber={tableNumber}
           seatIndex={seatIndex}
-          suppressStateStyles={isPreviewMode}
-          suppressInteraction={isPreviewMode}
+          suppressStateStyles={isPreviewMode || isSwapTarget || isSwapOriginPreview}
+          suppressInteraction={isPreviewMode || isSwapTarget || isSwapOriginPreview}
           draggableDisabled={
-            isPreviewMode && !(activeDragKind === "guest" && guestId === activeDragGuestId)
+            isSwapOriginPreview ||
+            isSwapTarget ||
+            (isPreviewMode && !(activeDragKind === "guest" && guestId === activeDragGuestId))
           }
-          fallbackName={guestFullName ?? undefined}
+          fallbackName={
+            isSwapTarget || isSwapOriginPreview ? undefined : (guestFullName ?? undefined)
+          }
+          onEditGuest={
+            isPreviewMode || isSwapTarget || isSwapOriginPreview ? undefined : onEditGuest
+          }
           className={[
-            isOriginSeat ? "absolute inset-0 opacity-0 pointer-events-none" : null,
+            isOriginSeat && !isSwapOriginPreview
+              ? "absolute inset-0 opacity-0 pointer-events-none"
+              : null,
+            isSwapOriginPreview ? "opacity-60 pointer-events-none" : null,
+            isSwapTarget ? "opacity-60 pointer-events-none" : null,
             previewChipClass,
           ]
             .filter(Boolean)
@@ -138,11 +180,41 @@ function SeatSlot({
       <ContextMenu>
         <ContextMenuTrigger asChild>{slotEl}</ContextMenuTrigger>
         <ContextMenuContent>
+          {guestId ? (
+            <ContextMenuItem onSelect={() => onEditGuest(guestId)}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit guest
+            </ContextMenuItem>
+          ) : null}
+          {guestId ? <ContextMenuSeparator /> : null}
           <ContextMenuItem onSelect={onToggleLock}>
-            {isLocked ? "Unlock guest" : "Lock guest"}
+            {isLocked ? (
+              <>
+                <LockOpen className="mr-2 h-4 w-4" />
+                Unlock guest
+              </>
+            ) : (
+              <>
+                <Lock className="mr-2 h-4 w-4" />
+                Lock guest
+              </>
+            )}
           </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem onSelect={onUnassign}>Unassign guest</ContextMenuItem>
+          <ContextMenuItem
+            className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+            onSelect={onUnassign}>
+            <UserMinus className="mr-2 h-4 w-4" />
+            Unassign guest
+          </ContextMenuItem>
+          {guestId ? <ContextMenuSeparator /> : null}
+          {guestId ? (
+            <ContextMenuItem
+              className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+              onSelect={() => onDeleteGuest(guestId)}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete guest
+            </ContextMenuItem>
+          ) : null}
         </ContextMenuContent>
       </ContextMenu>
     );
@@ -154,7 +226,17 @@ function SeatSlot({
       <ContextMenuTrigger asChild>{slotEl}</ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onSelect={onToggleDisabled}>
-          {isDisabled ? "Enable seat" : "Disable seat"}
+          {isDisabled ? (
+            <>
+              <ToggleRight className="mr-2 h-4 w-4" />
+              Enable seat
+            </>
+          ) : (
+            <>
+              <ToggleLeft className="mr-2 h-4 w-4" />
+              Disable seat
+            </>
+          )}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
@@ -165,6 +247,9 @@ export default function TableCard({
   table,
   activeDragKind,
   activeDragGuestId,
+  guestSwapPreview,
+  onEditGuest,
+  onDeleteGuest,
   displayGuestIds,
   previewSeatKinds,
   isPreviewMode = false,
@@ -271,6 +356,7 @@ export default function TableCard({
                   guestFullName={guestId ? (guests.get(guestId)?.fullName ?? null) : null}
                   activeDragKind={activeDragKind}
                   activeDragGuestId={activeDragGuestId}
+                  guestSwapPreview={guestSwapPreview}
                   isPreviewMode={isPreviewMode}
                   previewSeatKind={previewSeatKinds?.[i] ?? null}
                   isDisabled={disabledSeatsSet.has(i)}
@@ -295,6 +381,8 @@ export default function TableCard({
                       dispatch({ type: "REMOVE_GUESTS", guestIds: [guestId] });
                     }
                   }}
+                  onEditGuest={onEditGuest}
+                  onDeleteGuest={onDeleteGuest}
                 />
               ))}
             </div>
@@ -330,6 +418,7 @@ export default function TableCard({
                     guestFullName={guestId ? (guests.get(guestId)?.fullName ?? null) : null}
                     activeDragKind={activeDragKind}
                     activeDragGuestId={activeDragGuestId}
+                    guestSwapPreview={guestSwapPreview}
                     isPreviewMode={isPreviewMode}
                     previewSeatKind={previewSeatKinds?.[seatIndex] ?? null}
                     isDisabled={disabledSeatsSet.has(seatIndex)}
@@ -354,6 +443,8 @@ export default function TableCard({
                         dispatch({ type: "REMOVE_GUESTS", guestIds: [guestId] });
                       }
                     }}
+                    onEditGuest={onEditGuest}
+                    onDeleteGuest={onDeleteGuest}
                   />
                 );
               })}
@@ -363,22 +454,45 @@ export default function TableCard({
         <ContextMenuContent>
           <ContextMenuItem
             disabled={occupancy === 0}
-            onSelect={() => dispatch({ type: "CLEAR_TABLE", tableNumber: table.tableNumber })}>
-            Unassign all guests
-          </ContextMenuItem>
-          <ContextMenuItem
-            disabled={occupancy === 0}
             onSelect={() =>
               dispatch({ type: "TOGGLE_TABLE_GUEST_LOCKS", tableNumber: table.tableNumber })
             }>
-            {allSeatedGuestsLocked ? "Unlock all guests" : "Lock all guests"}
+            {allSeatedGuestsLocked ? (
+              <>
+                <LockOpen className="mr-2 h-4 w-4" />
+                Unlock all guests
+              </>
+            ) : (
+              <>
+                <Lock className="mr-2 h-4 w-4" />
+                Lock all guests
+              </>
+            )}
           </ContextMenuItem>
           <ContextMenuItem
             disabled={!hasDisabledEmptySeats && !hasEnabledEmptySeats}
             onSelect={() =>
               dispatch({ type: "TOGGLE_EMPTY_TABLE_SEATS", tableNumber: table.tableNumber })
             }>
-            {hasDisabledEmptySeats ? "Enable empty seats" : "Disable empty seats"}
+            {hasDisabledEmptySeats ? (
+              <>
+                <ToggleRight className="mr-2 h-4 w-4" />
+                Enable empty seats
+              </>
+            ) : (
+              <>
+                <ToggleLeft className="mr-2 h-4 w-4" />
+                Disable empty seats
+              </>
+            )}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+            disabled={occupancy === 0}
+            onSelect={() => dispatch({ type: "CLEAR_TABLE", tableNumber: table.tableNumber })}>
+            <Eraser className="mr-2 h-4 w-4" />
+            Unassign all guests
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>

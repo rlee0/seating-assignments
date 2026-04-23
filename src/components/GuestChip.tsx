@@ -1,4 +1,12 @@
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { Pencil, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CSS } from "@dnd-kit/utilities";
@@ -11,6 +19,7 @@ import { useSeating } from "../store/SeatingContext";
 
 const HOVERCARD_OPEN_DELAY_MS = 1200;
 const HOVERCARD_CLOSE_DELAY_MS = 80;
+const CHIP_SINGLE_CLICK_DELAY_MS = 220;
 
 let activeGuestHovercardId: string | null = null;
 const guestHovercardSubscribers = new Set<(hovercardId: string | null) => void>();
@@ -139,6 +148,8 @@ interface Props {
   suppressInteraction?: boolean;
   draggableDisabled?: boolean;
   fallbackName?: string;
+  onEditGuest?: (guestId: string) => void;
+  onDeleteGuest?: (guestId: string) => void;
 }
 
 export default function GuestChip({
@@ -151,6 +162,8 @@ export default function GuestChip({
   suppressInteraction = false,
   draggableDisabled = false,
   fallbackName,
+  onEditGuest,
+  onDeleteGuest,
 }: Props) {
   const {
     state,
@@ -162,8 +175,14 @@ export default function GuestChip({
     relatedHouseholdGuestIds,
     relatedGroupGuestIds,
   } = useSeating();
-  const { searchQuery, isGroupHighlightOn, isHouseholdHighlightOn, isHostHighlightOn } =
-    useSearch();
+  const {
+    searchQuery,
+    isGroupHighlightOn,
+    isHouseholdHighlightOn,
+    isHostHighlightOn,
+    activateHouseholdFocusFromGuestSelection,
+    restoreHighlightModeAfterGuestDeselection,
+  } = useSearch();
   const guest = guests.get(guestId);
   const selectedGuest = selectedGuestId ? guests.get(selectedGuestId) : null;
   const isAnchored = (state.lockedGuestIds ?? []).includes(guestId);
@@ -174,6 +193,7 @@ export default function GuestChip({
   const [isHovercardOpen, setIsHovercardOpen] = useState(false);
   const openTimerRef = useRef<number | null>(null);
   const closeTimerRef = useRef<number | null>(null);
+  const selectTimerRef = useRef<number | null>(null);
 
   const draggableId =
     draggableDisabled &&
@@ -191,8 +211,6 @@ export default function GuestChip({
         ? { kind: "guest", guestId, origin: context, tableNumber, seatIndex }
         : { kind: "guest", guestId, origin: context },
   });
-
-  if (!guest && !fallbackName) return null;
 
   const guestName = guest?.fullName ?? fallbackName ?? "";
 
@@ -213,6 +231,13 @@ export default function GuestChip({
     if (closeTimerRef.current !== null) {
       window.clearTimeout(closeTimerRef.current);
       closeTimerRef.current = null;
+    }
+  }
+
+  function clearSelectTimer() {
+    if (selectTimerRef.current !== null) {
+      window.clearTimeout(selectTimerRef.current);
+      selectTimerRef.current = null;
     }
   }
 
@@ -274,6 +299,7 @@ export default function GuestChip({
   useEffect(() => {
     return () => {
       clearHovercardTimers();
+      clearSelectTimer();
 
       if (activeGuestHovercardId === hovercardId) {
         setActiveGuestHovercard(null);
@@ -366,14 +392,33 @@ export default function GuestChip({
 
   if (visualState === "default" && isSearchMatch) visualState = "searchMatch";
 
-  function handleSelectGuest() {
+  function applyGuestSelection() {
     if (isDragging || suppressInteraction || !guest) return;
     if (selectedGuestId === guestId) {
+      restoreHighlightModeAfterGuestDeselection();
       clearSelectedGuest();
     } else {
       selectGuest(guestId);
+      activateHouseholdFocusFromGuestSelection();
     }
   }
+
+  function handleSelectGuest() {
+    clearSelectTimer();
+    // Delay single-click action so a following double-click can cancel selection.
+    selectTimerRef.current = window.setTimeout(() => {
+      applyGuestSelection();
+      selectTimerRef.current = null;
+    }, CHIP_SINGLE_CLICK_DELAY_MS);
+  }
+
+  function handleDoubleClick() {
+    clearSelectTimer();
+    if (suppressInteraction || !onEditGuest) return;
+    onEditGuest(guestId);
+  }
+
+  if (!guest && !fallbackName) return null;
 
   const chip = (
     <div
@@ -388,6 +433,7 @@ export default function GuestChip({
       )}
       title={shouldShowHovercard ? undefined : guestName}
       onClick={suppressInteraction ? undefined : handleSelectGuest}
+      onDoubleClick={suppressInteraction ? undefined : handleDoubleClick}
       onPointerEnter={shouldShowHovercard ? handleHovercardPointerEnter : undefined}
       onPointerLeave={shouldShowHovercard ? handleHovercardPointerLeave : undefined}
       onBlur={shouldShowHovercard ? handleHovercardBlur : undefined}
@@ -400,6 +446,31 @@ export default function GuestChip({
       </span>
     </div>
   );
+
+  if (context === "sidebar" && guest && !suppressInteraction && (onEditGuest || onDeleteGuest)) {
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{chip}</ContextMenuTrigger>
+        <ContextMenuContent>
+          {onEditGuest ? (
+            <ContextMenuItem onSelect={() => onEditGuest(guestId)}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit guest
+            </ContextMenuItem>
+          ) : null}
+          {onEditGuest && onDeleteGuest ? <ContextMenuSeparator /> : null}
+          {onDeleteGuest ? (
+            <ContextMenuItem
+              className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+              onSelect={() => onDeleteGuest(guestId)}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete guest
+            </ContextMenuItem>
+          ) : null}
+        </ContextMenuContent>
+      </ContextMenu>
+    );
+  }
 
   if (!shouldShowHovercard || !guest) {
     return chip;

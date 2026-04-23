@@ -1,8 +1,7 @@
 import { SortableContext } from "@dnd-kit/sortable";
-import type { Transform } from "@dnd-kit/utilities";
-
 import TableCard from "./TableCard";
 import type { TableState } from "../types";
+import type { Transform } from "@dnd-kit/utilities";
 import { cn } from "../lib/utils";
 import { useDroppable } from "@dnd-kit/core";
 import { useMemo } from "react";
@@ -17,10 +16,20 @@ export interface AutoSeatPreview {
   tables: TableState[];
 }
 
+export interface GuestSwapPreview {
+  sourceTableNumber: number;
+  sourceSeatIndex: number;
+  sourceGuestId: string;
+  targetGuestId: string;
+}
+
 interface Props {
   activeDragKind: "household" | "guest" | "group" | "table" | null;
   activeDragGuestId: string | null;
   autoSeatPreview: AutoSeatPreview | null;
+  guestSwapPreview: GuestSwapPreview | null;
+  onEditGuest: (guestId: string) => void;
+  onDeleteGuest: (guestId: string) => void;
 }
 
 function computePreviewSeatKinds(
@@ -36,7 +45,14 @@ function computePreviewSeatKinds(
   });
 }
 
-export default function TableBoard({ activeDragKind, activeDragGuestId, autoSeatPreview }: Props) {
+export default function TableBoard({
+  activeDragKind,
+  activeDragGuestId,
+  autoSeatPreview,
+  guestSwapPreview,
+  onEditGuest,
+  onDeleteGuest,
+}: Props) {
   const { state } = useSeating();
 
   const { setNodeRef: setAutoSeatRef, isOver: isAutoSeatOver } = useDroppable({
@@ -92,6 +108,9 @@ export default function TableBoard({ activeDragKind, activeDragGuestId, autoSeat
                 table={table}
                 activeDragKind={activeDragKind}
                 activeDragGuestId={activeDragGuestId}
+                guestSwapPreview={guestSwapPreview}
+                onEditGuest={onEditGuest}
+                onDeleteGuest={onDeleteGuest}
                 displayGuestIds={displayGuestIds}
                 previewSeatKinds={previewSeatKinds}
                 isPreviewMode={showPreview}

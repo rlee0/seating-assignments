@@ -12,7 +12,7 @@ import {
 import { AlertTriangle, Download, Moon, RotateCcw, Sun, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SeatingProvider, useSeating } from "./store/SeatingContext";
-import { SearchProvider } from "./store/SearchContext";
+import { SearchProvider, useSearch } from "./store/SearchContext";
 import { Alert, AlertDescription, AlertTitle } from "./components/ui/alert";
 import {
   useCallback,
@@ -27,17 +27,25 @@ import { X } from "lucide-react";
 
 import Sidebar from "./components/Sidebar";
 import TableBoard from "./components/TableBoard";
-import { getGuestSourceSignature, parseGuestsFromRows, type ParsedData } from "./data/parseGuests";
+import GuestDialog, { type GuestFormValues } from "./components/GuestDialog";
+import ConfirmDialog from "./components/ConfirmDialog";
+import {
+  createGuestRowId,
+  getGuestSourceSignature,
+  normalizeGuestInputRows,
+  parseGuestsFromRows,
+  type ParsedData,
+} from "./data/parseGuests";
 import {
   clearPersistedAppState,
   applyTheme,
   isCompatibleState,
-  isGuestInputRow,
-  loadPersistedGuestRows,
+  isGuestInputRowLike,
+  loadPersistedGuestData,
   resolvePreferredTheme,
   reconcileStateToGuestIds,
   saveGuestDataSourceSignature,
-  savePersistedGuestRows,
+  savePersistedGuestData,
   savePersistedSeating,
   saveTheme,
   type AppTheme,
@@ -49,10 +57,9 @@ import {
   TABLE_COUNT,
   type GuestInputRow,
   type PersistedSeatingData,
-  type SeatingExportData,
   type TableState,
 } from "./types";
-import { seatingReducer, type GuestProfile } from "./store/reducer";
+import { createInitialState, seatingReducer, type GuestProfile } from "./store/reducer";
 import { dndCollisionDetection } from "./dnd/collision";
 import { parseDragIntent, resolveDropTarget } from "./dnd/parsers";
 import { routeDrop } from "./dnd/router";
@@ -92,9 +99,15 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
-function getInitialGuestRows(): GuestInputRow[] {
+function getInitialGuestData(): {
+  guestRows: GuestInputRow[];
+} {
   const sourceSignature = getGuestSourceSignature();
-  return loadPersistedGuestRows(sourceSignature) ?? [];
+  const persisted = loadPersistedGuestData(sourceSignature);
+
+  return {
+    guestRows: persisted?.rows ?? [],
+  };
 }
 
 function isTableStateForImport(value: unknown): value is TableState {
@@ -129,7 +142,10 @@ function parseImportPayload(value: unknown): {
 
   if (candidate.version !== EXPORT_FORMAT_VERSION) return null;
 
-  if (!Array.isArray(candidate.guests) || !candidate.guests.every((row) => isGuestInputRow(row))) {
+  if (
+    !Array.isArray(candidate.guests) ||
+    !candidate.guests.every((row) => isGuestInputRowLike(row))
+  ) {
     return null;
   }
 
@@ -142,7 +158,7 @@ function parseImportPayload(value: unknown): {
   }
 
   return {
-    guests: candidate.guests.map((row) => ({ ...row })),
+    guests: normalizeGuestInputRows(candidate.guests),
     tables: candidate.tables.map((table) => ({
       ...table,
       guestIds: [...table.guestIds],
@@ -150,30 +166,255 @@ function parseImportPayload(value: unknown): {
   };
 }
 
-function buildExportPayload(
-  guests: GuestInputRow[],
-  seating: PersistedSeatingData
-): SeatingExportData {
+function buildExportFilename(): string {
+  return `seating-export-${new Date().toISOString().slice(0, 10)}.csv`;
+}
+
+function parseCsvRecord(line: string): string[] | null {
+  const fields: string[] = [];
+  let current = "";
+  let index = 0;
+  let inQuotes = false;
+
+  while (index < line.length) {
+    const char = line[index];
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (line[index + 1] === '"') {
+          current += '"';
+          index += 2;
+          continue;
+        }
+
+        inQuotes = false;
+        index += 1;
+        continue;
+      }
+
+      current += char;
+      index += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = true;
+      index += 1;
+      continue;
+    }
+
+    if (char === ",") {
+      fields.push(current);
+      current = "";
+      index += 1;
+      continue;
+    }
+
+    current += char;
+    index += 1;
+  }
+
+  if (inQuotes) return null;
+
+  fields.push(current);
+  return fields;
+}
+
+function parseCsvLines(text: string): string[][] | null {
+  const normalized = text
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+  const lines = normalized
+    .split("\n")
+    .filter((line, index, source) => line.length > 0 || index < source.length - 1);
+
+  const records: string[][] = [];
+  for (const line of lines) {
+    const parsed = parseCsvRecord(line);
+    if (!parsed) return null;
+    records.push(parsed);
+  }
+
+  return records;
+}
+
+const CSV_EXPORT_HEADERS = ["Full Name", "Host", "Household", "Group", "Table", "Seat"] as const;
+
+function normalizeCsvHeader(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function parseCsvImportPayload(text: string): {
+  guests: GuestInputRow[];
+  tables: TableState[];
+} | null {
+  const rows = parseCsvLines(text);
+  if (!rows || rows.length === 0) return null;
+
+  const [header, ...records] = rows;
+  const requiredGuestHeaders = ["Full Name", "Host", "Household", "Group"] as const;
+  const normalizedHeaderIndexes = new Map<string, number>();
+
+  for (let index = 0; index < header.length; index += 1) {
+    const trimmedLabel = header[index].trim();
+    const normalizedLabel = normalizeCsvHeader(trimmedLabel);
+    if (!normalizedLabel) return null;
+    if (normalizedHeaderIndexes.has(normalizedLabel)) return null;
+    normalizedHeaderIndexes.set(normalizedLabel, index);
+  }
+
+  const lookupIndex = (label: string): number | null => {
+    const normalized = normalizeCsvHeader(label);
+    const matchedIndex = normalizedHeaderIndexes.get(normalized);
+    return matchedIndex === undefined ? null : matchedIndex;
+  };
+
+  const fullNameIndex = lookupIndex("Full Name");
+  const hostIndex = lookupIndex("Host");
+  const householdIndex = lookupIndex("Household");
+  const groupIndex = lookupIndex("Group");
+  const tableColumnIndex = lookupIndex("Table");
+  const seatColumnIndex = lookupIndex("Seat");
+
+  if (
+    fullNameIndex === null ||
+    hostIndex === null ||
+    householdIndex === null ||
+    groupIndex === null ||
+    !requiredGuestHeaders.every((label) => lookupIndex(label) !== null)
+  ) {
+    return null;
+  }
+
+  const guests: GuestInputRow[] = [];
+  const nextState = createInitialState([]);
+
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (record.length !== header.length) return null;
+
+    const fullName = record[fullNameIndex] ?? "";
+    const host = record[hostIndex] ?? "";
+    const household = record[householdIndex] ?? "";
+    const group = record[groupIndex] ?? "";
+    const tableValue = tableColumnIndex === null ? "" : (record[tableColumnIndex] ?? "");
+    const seatValue = seatColumnIndex === null ? "" : (record[seatColumnIndex] ?? "");
+
+    // Rows without a guest name are considered empty/invalid guest records and ignored.
+    if (!fullName.trim()) {
+      continue;
+    }
+
+    const guestId = createGuestRowId(guests);
+
+    guests.push({
+      id: guestId,
+      fullName,
+      host,
+      household,
+      group,
+    });
+    const hasTableValue = tableValue.trim().length > 0;
+    const hasSeatValue = seatValue.trim().length > 0;
+
+    if (!hasTableValue && !hasSeatValue) {
+      nextState.unassigned.push(guestId);
+      continue;
+    }
+
+    if (!hasTableValue || !hasSeatValue) {
+      nextState.unassigned.push(guestId);
+      continue;
+    }
+
+    const tableNumber = Number.parseInt(tableValue, 10);
+    const seatNumber = Number.parseInt(seatValue, 10);
+
+    if (
+      !Number.isInteger(tableNumber) ||
+      tableNumber < 1 ||
+      tableNumber > TABLE_COUNT ||
+      !Number.isInteger(seatNumber) ||
+      seatNumber < 1 ||
+      seatNumber > TABLE_CAPACITY
+    ) {
+      nextState.unassigned.push(guestId);
+      continue;
+    }
+
+    const assignedSeatIndex = seatNumber - 1;
+    const table = nextState.tables[tableNumber - 1];
+    if (table.guestIds[assignedSeatIndex] !== null) {
+      nextState.unassigned.push(guestId);
+      continue;
+    }
+
+    table.guestIds[assignedSeatIndex] = guestId;
+  }
+
   return {
-    version: EXPORT_FORMAT_VERSION,
-    exportedAt: new Date().toISOString(),
-    guests: guests.map((row) => ({ ...row })),
-    tables: seating.state.tables.map((table) => ({
-      ...table,
-      guestIds: [...table.guestIds],
-    })),
+    guests,
+    tables: nextState.tables,
   };
 }
 
-function buildExportFilename(): string {
-  return `seating-export-${new Date().toISOString().slice(0, 10)}.json`;
+function buildCsvContent(guests: GuestInputRow[], seating: PersistedSeatingData): string {
+  const { tables } = seating.state;
+
+  // Build seat assignment map: guestId -> { tableNumber, seatIndex }
+  const seatMap = new Map<string, { tableNumber: number; seatIndex: number }>();
+  for (const table of tables) {
+    table.guestIds.forEach((guestId, seatIndex) => {
+      if (guestId !== null) {
+        seatMap.set(guestId, { tableNumber: table.tableNumber, seatIndex: seatIndex + 1 });
+      }
+    });
+  }
+
+  function escapeCsv(value: string): string {
+    if (value.includes(",") || value.includes('"') || value.includes("\n")) {
+      return `"${value.replace(/"/g, '""')}"`;
+    }
+    return value;
+  }
+
+  const rows = guests.map((row) => {
+    const seat = seatMap.get(row.id);
+    return [
+      row.fullName,
+      row.host,
+      row.household,
+      row.group,
+      seat ? String(seat.tableNumber) : "",
+      seat ? String(seat.seatIndex) : "",
+    ]
+      .map(escapeCsv)
+      .join(",");
+  });
+
+  return [CSV_EXPORT_HEADERS.map(escapeCsv).join(","), ...rows].join("\n");
 }
 
-function getFirstJsonFile(files: FileList | null): File | null {
+function getImportFileKind(file: File): "json" | "csv" | null {
+  const normalizedName = file.name.toLowerCase();
+
+  if (file.type === "application/json" || normalizedName.endsWith(".json")) {
+    return "json";
+  }
+
+  if (file.type === "text/csv" || normalizedName.endsWith(".csv")) {
+    return "csv";
+  }
+
+  return null;
+}
+
+function getFirstImportFile(files: FileList | null): File | null {
   if (!files || files.length === 0) return null;
 
   for (const file of Array.from(files)) {
-    if (file.type === "application/json" || file.name.toLowerCase().endsWith(".json")) {
+    if (getImportFileKind(file)) {
       return file;
     }
   }
@@ -314,16 +555,25 @@ function DragOverlayClone({ snapshot }: { snapshot: DragOverlaySnapshot }) {
   return <div ref={mountRef} className="pointer-events-none" />;
 }
 
+type GuestSwapPreview = {
+  sourceTableNumber: number;
+  sourceSeatIndex: number;
+  sourceGuestId: string;
+  targetGuestId: string;
+};
+
 // ─── SeatingApp ───────────────────────────────────────────────────────────────
 
 function SeatingApp({
   guestRows,
+  onGuestRowsChange,
   onImportSnapshot,
   onReset,
   theme,
   onThemeToggle,
 }: {
   guestRows: GuestInputRow[];
+  onGuestRowsChange: (nextGuestRows: GuestInputRow[]) => void;
   onImportSnapshot: (nextGuestRows: GuestInputRow[], snapshot: PersistedSeatingData) => void;
   onReset: () => void;
   theme: AppTheme;
@@ -343,12 +593,19 @@ function SeatingApp({
     selectedGuestId,
     clearSelectedGuest,
   } = useSeating();
+  const { restoreHighlightModeAfterGuestDeselection } = useSearch();
+
+  const deselectGuest = useCallback(() => {
+    restoreHighlightModeAfterGuestDeselection();
+    clearSelectedGuest();
+  }, [clearSelectedGuest, restoreHighlightModeAfterGuestDeselection]);
 
   // ── Drag state ──────────────────────────────────────────────────────────────
   const [activeDragIntent, setActiveDragIntent] = useState<DragIntent | null>(null);
   const [autoSeatPreview, setAutoSeatPreview] = useState<{
     tables: import("./types").TableState[];
   } | null>(null);
+  const [guestSwapPreview, setGuestSwapPreview] = useState<GuestSwapPreview | null>(null);
   const [dragOverlaySnapshot, setDragOverlaySnapshot] = useState<DragOverlaySnapshot | null>(null);
   /** Tracks the latest pointer position for seat-level probe during drag-end. */
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -404,6 +661,129 @@ function SeatingApp({
   const fileDragDepthRef = useRef(0);
 
   const guestProfiles = useMemo(() => buildGuestProfiles(guests, parties), [guests, parties]);
+  const guestRowsById = useMemo(
+    () => new Map(guestRows.map((row) => [row.id, row] as const)),
+    [guestRows]
+  );
+  const [guestDialogState, setGuestDialogState] = useState<
+    { mode: "create" } | { mode: "edit"; guestId: string } | null
+  >(null);
+  const [pendingDeleteGuestId, setPendingDeleteGuestId] = useState<string | null>(null);
+  const optionCollator = useMemo(() => new Intl.Collator(undefined, { sensitivity: "base" }), []);
+  const householdOptions = useMemo(
+    () =>
+      [...parties.values()]
+        .map((party) => party.household.trim())
+        .filter((value, index, source) => value.length > 0 && source.indexOf(value) === index)
+        .sort((left, right) => optionCollator.compare(left, right)),
+    [optionCollator, parties]
+  );
+  const groupOptions = useMemo(
+    () =>
+      [
+        ...new Set(guestRows.map((row) => row.group.trim()).filter((value) => value.length > 0)),
+      ].sort((left, right) => optionCollator.compare(left, right)),
+    [guestRows, optionCollator]
+  );
+  const householdHostByName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const party of parties.values()) {
+      const household = party.household.trim();
+      if (!household) continue;
+      map.set(household.toLocaleLowerCase(), party.host);
+    }
+    return map;
+  }, [parties]);
+  const editingGuestRow = useMemo(() => {
+    if (guestDialogState?.mode !== "edit") return null;
+    return guestRowsById.get(guestDialogState.guestId) ?? null;
+  }, [guestDialogState, guestRowsById]);
+  const deleteGuestRow = useMemo(
+    () => (pendingDeleteGuestId ? (guestRowsById.get(pendingDeleteGuestId) ?? null) : null),
+    [guestRowsById, pendingDeleteGuestId]
+  );
+  const guestDialogInitialValues = useMemo<GuestFormValues>(
+    () =>
+      editingGuestRow
+        ? {
+            fullName: editingGuestRow.fullName,
+            household: editingGuestRow.household,
+            group: editingGuestRow.group,
+          }
+        : { fullName: "", household: "", group: "" },
+    [editingGuestRow]
+  );
+
+  const resolveGuestHost = useCallback(
+    (household: string, fallbackHost: string) => {
+      const normalizedHousehold = household.trim().toLocaleLowerCase();
+      if (!normalizedHousehold) return fallbackHost;
+      return householdHostByName.get(normalizedHousehold) ?? fallbackHost;
+    },
+    [householdHostByName]
+  );
+  const handleAddGuest = useCallback(() => {
+    setGuestDialogState({ mode: "create" });
+  }, []);
+  const handleEditGuest = useCallback(
+    (guestId: string) => {
+      if (!guestRowsById.has(guestId)) return;
+      setGuestDialogState({ mode: "edit", guestId });
+    },
+    [guestRowsById]
+  );
+  const handleDeleteGuest = useCallback(
+    (guestId: string) => {
+      if (!guestRowsById.has(guestId)) return;
+      setPendingDeleteGuestId(guestId);
+    },
+    [guestRowsById]
+  );
+  const handleSubmitGuest = useCallback(
+    (values: GuestFormValues) => {
+      if (guestDialogState?.mode === "edit") {
+        const currentRow = guestRowsById.get(guestDialogState.guestId);
+        if (!currentRow) return;
+
+        onGuestRowsChange(
+          guestRows.map((row) =>
+            row.id === currentRow.id
+              ? {
+                  ...row,
+                  fullName: values.fullName,
+                  household: values.household,
+                  group: values.group,
+                  host: resolveGuestHost(values.household, row.host),
+                }
+              : row
+          )
+        );
+      } else {
+        onGuestRowsChange([
+          ...guestRows,
+          {
+            id: createGuestRowId(guestRows),
+            fullName: values.fullName,
+            household: values.household,
+            group: values.group,
+            host: resolveGuestHost(values.household, ""),
+          },
+        ]);
+      }
+
+      setGuestDialogState(null);
+    },
+    [guestDialogState, guestRowsById, onGuestRowsChange, guestRows, resolveGuestHost]
+  );
+  const handleConfirmDeleteGuest = useCallback(() => {
+    if (!pendingDeleteGuestId) return;
+
+    onGuestRowsChange(guestRows.filter((row) => row.id !== pendingDeleteGuestId));
+    if (selectedGuestId === pendingDeleteGuestId) {
+      deselectGuest();
+    }
+    setPendingDeleteGuestId(null);
+  }, [deselectGuest, guestRows, onGuestRowsChange, pendingDeleteGuestId, selectedGuestId]);
 
   // ── Pointer tracking for seat-level probe ────────────────────────────────────
   useEffect(() => {
@@ -461,7 +841,7 @@ function SeatingApp({
       }
 
       if (event.key === "Escape") {
-        clearSelectedGuest();
+        deselectGuest();
         (document.activeElement as HTMLElement | null)?.blur();
       }
 
@@ -470,23 +850,14 @@ function SeatingApp({
         if (isAssigned) {
           event.preventDefault();
           dispatch({ type: "REMOVE_GUESTS", guestIds: [selectedGuestId] });
-          clearSelectedGuest();
+          deselectGuest();
         }
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [
-    canRedo,
-    canUndo,
-    clearSelectedGuest,
-    dispatch,
-    redo,
-    selectedGuestId,
-    state.unassigned,
-    undo,
-  ]);
+  }, [canRedo, canUndo, deselectGuest, dispatch, redo, selectedGuestId, state.unassigned, undo]);
 
   // ── Click-to-deselect guest ───────────────────────────────────────────────────
   useEffect(() => {
@@ -494,12 +865,12 @@ function SeatingApp({
       const target = event.target;
       if (!(target instanceof Element)) return;
       if (!target.closest("[data-guest-chip]")) {
-        clearSelectedGuest();
+        deselectGuest();
       }
     }
     document.addEventListener("click", handleDocumentClick);
     return () => document.removeEventListener("click", handleDocumentClick);
-  }, [clearSelectedGuest]);
+  }, [deselectGuest]);
 
   // ── dnd-kit sensors ───────────────────────────────────────────────────────────
   const sensors = useSensors(
@@ -513,6 +884,7 @@ function SeatingApp({
     if (!intent) return;
     previewTargetKeyRef.current = null;
     previewLastComputedAtRef.current = 0;
+    setGuestSwapPreview(null);
     setDragOverlaySnapshot(captureDragOverlaySnapshot(intent));
     setActiveDragIntent(intent);
   }, []);
@@ -520,6 +892,7 @@ function SeatingApp({
   const handleDragCancel = useCallback(() => {
     setActiveDragIntent(null);
     setAutoSeatPreview(null);
+    setGuestSwapPreview(null);
     setDragOverlaySnapshot(null);
     pointerRef.current = null;
     previewTargetKeyRef.current = null;
@@ -531,6 +904,7 @@ function SeatingApp({
       const clearPreview = () => {
         previewTargetKeyRef.current = null;
         setAutoSeatPreview((prev) => (prev === null ? prev : null));
+        setGuestSwapPreview((prev) => (prev === null ? prev : null));
       };
 
       if (!over) {
@@ -546,6 +920,48 @@ function SeatingApp({
       // Guest seat drops need stable local feedback; table-level preview introduces
       // seat-vs-table flicker as the pointer crosses slot boundaries.
       if (intent.kind === "guest") {
+        const target = resolveDropTarget(over, null);
+        if (
+          intent.source === "seated" &&
+          typeof intent.tableNumber === "number" &&
+          typeof intent.seatIndex === "number" &&
+          target?.type === "seat"
+        ) {
+          const sourceTableNumber = intent.tableNumber;
+          const sourceSeatIndex = intent.seatIndex;
+          const targetTable = state.tables.find(
+            (table) => table.tableNumber === target.tableNumber
+          );
+          const targetGuestId = targetTable?.guestIds[target.seatIndex] ?? null;
+          const sourceSeatMatchesTarget =
+            sourceTableNumber === target.tableNumber && sourceSeatIndex === target.seatIndex;
+
+          if (targetGuestId && !sourceSeatMatchesTarget && targetGuestId !== intent.guestId) {
+            setGuestSwapPreview((prev) => {
+              if (
+                prev &&
+                prev.sourceTableNumber === sourceTableNumber &&
+                prev.sourceSeatIndex === sourceSeatIndex &&
+                prev.sourceGuestId === intent.guestId &&
+                prev.targetGuestId === targetGuestId
+              ) {
+                return prev;
+              }
+
+              return {
+                sourceTableNumber,
+                sourceSeatIndex,
+                sourceGuestId: intent.guestId,
+                targetGuestId,
+              };
+            });
+          } else {
+            setGuestSwapPreview((prev) => (prev === null ? prev : null));
+          }
+        } else {
+          setGuestSwapPreview((prev) => (prev === null ? prev : null));
+        }
+
         clearPreview();
         return;
       }
@@ -591,6 +1007,7 @@ function SeatingApp({
     ({ active, over }: DragEndEvent) => {
       setActiveDragIntent(null);
       setAutoSeatPreview(null);
+      setGuestSwapPreview(null);
       setDragOverlaySnapshot(null);
       const ptr = pointerRef.current;
       pointerRef.current = null;
@@ -636,12 +1053,25 @@ function SeatingApp({
   // ── File import/export ────────────────────────────────────────────────────────
   const importFromFile = useCallback(
     async (file: File) => {
+      const importKind = getImportFileKind(file);
+      if (!importKind) {
+        window.alert("Import failed. Select a .json or export .csv file.");
+        return;
+      }
+
       try {
         const text = await file.text();
-        const parsed = parseImportPayload(JSON.parse(text) as unknown);
+        const parsed =
+          importKind === "json"
+            ? parseImportPayload(JSON.parse(text) as unknown)
+            : parseCsvImportPayload(text);
 
         if (!parsed) {
-          window.alert("Import failed. Use v2 JSON with version, guests, and tables.");
+          window.alert(
+            importKind === "json"
+              ? "Import failed. Use v2 JSON with version, guests, and tables."
+              : "Import failed. Use a CSV structured like the exported guest file."
+          );
           return;
         }
 
@@ -664,7 +1094,11 @@ function SeatingApp({
 
         onImportSnapshot(parsed.guests, snapshotToImport);
       } catch {
-        window.alert("Import failed. The selected file is not valid JSON.");
+        window.alert(
+          importKind === "json"
+            ? "Import failed. The selected file is not valid JSON."
+            : "Import failed. The selected file is not a valid CSV export."
+        );
       }
     },
     [onImportSnapshot]
@@ -672,11 +1106,11 @@ function SeatingApp({
 
   const handleImportChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
-      const file = getFirstJsonFile(event.target.files);
+      const file = getFirstImportFile(event.target.files);
       event.target.value = "";
 
       if (!file) {
-        window.alert("Import failed. Select a .json file.");
+        window.alert("Import failed. Select a .json or export .csv file.");
         return;
       }
 
@@ -708,7 +1142,7 @@ function SeatingApp({
     event.preventDefault();
     fileDragDepthRef.current = 0;
 
-    const file = getFirstJsonFile(event.dataTransfer.files);
+    const file = getFirstImportFile(event.dataTransfer.files);
     if (!file) return;
 
     await importFromFile(file);
@@ -721,8 +1155,8 @@ function SeatingApp({
   }
 
   function handleExport() {
-    const payload = buildExportPayload(guestRows, snapshot);
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const csv = buildCsvContent(guestRows, snapshot);
+    const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -803,8 +1237,8 @@ function SeatingApp({
               ref={fileInputRef}
               className="hidden"
               type="file"
-              accept="application/json,.json"
-              aria-label="Import seating JSON file"
+              accept="application/json,.json,text/csv,.csv"
+              aria-label="Import seating JSON or CSV file"
               onChange={handleImportChange}
             />
           </div>
@@ -854,16 +1288,46 @@ function SeatingApp({
 
         <div className="flex flex-1 overflow-hidden">
           <div className={cn("contents", mobilePanel === "tables" && "max-sm:hidden")}>
-            <Sidebar />
+            <Sidebar
+              onAddGuest={handleAddGuest}
+              onEditGuest={handleEditGuest}
+              onDeleteGuest={handleDeleteGuest}
+            />
           </div>
           <div className={cn("contents", mobilePanel === "sidebar" && "max-sm:hidden")}>
             <TableBoard
               activeDragKind={activeDragKind}
               activeDragGuestId={activeDragGuestId}
               autoSeatPreview={autoSeatPreview}
+              guestSwapPreview={guestSwapPreview}
+              onEditGuest={handleEditGuest}
+              onDeleteGuest={handleDeleteGuest}
             />
           </div>
         </div>
+
+        <GuestDialog
+          open={guestDialogState !== null}
+          mode={guestDialogState?.mode ?? "create"}
+          initialValues={guestDialogInitialValues}
+          householdOptions={householdOptions}
+          groupOptions={groupOptions}
+          onClose={() => setGuestDialogState(null)}
+          onSubmit={handleSubmitGuest}
+        />
+
+        <ConfirmDialog
+          open={pendingDeleteGuestId !== null}
+          title="Delete Guest"
+          description={
+            deleteGuestRow
+              ? `${deleteGuestRow.fullName} will be removed from any assigned seat and from the unassigned list. Empty households or groups will disappear automatically when no members remain.`
+              : "This guest will be removed from seating and the guest list."
+          }
+          confirmLabel="Delete Guest"
+          onClose={() => setPendingDeleteGuestId(null)}
+          onConfirm={handleConfirmDeleteGuest}
+        />
 
         <div className="fixed bottom-0 left-0 right-0 z-100 hidden h-13 border-t border-border bg-card max-sm:flex">
           <button
@@ -895,7 +1359,8 @@ function SeatingApp({
 // ─── App (root) ───────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [guestRows, setGuestRows] = useState<GuestInputRow[]>(() => getInitialGuestRows());
+  const initialGuestData = useMemo(() => getInitialGuestData(), []);
+  const [guestRows, setGuestRows] = useState<GuestInputRow[]>(initialGuestData.guestRows);
   const [providerVersion, setProviderVersion] = useState(0);
   const [theme, setTheme] = useState<AppTheme>(() => resolvePreferredTheme());
   const parsedData = useMemo(() => parseGuestsFromRows(guestRows), [guestRows]);
@@ -908,13 +1373,13 @@ export default function App() {
 
   useEffect(() => {
     saveGuestDataSourceSignature(sourceSignature);
-    savePersistedGuestRows(guestRows);
+    savePersistedGuestData(guestRows);
   }, [guestRows, sourceSignature]);
 
   const handleImportSnapshot = useCallback(
     (nextGuestRows: GuestInputRow[], snapshot: PersistedSeatingData) => {
       saveGuestDataSourceSignature(sourceSignature);
-      savePersistedGuestRows(nextGuestRows);
+      savePersistedGuestData(nextGuestRows);
       savePersistedSeating(snapshot.state, snapshot.history, snapshot.future);
       setGuestRows(nextGuestRows);
       setProviderVersion((value) => value + 1);
@@ -933,6 +1398,7 @@ export default function App() {
       <SeatingProvider key={providerVersion} parsedData={parsedData}>
         <SeatingApp
           guestRows={guestRows}
+          onGuestRowsChange={setGuestRows}
           onImportSnapshot={handleImportSnapshot}
           onReset={handleResetApp}
           theme={theme}

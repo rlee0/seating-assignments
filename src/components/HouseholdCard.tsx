@@ -7,9 +7,11 @@ import { useSeating } from "../store/SeatingContext";
 
 interface Props {
   party: Party;
+  onEditGuest: (guestId: string) => void;
+  onDeleteGuest: (guestId: string) => void;
 }
 
-export default function HouseholdCard({ party }: Props) {
+export default function HouseholdCard({ party, onEditGuest, onDeleteGuest }: Props) {
   const { state } = useSeating();
   const unassignedSet = useMemo(() => new Set(state.unassigned), [state.unassigned]);
 
@@ -55,7 +57,13 @@ export default function HouseholdCard({ party }: Props) {
       </div>
       <div className="flex flex-wrap gap-1 px-3 pt-1 pb-2.5">
         {unassignedGuestIds.map((id) => (
-          <GuestChip key={id} guestId={id} context="sidebar" />
+          <GuestChip
+            key={id}
+            guestId={id}
+            context="sidebar"
+            onEditGuest={onEditGuest}
+            onDeleteGuest={onDeleteGuest}
+          />
         ))}
       </div>
     </div>

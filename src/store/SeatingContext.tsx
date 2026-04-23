@@ -14,6 +14,7 @@ import {
   isCompatibleState,
   loadPersistedSeating,
   MAX_UNDO_HISTORY,
+  reconcileStateToGuestIds,
   savePersistedSeating,
 } from "./localStorage";
 import type { GuestProfile } from "./reducer";
@@ -67,6 +68,7 @@ interface HistoryState {
 
 type HistoryAction =
   | { type: "APPLY_ACTION"; action: SeatingAction }
+  | { type: "SYNC_GUEST_IDS"; allGuestIds: string[] }
   | { type: "UNDO" }
   | { type: "REDO" };
 
@@ -158,6 +160,38 @@ function seatingHistoryReducer(state: HistoryState, action: HistoryAction): Hist
         present: nextPresent,
         history: [...state.history, state.present].slice(-MAX_UNDO_HISTORY),
         future: [],
+      };
+    }
+
+    case "SYNC_GUEST_IDS": {
+      const nextPresent = reconcileStateToGuestIds(state.present, action.allGuestIds);
+      if (!nextPresent) {
+        return state;
+      }
+
+      const nextHistory = state.history
+        .map((snapshot) => reconcileStateToGuestIds(snapshot, action.allGuestIds))
+        .filter((snapshot): snapshot is SeatingState => snapshot !== null);
+      const nextFuture = state.future
+        .map((snapshot) => reconcileStateToGuestIds(snapshot, action.allGuestIds))
+        .filter((snapshot): snapshot is SeatingState => snapshot !== null);
+
+      if (
+        areSeatingStatesEqual(state.present, nextPresent) &&
+        nextHistory.length === state.history.length &&
+        nextHistory.every((snapshot, index) =>
+          areSeatingStatesEqual(snapshot, state.history[index])
+        ) &&
+        nextFuture.length === state.future.length &&
+        nextFuture.every((snapshot, index) => areSeatingStatesEqual(snapshot, state.future[index]))
+      ) {
+        return state;
+      }
+
+      return {
+        present: nextPresent,
+        history: nextHistory,
+        future: nextFuture,
       };
     }
 
@@ -265,6 +299,10 @@ export function SeatingProvider({
   useEffect(() => {
     savePersistedSeating(historyState.present, historyState.history, historyState.future);
   }, [historyState.future, historyState.history, historyState.present]);
+
+  useEffect(() => {
+    historyDispatch({ type: "SYNC_GUEST_IDS", allGuestIds });
+  }, [allGuestIds]);
 
   useEffect(() => {
     if (selectedGuestId && !guests.has(selectedGuestId)) {

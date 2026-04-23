@@ -1,13 +1,13 @@
 /* @vitest-environment jsdom */
 
 import React from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import App from "./App";
-import { GUEST_DATA_SOURCE_KEY, GUEST_DATA_STORAGE_KEY, STORAGE_KEY } from "./types";
-import { getGuestSourceSignature } from "./data/parseGuests";
-import { createInitialState, seatingReducer, type GuestProfile } from "./store/reducer";
-import type { GuestInputRow, SeatingState } from "./types";
+import App from "../src/App";
+import { GUEST_DATA_SOURCE_KEY, GUEST_DATA_STORAGE_KEY, STORAGE_KEY } from "../src/types";
+import { getGuestSourceSignature } from "../src/data/parseGuests";
+import { createInitialState, seatingReducer, type GuestProfile } from "../src/store/reducer";
+import type { GuestInputRow, SeatingState } from "../src/types";
 
 // ─── dnd-kit mock ─────────────────────────────────────────────────────────────
 
@@ -79,6 +79,7 @@ function makeRows(
   specs: Array<{ name: string; household?: string; group?: string; host?: string }>
 ): GuestInputRow[] {
   return specs.map((spec, index) => ({
+    id: `g${index}`,
     fullName: spec.name,
     household: spec.household ?? `Household ${index + 1}`,
     group: spec.group ?? "",
@@ -89,9 +90,9 @@ function makeRows(
 function makeProfiles(rows: GuestInputRow[]): Record<string, GuestProfile> {
   const profiles: Record<string, GuestProfile> = {};
 
-  rows.forEach((row, index) => {
-    profiles[`g${index}`] = {
-      partyId: `p${index}`,
+  rows.forEach((row) => {
+    profiles[row.id] = {
+      partyId: "",
       group: row.group,
       host: row.host,
       household: row.household,
@@ -99,12 +100,11 @@ function makeProfiles(rows: GuestInputRow[]): Record<string, GuestProfile> {
   });
 
   const householdToPartyId = new Map<string, string>();
-  rows.forEach((row, index) => {
+  rows.forEach((row) => {
     if (!householdToPartyId.has(row.household)) {
       householdToPartyId.set(row.household, `p${householdToPartyId.size}`);
     }
-    const guestId = `g${index}`;
-    profiles[guestId].partyId = householdToPartyId.get(row.household)!;
+    profiles[row.id].partyId = householdToPartyId.get(row.household)!;
   });
 
   return profiles;
@@ -617,6 +617,243 @@ describe("Flow 7 — household → table (autoseat all members)", () => {
     expect(tableContainsGuest(container, 2, "Henry")).toBe(true);
     expect(sidebarContainsGuest(container, "Hannah")).toBe(false);
     expect(sidebarContainsGuest(container, "Henry")).toBe(false);
+  });
+});
+
+describe("File import", () => {
+  beforeEach(() => {
+    ensureLocalStorage().clear();
+    latestDndProps = null;
+  });
+
+  it("imports export-structured csv via drag and drop", async () => {
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    const csv = [
+      "Full Name,Host,Household,Group,Table,Seat",
+      "Alice,Ryan,Household 1,Family,1,1",
+      "Bob,Ryan,Household 2,Friends,,",
+    ].join("\n");
+    const file = new File([csv], "seating-export.csv", { type: "text/csv" });
+
+    const { container } = render(<App />);
+    const dndRoot = container.querySelector<HTMLElement>("[data-testid='dnd-context'] > div");
+    expect(dndRoot).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.drop(dndRoot!, {
+        dataTransfer: {
+          files: [file],
+          types: ["Files"],
+        },
+      });
+    });
+
+    expect(getSeatGuestName(container, 1, 0)).toBe("Alice");
+    expect(sidebarContainsGuest(container, "Bob")).toBe(true);
+    expect(sidebarContainsGuest(container, "Alice")).toBe(false);
+    expect(alertSpy).not.toHaveBeenCalled();
+
+    alertSpy.mockRestore();
+  });
+
+  it("imports export-structured csv when group is blank", async () => {
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    const csv = [
+      "Full Name,Host,Household,Group,Table,Seat",
+      "Alice,Ryan,Household 1,,1,1",
+      "Bob,Ryan,Household 2,,,",
+    ].join("\n");
+    const file = new File([csv], "seating-export-blank-group.csv", { type: "text/csv" });
+
+    const { container } = render(<App />);
+    const dndRoot = container.querySelector<HTMLElement>("[data-testid='dnd-context'] > div");
+    expect(dndRoot).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.drop(dndRoot!, {
+        dataTransfer: {
+          files: [file],
+          types: ["Files"],
+        },
+      });
+    });
+
+    expect(getSeatGuestName(container, 1, 0)).toBe("Alice");
+    expect(sidebarContainsGuest(container, "Bob")).toBe(true);
+    expect(alertSpy).not.toHaveBeenCalled();
+
+    alertSpy.mockRestore();
+  });
+
+  it("imports shuffled csv columns and ignores extra fields", async () => {
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    const csv = [
+      "group,host,household,full name,notes,seat,table",
+      "Family,Ryan,Household 1,Alice,VIP,1,1",
+      "Friends,Ryan,Household 2,Bob,Wheelchair,not-a-seat,1",
+    ].join("\n");
+    const file = new File([csv], "shuffled.csv", { type: "text/csv" });
+
+    const { container } = render(<App />);
+    const dndRoot = container.querySelector<HTMLElement>("[data-testid='dnd-context'] > div");
+    expect(dndRoot).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.drop(dndRoot!, {
+        dataTransfer: {
+          files: [file],
+          types: ["Files"],
+        },
+      });
+    });
+
+    expect(getSeatGuestName(container, 1, 0)).toBe("Alice");
+    expect(sidebarContainsGuest(container, "Bob")).toBe(true);
+    expect(alertSpy).not.toHaveBeenCalled();
+    alertSpy.mockRestore();
+  });
+
+  it("imports csv with only required guest headers", async () => {
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    const csv = [
+      "Host,Household,Group,Full Name",
+      "Ryan,Household 1,Family,Alice",
+      "Ryan,Household 2,Friends,Bob",
+    ].join("\n");
+    const file = new File([csv], "required-only.csv", { type: "text/csv" });
+
+    const { container } = render(<App />);
+    const dndRoot = container.querySelector<HTMLElement>("[data-testid='dnd-context'] > div");
+    expect(dndRoot).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.drop(dndRoot!, {
+        dataTransfer: {
+          files: [file],
+          types: ["Files"],
+        },
+      });
+    });
+
+    expect(sidebarContainsGuest(container, "Alice")).toBe(true);
+    expect(sidebarContainsGuest(container, "Bob")).toBe(true);
+    expect(alertSpy).not.toHaveBeenCalled();
+    alertSpy.mockRestore();
+  });
+
+  it("ignores rows without full name", async () => {
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    const csv = [
+      "Full Name,Host,Household,Group,Table,Seat",
+      "Alice,Ryan,Household 1,Family,1,1",
+      ",Ryan,Household 2,Friends,1,2",
+      "   ,Ryan,Household 3,Friends,,",
+      "Bob,Ryan,Household 4,Friends,,",
+    ].join("\n");
+    const file = new File([csv], "missing-name.csv", { type: "text/csv" });
+
+    const { container } = render(<App />);
+    const dndRoot = container.querySelector<HTMLElement>("[data-testid='dnd-context'] > div");
+    expect(dndRoot).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.drop(dndRoot!, {
+        dataTransfer: {
+          files: [file],
+          types: ["Files"],
+        },
+      });
+    });
+
+    expect(getSeatGuestName(container, 1, 0)).toBe("Alice");
+    expect(getSeatGuestName(container, 1, 1)).toBeNull();
+    expect(sidebarContainsGuest(container, "Bob")).toBe(true);
+    expect(alertSpy).not.toHaveBeenCalled();
+    alertSpy.mockRestore();
+  });
+
+  it("rejects duplicate headers ignoring case", async () => {
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    const csv = ["Full Name,Host,host,Household,Group", "Alice,Ryan,Ryan,Household 1,Family"].join(
+      "\n"
+    );
+    const file = new File([csv], "duplicate-header.csv", { type: "text/csv" });
+
+    const { container } = render(<App />);
+    const dndRoot = container.querySelector<HTMLElement>("[data-testid='dnd-context'] > div");
+    expect(dndRoot).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.drop(dndRoot!, {
+        dataTransfer: {
+          files: [file],
+          types: ["Files"],
+        },
+      });
+    });
+
+    expect(alertSpy).toHaveBeenCalledWith(
+      "Import failed. Use a CSV structured like the exported guest file."
+    );
+    alertSpy.mockRestore();
+  });
+
+  it("exports canonical columns only", async () => {
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    let exportedBlob: Blob | null = null;
+    const createObjectURLSpy = vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+      exportedBlob = blob as Blob;
+      return "blob:mock-export";
+    });
+    const revokeObjectURLSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    const csv = [
+      "Full Name,Household,Email/Phone Number,Status,Host,Group,Table,Seat",
+      "Alice,Household 1,alice@example.com,Attending,Ryan,Family,1,1",
+      "Bob,Household 2,bob@example.com,Attending,Ryan,Friends,,",
+    ].join("\n");
+    const file = new File([csv], "rich-export.csv", { type: "text/csv" });
+
+    const firstRender = render(<App />);
+    const dndRoot = firstRender.container.querySelector<HTMLElement>(
+      "[data-testid='dnd-context'] > div"
+    );
+    expect(dndRoot).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.drop(dndRoot!, {
+        dataTransfer: {
+          files: [file],
+          types: ["Files"],
+        },
+      });
+    });
+
+    expect(alertSpy).not.toHaveBeenCalled();
+    firstRender.unmount();
+
+    const secondRender = render(<App />);
+
+    await act(async () => {
+      fireEvent.click(within(secondRender.container).getByRole("button", { name: /export/i }));
+    });
+
+    expect(createObjectURLSpy).toHaveBeenCalledTimes(1);
+    expect(clickSpy).toHaveBeenCalled();
+    expect(exportedBlob).not.toBeNull();
+
+    const exportedText = await exportedBlob!.text();
+    const lines = exportedText.split("\n");
+    expect(lines[0]).toBe("Full Name,Host,Household,Group,Table,Seat");
+    expect(lines[1]).toBe("Alice,Ryan,Household 1,Family,1,1");
+    expect(lines[2]).toBe("Bob,Ryan,Household 2,Friends,,");
+
+    secondRender.unmount();
+    alertSpy.mockRestore();
+    createObjectURLSpy.mockRestore();
+    revokeObjectURLSpy.mockRestore();
+    clickSpy.mockRestore();
   });
 });
 

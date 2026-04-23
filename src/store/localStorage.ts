@@ -1,5 +1,12 @@
 import { GUEST_DATA_SOURCE_KEY, GUEST_DATA_STORAGE_KEY, STORAGE_KEY, TABLE_COUNT } from "../types";
-import type { GuestInputRow, PersistedSeatingData, SeatingState } from "../types";
+import type {
+  GuestInputRow,
+  PersistedGuestData,
+  PersistedSeatingData,
+  SeatingState,
+} from "../types";
+
+import { normalizeGuestInputRows } from "../data/parseGuests";
 
 export const MAX_UNDO_HISTORY = 100;
 export const THEME_STORAGE_KEY = "seating-theme";
@@ -39,6 +46,7 @@ export function isGuestInputRow(value: unknown): value is GuestInputRow {
   if (!value || typeof value !== "object") return false;
 
   const candidate = value as {
+    id?: unknown;
     host?: unknown;
     household?: unknown;
     group?: unknown;
@@ -46,6 +54,29 @@ export function isGuestInputRow(value: unknown): value is GuestInputRow {
   };
 
   return (
+    typeof candidate.id === "string" &&
+    typeof candidate.host === "string" &&
+    typeof candidate.household === "string" &&
+    typeof candidate.group === "string" &&
+    typeof candidate.fullName === "string"
+  );
+}
+
+export function isGuestInputRowLike(
+  value: unknown
+): value is Omit<GuestInputRow, "id"> & { id?: string } {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as {
+    id?: unknown;
+    host?: unknown;
+    household?: unknown;
+    group?: unknown;
+    fullName?: unknown;
+  };
+
+  return (
+    (candidate.id === undefined || typeof candidate.id === "string") &&
     typeof candidate.host === "string" &&
     typeof candidate.household === "string" &&
     typeof candidate.group === "string" &&
@@ -81,16 +112,34 @@ export function reconcileStateToGuestIds(
   const allowedGuestIds = new Set(allGuestIds);
   const seenGuestIds = new Set<string>();
 
-  const tables = state.tables.map((table) => ({
-    ...table,
-    guestIds: table.guestIds.map((guestId) => {
+  const tables = state.tables.map((table) => {
+    const guestIds = table.guestIds.map((guestId) => {
       if (guestId === null) return null;
       if (!allowedGuestIds.has(guestId) || seenGuestIds.has(guestId)) return null;
 
       seenGuestIds.add(guestId);
       return guestId;
-    }),
-  }));
+    });
+
+    // Imported snapshots can contain disabled seats that still hold guests.
+    // Normalize to keep occupied seats enabled so those guests stay visible.
+    const disabledSeats = Array.isArray(table.disabledSeats)
+      ? table.disabledSeats.filter(
+          (seatIndex, index, source): seatIndex is number =>
+            Number.isInteger(seatIndex) &&
+            seatIndex >= 0 &&
+            seatIndex < guestIds.length &&
+            guestIds[seatIndex] === null &&
+            source.indexOf(seatIndex) === index
+        )
+      : table.disabledSeats;
+
+    return {
+      ...table,
+      guestIds,
+      disabledSeats,
+    };
+  });
 
   const unassigned = allGuestIds.filter((guestId) => !seenGuestIds.has(guestId));
   return {
@@ -142,7 +191,7 @@ export function parsePersistedSeatingData(value: unknown): PersistedSeatingData 
   return null;
 }
 
-export function loadPersistedGuestRows(sourceSignature: string): GuestInputRow[] | null {
+export function loadPersistedGuestData(sourceSignature: string): PersistedGuestData | null {
   try {
     const savedSourceSignature = localStorage.getItem(GUEST_DATA_SOURCE_KEY);
     if (savedSourceSignature !== sourceSignature) {
@@ -155,19 +204,36 @@ export function loadPersistedGuestRows(sourceSignature: string): GuestInputRow[]
     if (!raw) return null;
 
     const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed) || !parsed.every((row) => isGuestInputRow(row))) {
+    if (Array.isArray(parsed) && parsed.every((row) => isGuestInputRowLike(row))) {
+      return {
+        rows: normalizeGuestInputRows(parsed),
+      };
+    }
+
+    const persistedRows =
+      parsed && typeof parsed === "object" && Array.isArray((parsed as { rows?: unknown }).rows)
+        ? (parsed as { rows: unknown[] }).rows
+        : null;
+
+    if (!persistedRows || !persistedRows.every((row) => isGuestInputRowLike(row))) {
       return null;
     }
 
-    return parsed.map((row) => ({ ...row }));
+    return {
+      rows: normalizeGuestInputRows(persistedRows),
+    };
   } catch {
     return null;
   }
 }
 
-export function savePersistedGuestRows(rows: GuestInputRow[]): void {
+export function savePersistedGuestData(rows: GuestInputRow[]): void {
   try {
-    localStorage.setItem(GUEST_DATA_STORAGE_KEY, JSON.stringify(rows));
+    const payload: PersistedGuestData = {
+      rows,
+    };
+
+    localStorage.setItem(GUEST_DATA_STORAGE_KEY, JSON.stringify(payload));
   } catch {
     // Ignore quota errors silently
   }

@@ -3,14 +3,19 @@
 export type Host = string;
 
 export interface GuestInputRow {
+  id: string;
   host: Host;
   household: string;
   group: string;
   fullName: string;
 }
 
+export interface PersistedGuestData {
+  rows: GuestInputRow[];
+}
+
 export interface Guest {
-  id: string; // "g{rowIndex}", stable within a parsed dataset
+  id: string;
   fullName: string;
   partyId: string; // matches Party.id
   host: Host;

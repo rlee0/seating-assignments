@@ -1,22 +1,12 @@
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Filter, Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import GroupCard from "./GroupCard";
 import HouseholdCard from "./HouseholdCard";
 import { Input } from "@/components/ui/input";
 import { cn } from "../lib/utils";
-import { chipToggleVariants } from "@/components/ui/chip";
 import { useDroppable } from "@dnd-kit/core";
 import { useSearch } from "../store/SearchContext";
 import { useSeating } from "../store/SeatingContext";
@@ -43,20 +33,25 @@ function comparePartiesForSidebar(
   return sidebarSortCollator.compare(a.household, b.household);
 }
 
-export default function Sidebar() {
+export default function Sidebar({
+  onAddGuest,
+  onEditGuest,
+  onDeleteGuest,
+}: {
+  onAddGuest: () => void;
+  onEditGuest: (guestId: string) => void;
+  onDeleteGuest: (guestId: string) => void;
+}) {
   const { state, parties, guests } = useSeating();
   const {
     searchQuery,
     setSearchQuery,
-    hostFilters,
-    toggleHostFilter,
-    clearHostFilters,
-    isGroupHighlightOn,
     setGroupHighlightOn,
     isHouseholdHighlightOn,
     setHouseholdHighlightOn,
     isHostHighlightOn,
     setHostHighlightOn,
+    householdPulseNonce,
   } = useSearch();
   const unassignedSet = useMemo(() => new Set(state.unassigned), [state.unassigned]);
   const normalizedQuery = useMemo(() => normalizeForSearch(searchQuery.trim()), [searchQuery]);
@@ -90,45 +85,26 @@ export default function Sidebar() {
     };
   }, []);
 
-  const availableHosts = useMemo(() => {
-    const hosts = new Set<string>();
-
-    for (const guest of guests.values()) {
-      if (guest.host.trim()) {
-        hosts.add(guest.host);
-      }
-    }
-
-    return [...hosts].sort((left, right) => sidebarSortCollator.compare(left, right));
-  }, [guests]);
-
-  const selectedHosts = useMemo(() => new Set(hostFilters), [hostFilters]);
-  const activeHostFilterCount = hostFilters.length;
+  const activeHighlightMode = isHouseholdHighlightOn
+    ? "household"
+    : isHostHighlightOn
+      ? "host"
+      : "group";
+  const highlightToggleItemClass =
+    "rounded-none border-l border-input bg-background first:rounded-l-md first:border-l-0 last:rounded-r-md";
   const emptyStateMessage =
     normalizedQuery.length > 0
       ? `No unassigned matches for "${searchQuery.trim()}"`
-      : activeHostFilterCount > 0
-        ? "No unassigned guests match the current host filters"
-        : "No unassigned guests available";
+      : "No unassigned guests available";
+  const unassignedSummary =
+    guests.size === 0 ? "No guests" : `${state.unassigned.length} of ${guests.size}`;
 
   // Show parties that still have at least one unassigned member
   const partiesWithUnassigned = useMemo(
     () =>
       [...parties.values()].filter((party) => {
         const unassignedGuestIds = party.guestIds.filter((id) => unassignedSet.has(id));
-        const unassignedHosts = new Set(
-          unassignedGuestIds
-            .map((id) => guests.get(id)?.host ?? "")
-            .filter((host): host is string => host.length > 0)
-        );
-
         if (unassignedGuestIds.length === 0) return false;
-        if (
-          selectedHosts.size > 0 &&
-          ![...unassignedHosts].some((host) => selectedHosts.has(host))
-        ) {
-          return false;
-        }
         if (!normalizedQuery) return true;
 
         if (normalizeForSearch(party.household).includes(normalizedQuery)) return true;
@@ -139,7 +115,7 @@ export default function Sidebar() {
           return guest && normalizeForSearch(guest.fullName).includes(normalizedQuery);
         });
       }),
-    [parties, unassignedSet, normalizedQuery, guests, selectedHosts]
+    [parties, unassignedSet, normalizedQuery, guests]
   );
 
   const sortedPartiesWithUnassigned = useMemo(
@@ -172,6 +148,15 @@ export default function Sidebar() {
       data-sidebar
       className="flex w-65 shrink-0 flex-col overflow-hidden overflow-x-clip border-r border-sidebar-border bg-sidebar overscroll-x-none *:min-w-0">
       <div className="relative shrink-0 border-b border-sidebar-border bg-sidebar p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            Guests
+          </p>
+          <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={onAddGuest}>
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Add Guest</span>
+          </Button>
+        </div>
         <div className="flex items-center gap-2">
           <div className="relative flex min-w-0 flex-1 items-center">
             <Search
@@ -188,109 +173,55 @@ export default function Sidebar() {
               aria-label="Search unassigned guests, households, and groups"
             />
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 gap-1.5 px-2.5 [&_svg]:h-3.5 [&_svg]:w-3.5">
-                <Filter aria-hidden="true" />
-                <span>Filter</span>
-                {activeHostFilterCount > 0 ? (
-                  <Badge
-                    className="h-5 min-w-5 rounded-full px-1.5 text-2xs leading-5"
-                    variant="default">
-                    {activeHostFilterCount}
-                  </Badge>
-                ) : null}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="w-72"
-              aria-label="Filter unassigned guests by host">
-              <DropdownMenuLabel className="text-xs font-bold uppercase tracking-wider text-foreground">
-                Hosts
-              </DropdownMenuLabel>
-              {availableHosts.length === 0 ? (
-                <DropdownMenuItem disabled className="m-0 text-xs text-muted-foreground">
-                  No hosts found
-                </DropdownMenuItem>
-              ) : (
-                availableHosts.map((host) => (
-                  <DropdownMenuCheckboxItem
-                    key={host}
-                    checked={selectedHosts.has(host)}
-                    className="text-xs"
-                    onCheckedChange={() => toggleHostFilter(host)}>
-                    <span className="text-xs font-semibold text-foreground">{host}</span>
-                  </DropdownMenuCheckboxItem>
-                ))
-              )}
-              {activeHostFilterCount > 0 ? (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className="text-xs font-semibold text-muted-foreground hover:text-foreground"
-                    onSelect={() => clearHostFilters()}>
-                    Clear
-                  </DropdownMenuItem>
-                </>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
-        <div className="mt-2 flex gap-1.5" aria-label="Highlight views">
-          <button
-            type="button"
-            className={[
-              "text-2xs",
-              chipToggleVariants({ state: isGroupHighlightOn ? "pressed" : "default", size: "sm" }),
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            aria-pressed={isGroupHighlightOn}
-            title="Highlight guests in the same group"
-            onClick={() => setGroupHighlightOn(!isGroupHighlightOn)}>
+        <ToggleGroup
+          type="single"
+          size="sm"
+          value={activeHighlightMode}
+          onValueChange={(value) => {
+            if (value === "group") {
+              setGroupHighlightOn(true);
+              return;
+            }
+
+            if (value === "household") {
+              setHouseholdHighlightOn(true);
+              return;
+            }
+
+            if (value === "host") {
+              setHostHighlightOn(true);
+            }
+          }}
+          className="mt-2 w-fit justify-start gap-0 rounded-md border border-input"
+          aria-label="Highlight views">
+          <ToggleGroupItem
+            value="group"
+            className={highlightToggleItemClass}
+            title="Highlight guests in the same group">
             Group
-          </button>
-          <button
-            type="button"
-            className={[
-              "text-2xs",
-              chipToggleVariants({
-                state: isHouseholdHighlightOn ? "pressed" : "default",
-                size: "sm",
-              }),
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            aria-pressed={isHouseholdHighlightOn}
-            title="Highlight guests in the same household"
-            onClick={() => setHouseholdHighlightOn(!isHouseholdHighlightOn)}>
+          </ToggleGroupItem>
+          <ToggleGroupItem
+            key={`household-toggle-${householdPulseNonce}`}
+            value="household"
+            className={cn(
+              highlightToggleItemClass,
+              householdPulseNonce > 0 && "animate-[pulse_280ms_ease-out_2]"
+            )}
+            title="Highlight guests in the same household">
             Household
-          </button>
-          <button
-            type="button"
-            className={[
-              "text-2xs",
-              chipToggleVariants({ state: isHostHighlightOn ? "pressed" : "default", size: "sm" }),
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            aria-pressed={isHostHighlightOn}
-            title="Highlight seated guests by host"
-            onClick={() => setHostHighlightOn(!isHostHighlightOn)}>
+          </ToggleGroupItem>
+          <ToggleGroupItem
+            value="host"
+            className={highlightToggleItemClass}
+            title="Highlight seated guests by host">
             Host
-          </button>
-        </div>
+          </ToggleGroupItem>
+        </ToggleGroup>
       </div>
       <div className="flex shrink-0 items-center justify-between border-b border-sidebar-border px-3 py-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
         <span>Unassigned</span>
-        <Badge variant="secondary" className="h-auto rounded-full px-1.5 py-0 text-2xs">
-          {state.unassigned.length}
-        </Badge>
+        <span className="font-medium normal-case tracking-normal">{unassignedSummary}</span>
       </div>
       <div
         ref={setDropzoneRef}
@@ -312,7 +243,12 @@ export default function Sidebar() {
               <GroupCard groupName={groupName} guestIds={groupedGuestIds.get(groupName) ?? []} />
               <div className="relative ml-0 grid gap-1.5 pl-5 pt-1 pb-1 before:absolute before:left-2 before:top-1 before:bottom-1 before:w-px before:bg-border">
                 {groupedParties.get(groupName)?.map((party) => (
-                  <HouseholdCard key={party.id} party={party} />
+                  <HouseholdCard
+                    key={party.id}
+                    party={party}
+                    onEditGuest={onEditGuest}
+                    onDeleteGuest={onDeleteGuest}
+                  />
                 ))}
               </div>
             </div>

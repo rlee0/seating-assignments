@@ -5,25 +5,34 @@ import type { ReactNode } from "react";
 interface SearchContextValue {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
-  hostFilters: string[];
-  toggleHostFilter: (host: string) => void;
-  clearHostFilters: () => void;
   isGroupHighlightOn: boolean;
   setGroupHighlightOn: (isOn: boolean) => void;
   isHouseholdHighlightOn: boolean;
   setHouseholdHighlightOn: (isOn: boolean) => void;
   isHostHighlightOn: boolean;
   setHostHighlightOn: (isOn: boolean) => void;
+  householdPulseNonce: number;
+  activateHouseholdFocusFromGuestSelection: () => void;
+  restoreHighlightModeAfterGuestDeselection: () => void;
 }
 
 const SearchContext = createContext<SearchContextValue | null>(null);
 
 export function SearchProvider({ children }: { children: ReactNode }) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [hostFilters, setHostFilters] = useState<string[]>([]);
   const [isGroupHighlightOn, setGroupHighlightOn] = useState(true);
   const [isHouseholdHighlightOn, setHouseholdHighlightOn] = useState(false);
   const [isHostHighlightOn, setHostHighlightOn] = useState(false);
+  const [householdPulseNonce, setHouseholdPulseNonce] = useState(0);
+  const [previousHighlightMode, setPreviousHighlightMode] = useState<
+    "group" | "household" | "host" | null
+  >(null);
+
+  function getActiveHighlightMode(): "group" | "household" | "host" {
+    if (isHouseholdHighlightOn) return "household";
+    if (isHostHighlightOn) return "host";
+    return "group";
+  }
 
   function handleSetGroupHighlightOn(isOn: boolean) {
     if (isOn) {
@@ -64,18 +73,21 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     setHostHighlightOn(false);
   }
 
-  function toggleHostFilter(host: string) {
-    setHostFilters((current) => {
-      if (current.includes(host)) {
-        return current.filter((entry) => entry !== host);
-      }
-
-      return [...current, host];
-    });
+  function activateHouseholdFocusFromGuestSelection() {
+    setPreviousHighlightMode((current) => current ?? getActiveHighlightMode());
+    setHouseholdPulseNonce((current) => current + 1);
+    setHouseholdHighlightOn(true);
+    setGroupHighlightOn(false);
+    setHostHighlightOn(false);
   }
 
-  function clearHostFilters() {
-    setHostFilters([]);
+  function restoreHighlightModeAfterGuestDeselection() {
+    if (!previousHighlightMode) return;
+
+    setGroupHighlightOn(previousHighlightMode === "group");
+    setHouseholdHighlightOn(previousHighlightMode === "household");
+    setHostHighlightOn(previousHighlightMode === "host");
+    setPreviousHighlightMode(null);
   }
 
   return (
@@ -83,15 +95,15 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       value={{
         searchQuery,
         setSearchQuery,
-        hostFilters,
-        toggleHostFilter,
-        clearHostFilters,
         isGroupHighlightOn,
         setGroupHighlightOn: handleSetGroupHighlightOn,
         isHouseholdHighlightOn,
         setHouseholdHighlightOn: handleSetHouseholdHighlightOn,
         isHostHighlightOn,
         setHostHighlightOn: handleSetHostHighlightOn,
+        householdPulseNonce,
+        activateHouseholdFocusFromGuestSelection,
+        restoreHighlightModeAfterGuestDeselection,
       }}>
       {children}
     </SearchContext.Provider>
