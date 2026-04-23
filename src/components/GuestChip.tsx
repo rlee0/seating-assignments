@@ -1,11 +1,32 @@
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CSS } from "@dnd-kit/utilities";
 import type { CSSProperties } from "react";
+import { cn } from "../lib/utils";
 import { guestChipVariants } from "@/components/ui/chip";
 import { useDraggable } from "@dnd-kit/core";
 import { useSearch } from "../store/SearchContext";
 import { useSeating } from "../store/SeatingContext";
+
+const HOVERCARD_OPEN_DELAY_MS = 1200;
+const HOVERCARD_CLOSE_DELAY_MS = 80;
+
+let activeGuestHovercardId: string | null = null;
+const guestHovercardSubscribers = new Set<(hovercardId: string | null) => void>();
+
+function subscribeToGuestHovercardChanges(listener: (hovercardId: string | null) => void) {
+  guestHovercardSubscribers.add(listener);
+
+  return () => {
+    guestHovercardSubscribers.delete(listener);
+  };
+}
+
+function setActiveGuestHovercard(hovercardId: string | null) {
+  activeGuestHovercardId = hovercardId;
+  guestHovercardSubscribers.forEach((listener) => listener(hovercardId));
+}
 
 function normalizeForSearch(str: string): string {
   return str
@@ -85,9 +106,9 @@ function getHighlightColor(token: string): {
 } {
   const hue = getTokenHue(token);
   return {
-    background: `hsl(${hue} 78% 85%)`,
-    border: `hsl(${hue} 58% 64%)`,
-    solid: `hsl(${hue} 52% 56%)`,
+    background: `oklch(0.88 0.1 ${hue})`,
+    border: `oklch(0.72 0.15 ${hue})`,
+    solid: `oklch(0.62 0.17 ${hue})`,
   };
 }
 
@@ -115,6 +136,9 @@ interface Props {
   seatIndex?: number;
   className?: string;
   suppressStateStyles?: boolean;
+  suppressInteraction?: boolean;
+  draggableDisabled?: boolean;
+  fallbackName?: string;
 }
 
 export default function GuestChip({
@@ -124,6 +148,9 @@ export default function GuestChip({
   seatIndex,
   className,
   suppressStateStyles = false,
+  suppressInteraction = false,
+  draggableDisabled = false,
+  fallbackName,
 }: Props) {
   const {
     state,
@@ -140,22 +167,119 @@ export default function GuestChip({
   const guest = guests.get(guestId);
   const selectedGuest = selectedGuestId ? guests.get(selectedGuestId) : null;
   const isAnchored = (state.lockedGuestIds ?? []).includes(guestId);
+  const hovercardId =
+    context === "table" && typeof tableNumber === "number" && typeof seatIndex === "number"
+      ? `table-${tableNumber}-seat-${seatIndex}-guest-${guestId}`
+      : `guest-${guestId}`;
+  const [isHovercardOpen, setIsHovercardOpen] = useState(false);
+  const openTimerRef = useRef<number | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
+
+  const draggableId =
+    draggableDisabled &&
+    context === "table" &&
+    typeof tableNumber === "number" &&
+    typeof seatIndex === "number"
+      ? `guest-preview-${guestId}-${tableNumber}-${seatIndex}`
+      : `guest-${guestId}`;
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: `guest-${guestId}`,
+    id: draggableId,
+    disabled: draggableDisabled,
     data:
       context === "table" && typeof tableNumber === "number" && typeof seatIndex === "number"
         ? { kind: "guest", guestId, origin: context, tableNumber, seatIndex }
         : { kind: "guest", guestId, origin: context },
   });
 
-  if (!guest) return null;
+  if (!guest && !fallbackName) return null;
 
-  const householdName = parties.get(guest.partyId)?.household?.trim() || "Unknown household";
-  const groupName = guest.group.trim() || "No group";
-  const hostName = guest.host.trim() || "Unknown host";
+  const guestName = guest?.fullName ?? fallbackName ?? "";
+
+  const householdName = guest
+    ? parties.get(guest.partyId)?.household?.trim() || "Unknown household"
+    : "";
+  const groupName = guest ? guest.group.trim() || "No group" : "";
+  const hostName = guest ? guest.host.trim() || "Unknown host" : "";
   const lockedStatusLabel = isAnchored ? "Locked" : "Not locked";
   const shouldShowHovercard = context === "table" && !isDragging;
+
+  function clearHovercardTimers() {
+    if (openTimerRef.current !== null) {
+      window.clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }
+
+  function closeHovercard() {
+    clearHovercardTimers();
+    setIsHovercardOpen(false);
+
+    if (activeGuestHovercardId === hovercardId) {
+      setActiveGuestHovercard(null);
+    }
+  }
+
+  function scheduleHovercardOpen() {
+    if (!shouldShowHovercard || !guest) return;
+
+    clearHovercardTimers();
+    setActiveGuestHovercard(hovercardId);
+    openTimerRef.current = window.setTimeout(() => {
+      if (activeGuestHovercardId !== hovercardId) return;
+      setIsHovercardOpen(true);
+      openTimerRef.current = null;
+    }, HOVERCARD_OPEN_DELAY_MS);
+  }
+
+  function scheduleHovercardClose() {
+    clearHovercardTimers();
+    closeTimerRef.current = window.setTimeout(() => {
+      closeHovercard();
+      closeTimerRef.current = null;
+    }, HOVERCARD_CLOSE_DELAY_MS);
+  }
+
+  function handleHovercardPointerEnter() {
+    scheduleHovercardOpen();
+  }
+
+  function handleHovercardPointerLeave() {
+    scheduleHovercardClose();
+  }
+
+  function handleHovercardBlur() {
+    closeHovercard();
+  }
+
+  useEffect(() => {
+    if (!shouldShowHovercard) {
+      closeHovercard();
+      return;
+    }
+
+    return subscribeToGuestHovercardChanges((nextHovercardId) => {
+      if (nextHovercardId === hovercardId) return;
+
+      clearHovercardTimers();
+      setIsHovercardOpen(false);
+    });
+  }, [hovercardId, shouldShowHovercard]);
+
+  useEffect(() => {
+    return () => {
+      clearHovercardTimers();
+
+      if (activeGuestHovercardId === hovercardId) {
+        setActiveGuestHovercard(null);
+      }
+    };
+  }, [hovercardId]);
 
   // When DragOverlay is active it owns the visual movement; don't also move the original element.
   const style: CSSProperties & Record<string, string> = {};
@@ -163,37 +287,48 @@ export default function GuestChip({
     style.transform = CSS.Translate.toString(transform);
   }
 
-  const highlightToken =
-    context === "table"
-      ? getHighlightTokenForGuest(guest, {
-          isHostHighlightOn,
-          isHouseholdHighlightOn,
-          isGroupHighlightOn,
-        })
-      : null;
-  const selectedHighlightToken = selectedGuest
-    ? getHighlightTokenForGuest(selectedGuest, {
-        isHostHighlightOn,
-        isHouseholdHighlightOn,
-        isGroupHighlightOn,
-      })
-    : null;
+  const highlightToken = useMemo(() => {
+    if (!guest) return null;
+    return getHighlightTokenForGuest(guest, {
+      isHostHighlightOn,
+      isHouseholdHighlightOn,
+      isGroupHighlightOn,
+    });
+  }, [guest, isHostHighlightOn, isHouseholdHighlightOn, isGroupHighlightOn]);
+
+  const selectedHighlightToken = useMemo(() => {
+    if (!selectedGuest) return null;
+    return getHighlightTokenForGuest(selectedGuest, {
+      isHostHighlightOn,
+      isHouseholdHighlightOn,
+      isGroupHighlightOn,
+    });
+  }, [selectedGuest, isHostHighlightOn, isHouseholdHighlightOn, isGroupHighlightOn]);
+
   const isSelected = selectedGuestId === guestId;
   const isRelatedHousehold = relatedHouseholdGuestIds.has(guestId);
   const isRelatedGroup = relatedGroupGuestIds.has(guestId);
 
-  let highlightClass: string | null = null;
-  if (highlightToken) {
-    const { background, border } = getHighlightColor(highlightToken);
-    style["--guest-chip-highlight-bg"] = background;
-    style["--guest-chip-highlight-border"] = border;
-    highlightClass = "is-highlighted";
+  const highlightColors = useMemo(
+    () => (highlightToken ? getHighlightColor(highlightToken) : null),
+    [highlightToken]
+  );
+
+  const selectedHighlightColors = useMemo(
+    () => (selectedHighlightToken ? getHighlightColor(selectedHighlightToken) : null),
+    [selectedHighlightToken]
+  );
+
+  let isHighlighted = false;
+  if (highlightColors) {
+    style["--guest-chip-highlight-bg"] = highlightColors.background;
+    style["--guest-chip-highlight-border"] = highlightColors.border;
+    isHighlighted = true;
   }
 
   if (!suppressStateStyles && selectedGuestId) {
-    if (selectedHighlightToken) {
-      const { solid } = getHighlightColor(selectedHighlightToken);
-      style["--guest-chip-selected-color"] = solid;
+    if (selectedHighlightColors) {
+      style["--guest-chip-selected-color"] = selectedHighlightColors.solid;
     } else {
       style["--guest-chip-selected-color"] = "var(--primary)";
     }
@@ -204,42 +339,35 @@ export default function GuestChip({
   }
 
   const hasInlineStyle = Object.keys(style).length > 0;
-  const relationClasses: string[] = [];
+
+  let visualState:
+    | "selected"
+    | "relatedBoth"
+    | "relatedHousehold"
+    | "relatedGroup"
+    | "dimmed"
+    | "highlighted"
+    | "searchMatch"
+    | "default" = "default";
   if (!suppressStateStyles) {
-    if (isSelected) {
-      relationClasses.push("is-selected");
-    } else if (isRelatedHousehold && isRelatedGroup) {
-      relationClasses.push("is-related-household", "is-related-group", "is-related-both");
-    } else if (isRelatedHousehold) {
-      relationClasses.push("is-related-household");
-    } else if (isRelatedGroup) {
-      relationClasses.push("is-related-group");
-    } else if (selectedGuestId) {
-      relationClasses.push("is-dimmed");
+    if (isSelected || isRelatedHousehold) {
+      visualState = "selected";
+    } else if (selectedGuestId && !isRelatedGroup) {
+      visualState = "dimmed";
     }
   }
+  if (visualState === "default" && isHighlighted) visualState = "highlighted";
 
   const isSearchMatch =
     !suppressStateStyles &&
+    !!guest &&
     searchQuery.trim() &&
-    normalizeForSearch(guest.fullName).includes(normalizeForSearch(searchQuery.trim()));
+    normalizeForSearch(guestName).includes(normalizeForSearch(searchQuery.trim()));
 
-  const visualState = relationClasses.includes("is-selected")
-    ? "selected"
-    : relationClasses.includes("is-related-both")
-      ? "relatedBoth"
-      : relationClasses.includes("is-related-household")
-        ? "relatedHousehold"
-        : relationClasses.includes("is-related-group")
-          ? "relatedGroup"
-          : highlightClass
-            ? "highlighted"
-            : isSearchMatch
-              ? "searchMatch"
-              : "default";
+  if (visualState === "default" && isSearchMatch) visualState = "searchMatch";
 
   function handleSelectGuest() {
-    if (isDragging) return;
+    if (isDragging || suppressInteraction || !guest) return;
     if (selectedGuestId === guestId) {
       clearSelectedGuest();
     } else {
@@ -250,36 +378,40 @@ export default function GuestChip({
   const chip = (
     <div
       ref={setNodeRef}
+      data-guest-chip
+      data-guest-id={guestId}
       style={hasInlineStyle ? style : undefined}
-      className={[
-        "guest-chip",
-        `guest-chip--${context}`,
+      className={cn(
         guestChipVariants({ state: visualState, context }),
-        className,
-        highlightClass,
-        ...relationClasses,
-        isAnchored ? "is-anchored" : null,
-        isDragging ? "is-dragging" : null,
-        isSearchMatch ? "is-search-match" : null,
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      title={shouldShowHovercard ? undefined : guest.fullName}
-      onClick={handleSelectGuest}
-      {...listeners}
-      {...attributes}>
-      <span className="guest-name">{guest.fullName}</span>
+        isDragging && "opacity-0",
+        className
+      )}
+      title={shouldShowHovercard ? undefined : guestName}
+      onClick={suppressInteraction ? undefined : handleSelectGuest}
+      onPointerEnter={shouldShowHovercard ? handleHovercardPointerEnter : undefined}
+      onPointerLeave={shouldShowHovercard ? handleHovercardPointerLeave : undefined}
+      onBlur={shouldShowHovercard ? handleHovercardBlur : undefined}
+      {...(suppressInteraction ? undefined : listeners)}
+      {...(suppressInteraction ? undefined : attributes)}>
+      <span
+        data-guest-name
+        className="relative block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+        {guestName}
+      </span>
     </div>
   );
 
-  if (!shouldShowHovercard) {
+  if (!shouldShowHovercard || !guest) {
     return chip;
   }
 
   return (
-    <HoverCard openDelay={1000} closeDelay={100}>
+    <HoverCard open={isHovercardOpen} onOpenChange={(open) => !open && closeHovercard()}>
       <HoverCardTrigger asChild>{chip}</HoverCardTrigger>
-      <HoverCardContent className="w-64 space-y-3">
+      <HoverCardContent
+        className="w-64 space-y-3"
+        onPointerEnter={handleHovercardPointerEnter}
+        onPointerLeave={handleHovercardPointerLeave}>
         <div>
           <h4 className="text-sm font-semibold leading-tight">{guest.fullName}</h4>
         </div>

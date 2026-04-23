@@ -1,0 +1,166 @@
+{
+  "version": 2,
+  "exportedAt": "2026-04-22T00:00:00.000Z",
+  "guests": [
+    { "name": "Alice", "household": "Alpha Household", "group": "Ceremony", "host": "Ryan" },
+    { "name": "Bob", "household": "Alpha Household", "group": "Ceremony", "host": "Ryan" },
+    { "name": "Charlie", "household": "Beta Household", "group": "Ceremony", "host": "Ryan" },
+    { "name": "Diana", "household": "Beta Household", "group": "Ceremony", "host": "Ryan" },
+    { "name": "Eve", "household": "Gamma Household", "group": "Reception", "host": "Ryan" },
+    { "name": "Frank", "household": "Gamma Household", "group": "Reception", "host": "Ryan" },
+    { "name": "Grace", "household": "Delta Household", "group": "Reception", "host": "Ryan" },
+    { "name": "Henry", "household": "Delta Household", "group": "Reception", "host": "Ryan" }
+  ],
+  "tables": [
+    {
+      "tableNumber": 1,
+      "name": "Table 1",
+      "guestIds": ["Alice", "Bob", null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 2,
+      "name": "Table 2",
+      "guestIds": ["Charlie", "Diana", null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 3,
+      "name": "Table 3",
+      "guestIds": ["Eve", "Frank", null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 4,
+      "name": "Table 4",
+      "guestIds": ["Grace", "Henry", null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 5,
+      "name": "Table 5",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 6,
+      "name": "Table 6",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 7,
+      "name": "Table 7",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 8,
+      "name": "Table 8",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 9,
+      "name": "Table 9",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 10,
+      "name": "Table 10",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 11,
+      "name": "Table 11",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 12,
+      "name": "Table 12",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 13,
+      "name": "Table 13",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 14,
+      "name": "Table 14",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 15,
+      "name": "Table 15",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 16,
+      "name": "Table 16",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 17,
+      "name": "Table 17",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 18,
+      "name": "Table 18",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 19,
+      "name": "Table 19",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 20,
+      "name": "Table 20",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 21,
+      "name": "Table 21",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 22,
+      "name": "Table 22",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 23,
+      "name": "Table 23",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 24,
+      "name": "Table 24",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    },
+    {
+      "tableNumber": 25,
+      "name": "Table 25",
+      "guestIds": [null, null, null, null, null, null, null, null],
+      "disabledSeats": []
+    }
+  ]
+}

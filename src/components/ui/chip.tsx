@@ -1,12 +1,13 @@
 import { cva, type VariantProps } from "class-variance-authority";
 
 const guestChipVariants = cva(
-  "inline-flex items-center gap-1 rounded-[4px] border px-1 py-0.5 text-[11px] leading-[1.2] font-medium ring-offset-background transition-[color,background-color,border-color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+  "flex items-center gap-1 rounded-sm border px-1 py-0.5 text-2xs leading-tight font-medium ring-offset-background transition-[color,background-color,border-color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
   {
     variants: {
       state: {
         default:
-          "border-input bg-secondary text-secondary-foreground hover:bg-secondary/80 active:bg-secondary/75",
+          "border-primary/20 bg-primary/8 text-primary hover:bg-primary/12 active:bg-primary/10",
+        dimmed: "border-border bg-muted text-muted-foreground hover:bg-muted/80 active:bg-muted/75",
         selected:
           "border-[var(--guest-chip-selected-color,var(--primary))] bg-[var(--guest-chip-selected-color,var(--primary))] text-primary-foreground hover:bg-[var(--guest-chip-selected-color,var(--primary))] active:bg-[var(--guest-chip-selected-color,var(--primary))]",
         relatedHousehold:
@@ -22,7 +23,7 @@ const guestChipVariants = cva(
       },
       context: {
         sidebar: "w-auto",
-        table: "w-full box-border",
+        table: "w-full h-full box-border",
       },
     },
     defaultVariants: {
@@ -33,7 +34,7 @@ const guestChipVariants = cva(
 );
 
 const chipToggleVariants = cva(
-  "inline-flex cursor-pointer items-center justify-center whitespace-nowrap rounded-full border text-[11px] font-medium ring-offset-background transition-[color,background-color,border-color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex cursor-pointer items-center justify-center whitespace-nowrap rounded-full border text-2xs font-medium ring-offset-background transition-[color,background-color,border-color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       state: {

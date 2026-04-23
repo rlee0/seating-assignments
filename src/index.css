@@ -1,6 +1,24 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* ─── Geist font ──────────────────────────────────────────────────────────── */
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist-Italic[wght].woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ─── Shadcn theme tokens ─────────────────────────────────────────────────── */
@@ -20,6 +38,8 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
@@ -42,6 +62,8 @@
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) * 1.4);
+  --text-2xs: 0.6875rem; /* 11px — dense chip/label size */
+  --text-2xs--line-height: 1.2;
 }
 
 :root {
@@ -60,8 +82,10 @@
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
+  --warning: oklch(0.769 0.188 70.08);
+  --warning-foreground: oklch(0.539 0.156 56);
   --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -85,22 +109,63 @@
   --table-seat-disabled-bg-b: color-mix(in oklab, var(--muted) 72%, var(--background) 28%);
   --table-seat-disabled-border: color-mix(in oklab, var(--border) 75%, var(--foreground) 25%);
   --table-drop-bg: color-mix(in oklab, var(--primary) 10%, var(--background) 90%);
-  --table-drop-border: color-mix(in oklab, var(--primary) 62%, var(--border) 38%);
+  --table-drop-border: color-mix(in oklab, var(--primary) 42%, var(--border) 58%);
+  --table-preview-border: color-mix(in oklab, var(--primary) 65%, var(--border) 35%);
+  --table-preview-bg: color-mix(in oklab, var(--card) 70%, var(--primary) 30%);
 
   --guest-chip-highlight-fg: var(--foreground);
-  --search-match-bg: color-mix(in oklab, var(--accent) 72%, hsl(47 98% 65%) 28%);
-  --search-match-border: color-mix(in oklab, var(--accent-foreground) 24%, hsl(47 98% 42%) 76%);
-  --search-match-fg: color-mix(in oklab, var(--foreground) 78%, hsl(32 90% 20%) 22%);
+  /* yellow-amber accent for search match — warm hue, no bare hsl */
+  --search-match-accent: oklch(0.87 0.16 88);
+  --search-match-accent-strong: oklch(0.62 0.16 72);
+  --search-match-accent-dark: oklch(0.42 0.12 60);
+  --search-match-bg: color-mix(in oklab, var(--accent) 72%, var(--search-match-accent) 28%);
+  --search-match-border: color-mix(
+    in oklab,
+    var(--accent-foreground) 24%,
+    var(--search-match-accent-strong) 76%
+  );
+  --search-match-fg: color-mix(
+    in oklab,
+    var(--foreground) 78%,
+    var(--search-match-accent-dark) 22%
+  );
+  --search-match-chip-bg: oklch(0.985 0.026 95.277);
 
-  --diff-added-slot-bg: color-mix(in oklab, var(--background) 80%, hsl(137 56% 92%) 20%);
-  --diff-added-chip-bg: color-mix(in oklab, var(--background) 55%, hsl(137 57% 82%) 45%);
-  --diff-added-border: hsl(137 63% 35%);
-  --diff-changed-slot-bg: color-mix(in oklab, var(--background) 72%, hsl(48 100% 90%) 28%);
-  --diff-changed-chip-bg: color-mix(in oklab, var(--background) 48%, hsl(48 100% 80%) 52%);
-  --diff-changed-border: hsl(40 87% 36%);
-  --diff-deleted-slot-bg: color-mix(in oklab, var(--background) 78%, hsl(0 85% 93%) 22%);
-  --diff-deleted-chip-bg: color-mix(in oklab, var(--background) 54%, hsl(0 89% 88%) 46%);
-  --diff-deleted-border: hsl(0 66% 46%);
+  /* diff state colors — green / amber / red in oklch */
+  --diff-green: oklch(0.88 0.1 152);
+  --diff-green-mid: oklch(0.78 0.15 152);
+  --diff-green-strong: oklch(0.45 0.15 152);
+  --diff-amber: oklch(0.95 0.08 88);
+  --diff-amber-mid: oklch(0.88 0.15 80);
+  --diff-amber-strong: oklch(0.58 0.16 72);
+  --diff-red: oklch(0.96 0.04 20);
+  --diff-red-mid: oklch(0.88 0.09 20);
+  --diff-red-strong: oklch(0.55 0.2 22);
+
+  --diff-added-slot-bg: color-mix(in oklab, var(--background) 80%, var(--diff-green) 20%);
+  --diff-added-chip-bg: color-mix(in oklab, var(--background) 55%, var(--diff-green-mid) 45%);
+  --diff-added-border: var(--diff-green-strong);
+  --diff-changed-slot-bg: color-mix(in oklab, var(--background) 72%, var(--diff-amber) 28%);
+  --diff-changed-chip-bg: color-mix(in oklab, var(--background) 48%, var(--diff-amber-mid) 52%);
+  --diff-changed-border: var(--diff-amber-strong);
+  --diff-deleted-slot-bg: color-mix(in oklab, var(--background) 78%, var(--diff-red) 22%);
+  --diff-deleted-chip-bg: color-mix(in oklab, var(--background) 54%, var(--diff-red-mid) 46%);
+  --diff-deleted-border: var(--diff-red-strong);
+
+  /* card interaction hover — used by table/group/party cards */
+  --card-hover-bg: color-mix(in oklab, var(--card) 90%, var(--accent) 10%);
+  --card-hover-border: color-mix(in oklab, var(--border) 72%, var(--foreground) 28%);
+
+  /* auto-seat dropzone gradient bottom stop */
+  --auto-seat-bg-end: color-mix(in oklab, var(--card) 85%, var(--muted) 15%);
+  /* active dropzone border */
+  --auto-seat-active-border: color-mix(in oklab, var(--border) 60%, var(--foreground) 40%);
+
+  /* sidebar drop highlight */
+  --sidebar-drop-bg: color-mix(in oklab, var(--primary) 10%, var(--sidebar) 90%);
+
+  /* selected guest info panel bg */
+  --sidebar-guest-panel-bg: color-mix(in oklab, var(--sidebar) 80%, var(--muted) 20%);
 }
 
 .dark {
@@ -112,12 +177,14 @@
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
+  --secondary: oklch(0.2 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
+  --muted-foreground: oklch(0.84 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.769 0.188 70.08);
+  --warning-foreground: oklch(0.888 0.163 85.7);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 12%);
@@ -143,11 +210,42 @@
   --table-seat-disabled-bg-b: color-mix(in oklab, var(--muted) 66%, var(--card) 34%);
   --table-seat-disabled-border: color-mix(in oklab, var(--border) 80%, var(--foreground) 20%);
   --table-drop-bg: color-mix(in oklab, var(--primary) 14%, var(--card) 86%);
-  --table-drop-border: color-mix(in oklab, var(--primary) 64%, var(--border) 36%);
+  --table-drop-border: color-mix(in oklab, var(--primary) 44%, var(--border) 56%);
+  --table-preview-border: color-mix(in oklab, var(--primary) 60%, var(--border) 40%);
+  --table-preview-bg: color-mix(in oklab, var(--card) 68%, var(--primary) 32%);
 
-  --search-match-bg: color-mix(in oklab, var(--accent) 55%, hsl(47 98% 40%) 45%);
-  --search-match-border: color-mix(in oklab, var(--accent-foreground) 25%, hsl(47 98% 62%) 75%);
-  --search-match-fg: color-mix(in oklab, var(--foreground) 90%, hsl(47 88% 78%) 10%);
+  /* diff colors stay the same token structure in dark mode; intermediate vars adjust naturally */
+  --diff-green: oklch(0.5 0.15 152);
+  --diff-green-mid: oklch(0.42 0.13 152);
+  --diff-green-strong: oklch(0.65 0.18 152);
+  --diff-amber: oklch(0.46 0.1 80);
+  --diff-amber-mid: oklch(0.5 0.14 78);
+  --diff-amber-strong: oklch(0.72 0.18 80);
+  --diff-red: oklch(0.4 0.08 22);
+  --diff-red-mid: oklch(0.45 0.14 22);
+  --diff-red-strong: oklch(0.68 0.22 22);
+
+  --card-hover-bg: color-mix(in oklab, var(--card) 88%, var(--accent) 12%);
+  --card-hover-border: color-mix(in oklab, var(--border) 68%, var(--foreground) 32%);
+
+  --auto-seat-bg-end: color-mix(in oklab, var(--card) 82%, var(--muted) 18%);
+  --auto-seat-active-border: color-mix(in oklab, var(--border) 55%, var(--foreground) 45%);
+
+  --sidebar-drop-bg: color-mix(in oklab, var(--primary) 14%, var(--sidebar) 86%);
+
+  --sidebar-guest-panel-bg: color-mix(in oklab, var(--sidebar) 78%, var(--muted) 22%);
+
+  /* highlight chips keep a light colored background in dark mode; force dark text for readability */
+  --guest-chip-highlight-fg: oklch(0.145 0 0);
+
+  --search-match-bg: color-mix(in oklab, var(--accent) 55%, var(--search-match-accent) 45%);
+  --search-match-border: color-mix(
+    in oklab,
+    var(--accent-foreground) 25%,
+    var(--search-match-accent-strong) 75%
+  );
+  --search-match-fg: color-mix(in oklab, var(--foreground) 90%, var(--search-match-accent) 10%);
+  --search-match-chip-bg: oklch(0.48 0.08 95);
 }
 
 /* ─── Base layer ──────────────────────────────────────────────────────────── */
@@ -159,8 +257,8 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
-    font-size: 15px;
+    font-family: "Geist", "Geist Sans", sans-serif;
+    font-size: 0.9375rem;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;

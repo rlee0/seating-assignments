@@ -30,18 +30,23 @@ export const dndCollisionDetection: CollisionDetection = (args) => {
 
   // ── Table drags ────────────────────────────────────────────────────────────
   if (kind === "table") {
-    return closestCenter({
-      ...args,
-      droppableContainers: args.droppableContainers.filter((c) => {
-        const id = String(c.id);
-        return (
-          id.startsWith("sortable-table-") ||
-          id === "auto-seat" ||
-          id === "unassigned" ||
-          id === "unassigned-panel"
-        );
-      }),
+    const tableDragContainers = args.droppableContainers.filter((c) => {
+      const id = String(c.id);
+      return (
+        id.startsWith("sortable-table-") ||
+        id === "auto-seat" ||
+        id === "unassigned" ||
+        id === "unassigned-panel"
+      );
     });
+
+    const sidebarContainers = tableDragContainers.filter(
+      (c) => String(c.id) === "unassigned" || String(c.id) === "unassigned-panel"
+    );
+    const sidebarHits = pointerWithin({ ...args, droppableContainers: sidebarContainers });
+    if (sidebarHits.length > 0) return sidebarHits;
+
+    return closestCenter({ ...args, droppableContainers: tableDragContainers });
   }
 
   // For all other drags, exclude sortable-table-* so the board never reorders.
@@ -56,6 +61,7 @@ export const dndCollisionDetection: CollisionDetection = (args) => {
     if (seatHits.length > 0) return seatHits;
 
     const nonSeatContainers = baseContainers.filter((c) => !String(c.id).startsWith("seat-"));
+    const tableContainers = nonSeatContainers.filter((c) => String(c.id).startsWith("table-"));
     const sidebarContainers = nonSeatContainers.filter(
       (c) => String(c.id) === "unassigned" || String(c.id) === "unassigned-panel"
     );
@@ -69,9 +75,10 @@ export const dndCollisionDetection: CollisionDetection = (args) => {
     const hits = pointerWithin({ ...args, droppableContainers: nonSeatContainers });
     if (hits.length > 0) return hits;
 
-    // Fallback to closestCenter for sidebar when pointer is far away.
-    if (sidebarContainers.length > 0) {
-      return closestCenter({ ...args, droppableContainers: sidebarContainers });
+    // In board gaps, keep a nearby table target rather than snapping to sidebar,
+    // which creates noisy highlight jumps while moving across table spacing.
+    if (tableContainers.length > 0) {
+      return closestCenter({ ...args, droppableContainers: tableContainers });
     }
 
     return [];

@@ -1,5 +1,3 @@
-import "./App.css";
-
 import {
   DndContext,
   DragOverlay,
@@ -25,6 +23,7 @@ import {
   type ChangeEvent,
   type DragEvent as ReactDragEvent,
 } from "react";
+import { X } from "lucide-react";
 
 import Sidebar from "./components/Sidebar";
 import TableBoard from "./components/TableBoard";
@@ -43,6 +42,7 @@ import {
   saveTheme,
   type AppTheme,
 } from "./store/localStorage";
+import { cn } from "./lib/utils";
 import {
   EXPORT_FORMAT_VERSION,
   TABLE_CAPACITY,
@@ -181,6 +181,139 @@ function getFirstJsonFile(files: FileList | null): File | null {
   return null;
 }
 
+function arePreviewTablesEqual(nextTables: TableState[], prevTables: TableState[]): boolean {
+  if (nextTables.length !== prevTables.length) return false;
+
+  for (let tableIndex = 0; tableIndex < nextTables.length; tableIndex += 1) {
+    const nextTable = nextTables[tableIndex];
+    const prevTable = prevTables[tableIndex];
+
+    if (nextTable.tableNumber !== prevTable.tableNumber) return false;
+    if (nextTable.guestIds.length !== prevTable.guestIds.length) return false;
+
+    for (let seatIndex = 0; seatIndex < nextTable.guestIds.length; seatIndex += 1) {
+      if (nextTable.guestIds[seatIndex] !== prevTable.guestIds[seatIndex]) return false;
+    }
+  }
+
+  return true;
+}
+
+type DragOverlaySnapshot = {
+  node: HTMLElement;
+  width: number;
+  height: number;
+};
+
+function findGuestChipById(
+  guestId: string,
+  predicate?: (el: HTMLElement) => boolean
+): HTMLElement | null {
+  const chips = document.querySelectorAll<HTMLElement>("[data-guest-chip][data-guest-id]");
+  for (const chip of chips) {
+    if (chip.dataset.guestId !== guestId) continue;
+    if (!predicate || predicate(chip)) return chip;
+  }
+  return null;
+}
+
+function resolveDragOverlaySourceElement(intent: DragIntent): HTMLElement | null {
+  if (intent.kind === "guest") {
+    if (
+      intent.source === "seated" &&
+      typeof intent.tableNumber === "number" &&
+      typeof intent.seatIndex === "number"
+    ) {
+      const seatId = `seat-${intent.tableNumber}-${intent.seatIndex}`;
+      return findGuestChipById(
+        intent.guestId,
+        (chip) => chip.closest<HTMLElement>("[data-seat-slot]")?.dataset.seatId === seatId
+      );
+    }
+
+    return findGuestChipById(intent.guestId, (chip) => !!chip.closest("[data-sidebar]"));
+  }
+
+  if (intent.kind === "household") {
+    const cards = document.querySelectorAll<HTMLElement>("[data-household-card][data-party-id]");
+    for (const card of cards) {
+      if (card.dataset.partyId === intent.partyId) return card;
+    }
+    return null;
+  }
+
+  if (intent.kind === "group") {
+    const cards = document.querySelectorAll<HTMLElement>("[data-group-card][data-group-name]");
+    for (const card of cards) {
+      if (card.dataset.groupName === intent.groupName) return card;
+    }
+    return null;
+  }
+
+  if (intent.kind === "table") {
+    const roots = document.querySelectorAll<HTMLElement>(
+      "[data-table-drag-root][data-table-number]"
+    );
+    for (const root of roots) {
+      if (root.dataset.tableNumber !== String(intent.tableNumber)) continue;
+      const card = root.querySelector<HTMLElement>("[data-table-card]");
+      if (card) return card;
+    }
+  }
+
+  return null;
+}
+
+function sanitizeOverlayClone(node: HTMLElement): void {
+  node.classList.remove("opacity-0");
+  node.style.opacity = "1";
+  node.style.pointerEvents = "none";
+
+  const hiddenNodes = node.querySelectorAll<HTMLElement>(".opacity-0");
+  hiddenNodes.forEach((hiddenNode) => hiddenNode.classList.remove("opacity-0"));
+}
+
+function captureDragOverlaySnapshot(intent: DragIntent): DragOverlaySnapshot | null {
+  const sourceNode = resolveDragOverlaySourceElement(intent);
+  if (!sourceNode) return null;
+
+  const rect = sourceNode.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return null;
+
+  const clone = sourceNode.cloneNode(true);
+  if (!(clone instanceof HTMLElement)) return null;
+  sanitizeOverlayClone(clone);
+
+  return {
+    node: clone,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+function DragOverlayClone({ snapshot }: { snapshot: DragOverlaySnapshot }) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const mountNode = mountRef.current;
+    if (!mountNode) return;
+
+    mountNode.replaceChildren(snapshot.node.cloneNode(true));
+    const child = mountNode.firstElementChild;
+    if (child instanceof HTMLElement) {
+      sanitizeOverlayClone(child);
+      child.style.width = `${snapshot.width}px`;
+      child.style.height = `${snapshot.height}px`;
+    }
+
+    return () => {
+      mountNode.replaceChildren();
+    };
+  }, [snapshot]);
+
+  return <div ref={mountRef} className="pointer-events-none" />;
+}
+
 // ─── SeatingApp ───────────────────────────────────────────────────────────────
 
 function SeatingApp({
@@ -216,8 +349,11 @@ function SeatingApp({
   const [autoSeatPreview, setAutoSeatPreview] = useState<{
     tables: import("./types").TableState[];
   } | null>(null);
+  const [dragOverlaySnapshot, setDragOverlaySnapshot] = useState<DragOverlaySnapshot | null>(null);
   /** Tracks the latest pointer position for seat-level probe during drag-end. */
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
+  const previewTargetKeyRef = useRef<string | null>(null);
+  const previewLastComputedAtRef = useRef(0);
 
   // Derived drag state passed down to child components.
   const activeDragKind: DragKind | null = activeDragIntent?.kind ?? null;
@@ -226,10 +362,46 @@ function SeatingApp({
 
   // ── Other state ─────────────────────────────────────────────────────────────
   const [showWarnings, setShowWarnings] = useState(false);
+  const [autoAssignWarning, setAutoAssignWarning] = useState<string | null>(null);
+  const [headerOffset, setHeaderOffset] = useState(0);
+  const autoAssignWarningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const headerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!autoAssignWarning) return;
+    if (autoAssignWarningTimerRef.current) clearTimeout(autoAssignWarningTimerRef.current);
+    autoAssignWarningTimerRef.current = setTimeout(() => setAutoAssignWarning(null), 6000);
+    return () => {
+      if (autoAssignWarningTimerRef.current) clearTimeout(autoAssignWarningTimerRef.current);
+    };
+  }, [autoAssignWarning]);
+
+  useEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+
+    const updateHeaderOffset = () => {
+      setHeaderOffset(header.getBoundingClientRect().height + 8);
+    };
+
+    updateHeaderOffset();
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateHeaderOffset();
+    });
+
+    resizeObserver.observe(header);
+    window.addEventListener("resize", updateHeaderOffset);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", updateHeaderOffset);
+    };
+  }, []);
+
   const [mobilePanel, setMobilePanel] = useState<"sidebar" | "tables">("sidebar");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const fileDragDepthRef = useRef(0);
-  const [isFileDragOver, setIsFileDragOver] = useState(false);
 
   const guestProfiles = useMemo(() => buildGuestProfiles(guests, parties), [guests, parties]);
 
@@ -321,7 +493,7 @@ function SeatingApp({
     function handleDocumentClick(event: MouseEvent) {
       const target = event.target;
       if (!(target instanceof Element)) return;
-      if (!target.closest(".guest-chip, .sidebar-selected-guest")) {
+      if (!target.closest("[data-guest-chip]")) {
         clearSelectedGuest();
       }
     }
@@ -339,39 +511,78 @@ function SeatingApp({
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const intent = parseDragIntent(event.active.data.current);
     if (!intent) return;
+    previewTargetKeyRef.current = null;
+    previewLastComputedAtRef.current = 0;
+    setDragOverlaySnapshot(captureDragOverlaySnapshot(intent));
     setActiveDragIntent(intent);
   }, []);
 
   const handleDragCancel = useCallback(() => {
     setActiveDragIntent(null);
     setAutoSeatPreview(null);
+    setDragOverlaySnapshot(null);
     pointerRef.current = null;
+    previewTargetKeyRef.current = null;
+    previewLastComputedAtRef.current = 0;
   }, []);
 
   const handleDragOver = useCallback(
     ({ active, over }: DragOverEvent) => {
+      const clearPreview = () => {
+        previewTargetKeyRef.current = null;
+        setAutoSeatPreview((prev) => (prev === null ? prev : null));
+      };
+
       if (!over) {
-        setAutoSeatPreview(null);
+        clearPreview();
         return;
       }
       const intent = parseDragIntent(active.data.current);
       if (!intent) {
-        setAutoSeatPreview(null);
+        clearPreview();
         return;
       }
+
+      // Guest seat drops need stable local feedback; table-level preview introduces
+      // seat-vs-table flicker as the pointer crosses slot boundaries.
+      if (intent.kind === "guest") {
+        clearPreview();
+        return;
+      }
+
       // Only preview table-level and autoseat drops — seat drops are single-slot.
       const target = resolveDropTarget(over, null);
       if (!target || target.type === "seat" || target.type === "unassigned") {
-        setAutoSeatPreview(null);
+        clearPreview();
         return;
       }
+
+      const targetKey =
+        target.type === "table"
+          ? `${intent.kind}:table:${target.tableNumber}`
+          : `${intent.kind}:auto-seat`;
+      const now = performance.now();
+      const elapsed = now - previewLastComputedAtRef.current;
+      const isSameTarget = previewTargetKeyRef.current === targetKey;
+
+      // While hovering the same drop target, recompute preview at most every 60ms.
+      if (isSameTarget && elapsed < 60) {
+        return;
+      }
+
       const action = routeDrop(intent, target, { state, guestProfiles, parties });
       if (!action) {
-        setAutoSeatPreview(null);
+        clearPreview();
         return;
       }
+
+      previewTargetKeyRef.current = targetKey;
+      previewLastComputedAtRef.current = now;
       const previewState = seatingReducer(state, action);
-      setAutoSeatPreview({ tables: previewState.tables });
+      setAutoSeatPreview((prev) => {
+        if (prev && arePreviewTablesEqual(previewState.tables, prev.tables)) return prev;
+        return { tables: previewState.tables };
+      });
     },
     [guestProfiles, parties, state]
   );
@@ -380,8 +591,11 @@ function SeatingApp({
     ({ active, over }: DragEndEvent) => {
       setActiveDragIntent(null);
       setAutoSeatPreview(null);
+      setDragOverlaySnapshot(null);
       const ptr = pointerRef.current;
       pointerRef.current = null;
+      previewTargetKeyRef.current = null;
+      previewLastComputedAtRef.current = 0;
 
       const intent = parseDragIntent(active.data.current);
       if (!intent) return;
@@ -390,7 +604,31 @@ function SeatingApp({
       if (!target) return;
 
       const action = routeDrop(intent, target, { state, guestProfiles, parties });
-      if (action) dispatch(action);
+      if (action) {
+        if (action.type === "AUTO_ASSIGN_GUESTS" && action.guestIds.length > 0) {
+          const nextState = seatingReducer(state, action);
+          const nextUnassigned = new Set(nextState.unassigned);
+          const failedIds = action.guestIds.filter((id) => nextUnassigned.has(id));
+          if (failedIds.length > 0) {
+            const MAX_NAMES = 3;
+            const names = failedIds.slice(0, MAX_NAMES).map((id) => guests.get(id)?.fullName ?? id);
+            const overflow = failedIds.length - MAX_NAMES;
+            const nameStr =
+              overflow > 0 ? `${names.join(", ")} and ${overflow} more` : names.join(", ");
+            // For manual drag drops with allowPartialPlacementBypass, only warn about seat capacity limits.
+            // For other auto-assign actions, mention the additional constraints.
+            const constraintHint = action.allowPartialPlacementBypass
+              ? "Try a different table or row."
+              : "Try a different table, or check group row and side constraints.";
+            setAutoAssignWarning(`${nameStr} couldn't be seated. ${constraintHint}`);
+          } else {
+            setAutoAssignWarning(null);
+          }
+        } else {
+          setAutoAssignWarning(null);
+        }
+        dispatch(action);
+      }
     },
     [dispatch, guestProfiles, parties, state]
   );
@@ -451,7 +689,6 @@ function SeatingApp({
     if (!Array.from(event.dataTransfer.types).includes("Files")) return;
     event.preventDefault();
     fileDragDepthRef.current += 1;
-    setIsFileDragOver(true);
   }
 
   function handleFileDragOver(event: ReactDragEvent<HTMLDivElement>) {
@@ -464,14 +701,12 @@ function SeatingApp({
     if (!Array.from(event.dataTransfer.types).includes("Files")) return;
     event.preventDefault();
     fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
-    if (fileDragDepthRef.current === 0) setIsFileDragOver(false);
   }
 
   async function handleFileDrop(event: ReactDragEvent<HTMLDivElement>) {
     if (!Array.from(event.dataTransfer.types).includes("Files")) return;
     event.preventDefault();
     fileDragDepthRef.current = 0;
-    setIsFileDragOver(false);
 
     const file = getFirstJsonFile(event.dataTransfer.files);
     if (!file) return;
@@ -499,55 +734,9 @@ function SeatingApp({
   const unassignedCount = state.unassigned.length;
 
   // ── Overlay content ───────────────────────────────────────────────────────
-  const overlayContent = useMemo(() => {
-    if (!activeDragIntent) return null;
-
-    if (activeDragIntent.kind === "guest") {
-      const guest = guests.get(activeDragIntent.guestId);
-      if (!guest) return null;
-      return (
-        <span className="guest-chip guest-chip--sidebar drag-overlay-guest-chip">
-          <span className="guest-name">{guest.fullName}</span>
-        </span>
-      );
-    }
-
-    if (activeDragIntent.kind === "household") {
-      const party = parties.get(activeDragIntent.partyId);
-      if (!party) return null;
-      const memberCount = party.guestIds.length;
-      return (
-        <div className="drag-overlay-party">
-          <div className="drag-overlay-party-name">{party.household}</div>
-          <div className="drag-overlay-party-count">{memberCount} guests</div>
-        </div>
-      );
-    }
-
-    if (activeDragIntent.kind === "group") {
-      const memberCount = Array.from(guests.values()).filter(
-        (g) => g.group === activeDragIntent.groupName
-      ).length;
-      return (
-        <div className="drag-overlay-group">
-          <div className="drag-overlay-group-name">{activeDragIntent.groupName}</div>
-          <div className="drag-overlay-group-count">{memberCount} guests</div>
-        </div>
-      );
-    }
-
-    if (activeDragIntent.kind === "table") {
-      const table = state.tables.find((t) => t.tableNumber === activeDragIntent.tableNumber);
-      const occupiedCount = table ? table.guestIds.filter(Boolean).length : 0;
-      return (
-        <div className="drag-overlay-table">
-          {activeDragIntent.name} &mdash; {occupiedCount} guests
-        </div>
-      );
-    }
-
-    return null;
-  }, [activeDragIntent, guests, parties, state.tables]);
+  const overlayContent = dragOverlaySnapshot ? (
+    <DragOverlayClone snapshot={dragOverlaySnapshot} />
+  ) : null;
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
@@ -559,31 +748,36 @@ function SeatingApp({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}>
       <div
-        className={[
-          "app",
-          activeDragKind ? "app--dragging" : null,
-          activeDragKind === "guest" ? "app--guest-dragging" : null,
-          isFileDragOver ? "app--file-drop-target" : null,
-        ]
-          .filter(Boolean)
-          .join(" ")}
+        className={cn(
+          "relative flex h-screen flex-col overflow-hidden",
+          activeDragKind === "guest" && "**:cursor-grabbing!"
+        )}
+        data-drag-kind={activeDragKind ?? undefined}
         onDragEnter={handleFileDragEnter}
         onDragOver={handleFileDragOver}
         onDragLeave={handleFileDragLeave}
         onDrop={handleFileDrop}>
-        <header className="app-header">
-          <h1>Seating Assignments</h1>
-          <div className="app-actions">
+        <header
+          ref={headerRef}
+          className="z-10 flex shrink-0 flex-wrap items-center gap-4 border-b border-border bg-card px-4 py-2.5">
+          <h1 className="whitespace-nowrap text-lg font-semibold text-foreground">
+            Seating Assignments
+          </h1>
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             <Button type="button" variant="outline" size="sm" onClick={onThemeToggle}>
-              {theme === "dark" ? <Sun size={14} aria-hidden="true" /> : <Moon size={14} aria-hidden="true" />}
-              <span className="btn-label">{theme === "dark" ? "Light" : "Dark"}</span>
+              {theme === "dark" ? (
+                <Sun size={14} aria-hidden="true" />
+              ) : (
+                <Moon size={14} aria-hidden="true" />
+              )}
+              <span className="max-sm:hidden">{theme === "dark" ? "Light" : "Dark"}</span>
             </Button>
             {warnings.length > 0 && (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="border-amber-500/30 bg-amber-500/10 text-amber-700 hover:border-amber-500/45 hover:bg-amber-500/15 dark:text-amber-300"
+                className="border-warning/30 bg-warning/10 text-warning-foreground hover:border-warning/45 hover:bg-warning/15"
                 onClick={() => setShowWarnings((v) => !v)}>
                 <AlertTriangle size={14} aria-hidden="true" />
                 {warnings.length} data {warnings.length === 1 ? "issue" : "issues"}
@@ -591,7 +785,7 @@ function SeatingApp({
             )}
             <Button type="button" variant="outline" size="sm" onClick={handleReset}>
               <RotateCcw size={14} aria-hidden="true" />
-              <span className="btn-label">Reset</span>
+              <span className="max-sm:hidden">Reset</span>
             </Button>
             <Button
               type="button"
@@ -599,15 +793,15 @@ function SeatingApp({
               size="sm"
               onClick={() => fileInputRef.current?.click()}>
               <Upload size={14} aria-hidden="true" />
-              <span className="btn-label">Import</span>
+              <span className="max-sm:hidden">Import</span>
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={handleExport}>
               <Download size={14} aria-hidden="true" />
-              <span className="btn-label">Export</span>
+              <span className="max-sm:hidden">Export</span>
             </Button>
             <input
               ref={fileInputRef}
-              className="hidden-file-input"
+              className="hidden"
               type="file"
               accept="application/json,.json"
               aria-label="Import seating JSON file"
@@ -615,6 +809,32 @@ function SeatingApp({
             />
           </div>
         </header>
+
+        {autoAssignWarning && (
+          <div
+            className="pointer-events-none fixed inset-x-0 z-30 flex justify-center px-4"
+            style={{ top: headerOffset }}>
+            <div
+              role="alert"
+              className="auto-assign-warning pointer-events-auto grid w-full max-w-3xl grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 rounded-xl border border-warning/35 bg-[color-mix(in_oklab,var(--card)_84%,var(--warning)_16%)] px-4 py-3 text-warning-foreground shadow-lg backdrop-blur supports-backdrop-filter:bg-[color-mix(in_oklab,var(--card)_72%,var(--warning)_28%)]">
+              <AlertTriangle
+                className="auto-assign-warning__icon h-4 w-4 shrink-0 text-warning"
+                aria-hidden="true"
+              />
+              <div className="min-w-0">
+                <p className="auto-assign-warning__title">Auto-seat blocked</p>
+                <p className="auto-assign-warning__message">{autoAssignWarning}</p>
+              </div>
+              <button
+                type="button"
+                aria-label="Dismiss"
+                className="auto-assign-warning__dismiss"
+                onClick={() => setAutoAssignWarning(null)}>
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {showWarnings && (
           <div className="px-4 pb-2">
@@ -632,25 +852,35 @@ function SeatingApp({
           </div>
         )}
 
-        <div className={`app-body app-body--${mobilePanel}`}>
-          <Sidebar />
-          <TableBoard
-            activeDragKind={activeDragKind}
-            activeDragGuestId={activeDragGuestId}
-            autoSeatPreview={autoSeatPreview}
-          />
+        <div className="flex flex-1 overflow-hidden">
+          <div className={cn("contents", mobilePanel === "tables" && "max-sm:hidden")}>
+            <Sidebar />
+          </div>
+          <div className={cn("contents", mobilePanel === "sidebar" && "max-sm:hidden")}>
+            <TableBoard
+              activeDragKind={activeDragKind}
+              activeDragGuestId={activeDragGuestId}
+              autoSeatPreview={autoSeatPreview}
+            />
+          </div>
         </div>
 
-        <div className="mobile-tabs">
+        <div className="fixed bottom-0 left-0 right-0 z-100 hidden h-13 border-t border-border bg-card max-sm:flex">
           <button
             type="button"
-            className={`mobile-tab${mobilePanel === "sidebar" ? " mobile-tab--active" : ""}`}
+            className={cn(
+              "flex flex-1 cursor-pointer items-center justify-center border-none bg-transparent px-0 text-sm font-medium text-muted-foreground transition-[color,background] duration-120 active:bg-accent",
+              mobilePanel === "sidebar" && "border-t-2 border-primary text-foreground"
+            )}
             onClick={() => setMobilePanel("sidebar")}>
             Unassigned{unassignedCount > 0 ? ` (${unassignedCount})` : ""}
           </button>
           <button
             type="button"
-            className={`mobile-tab${mobilePanel === "tables" ? " mobile-tab--active" : ""}`}
+            className={cn(
+              "flex flex-1 cursor-pointer items-center justify-center border-none bg-transparent px-0 text-sm font-medium text-muted-foreground transition-[color,background] duration-120 active:bg-accent",
+              mobilePanel === "tables" && "border-t-2 border-primary text-foreground"
+            )}
             onClick={() => setMobilePanel("tables")}>
             Tables
           </button>

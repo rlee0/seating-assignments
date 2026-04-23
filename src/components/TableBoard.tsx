@@ -3,6 +3,7 @@ import type { Transform } from "@dnd-kit/utilities";
 
 import TableCard from "./TableCard";
 import type { TableState } from "../types";
+import { cn } from "../lib/utils";
 import { useDroppable } from "@dnd-kit/core";
 import { useMemo } from "react";
 import { useSeating } from "../store/SeatingContext";
@@ -63,21 +64,19 @@ export default function TableBoard({ activeDragKind, activeDragGuestId, autoSeat
 
   return (
     <SortableContext items={tableIds} strategy={swapSortingStrategy}>
-      <main className="table-board">
+      <main className="flex min-h-0 flex-1 flex-col items-stretch gap-3 overflow-y-auto p-3">
         <section
           ref={setAutoSeatRef}
-          className={[
-            "auto-seat-dropzone",
-            activeDragKind !== null ? "is-enabled" : null,
-            isAutoSeatOver ? "is-over" : null,
-          ]
-            .filter(Boolean)
-            .join(" ")}>
-          <h3 className="auto-seat-title">{autoSeatTitle}</h3>
-          <p className="auto-seat-copy">{autoSeatCopy}</p>
+          className={cn(
+            "flex min-h-16 flex-none flex-col items-center justify-center rounded-[10px] border border-dashed border-border bg-[linear-gradient(180deg,var(--card)_0%,var(--auto-seat-bg-end)_100%)] px-4 py-3.5 text-center transition-[border-color,background,color] duration-150",
+            activeDragKind !== null && "border-(--auto-seat-active-border)",
+            isAutoSeatOver && "border-(--table-drop-border) bg-(--table-drop-bg)"
+          )}>
+          <h3 className="m-0 text-xs font-semibold text-foreground">{autoSeatTitle}</h3>
+          <p className="mt-1 mb-0 text-xs text-muted-foreground">{autoSeatCopy}</p>
         </section>
 
-        <div className="table-grid">
+        <div className="grid grid-cols-5 content-start gap-2.5">
           {state.tables.map((table) => {
             const previewTable = previewTablesByNumber?.get(table.tableNumber) ?? null;
             const displayGuestIds = previewTable ? previewTable.guestIds : table.guestIds;

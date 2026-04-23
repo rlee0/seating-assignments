@@ -10,6 +10,7 @@ import { CSS } from "@dnd-kit/utilities";
 import GuestChip from "./GuestChip";
 import { TABLE_CAPACITY } from "../types";
 import type { TableState } from "../types";
+import { cn } from "../lib/utils";
 import { useDroppable } from "@dnd-kit/core";
 import { useSeating } from "../store/SeatingContext";
 import { useSortable } from "@dnd-kit/sortable";
@@ -73,46 +74,58 @@ function SeatSlot({
     disabled: isSeatDropDisabled,
   });
 
+  const isSeatOver = !isDisabled && activeDragKind === "guest" && droppable.isOver;
+
+  const previewChipClass =
+    previewSeatKind === "added"
+      ? "border-(--diff-added-border) bg-(--diff-added-chip-bg) [--guest-chip-bg:var(--diff-added-chip-bg)]"
+      : previewSeatKind === "changed"
+        ? "border-(--diff-changed-border) bg-(--diff-changed-chip-bg) [--guest-chip-bg:var(--diff-changed-chip-bg)]"
+        : previewSeatKind === "deleted"
+          ? "border-(--diff-deleted-border) bg-(--diff-deleted-chip-bg) [--guest-chip-bg:var(--diff-deleted-chip-bg)]"
+          : null;
+
   const slotEl = (
     <div
       ref={droppable.setNodeRef}
       data-seat-id={`seat-${tableNumber}-${seatIndex}`}
-      className={[
-        "seat-slot",
-        isDisabled ? "seat-disabled" : isVisuallyEmpty ? "seat-empty" : "seat-occupied",
-        !isDisabled && activeDragKind === "guest" && droppable.isOver ? "is-over" : null,
-        previewSeatKind ? `seat-slot--preview-${previewSeatKind}` : null,
-      ]
-        .filter(Boolean)
-        .join(" ")}>
+      data-seat-slot
+      data-disabled={isDisabled || undefined}
+      className={cn(
+        "relative flex h-4.75 min-h-4.75 min-w-0 items-center overflow-hidden rounded-sm transition-[background-color,border-color,box-shadow] duration-100 box-border",
+        isDisabled
+          ? "border bg-[repeating-linear-gradient(135deg,var(--table-seat-disabled-bg-a),var(--table-seat-disabled-bg-a)_3px,var(--table-seat-disabled-bg-b)_3px,var(--table-seat-disabled-bg-b)_8px)] border-(--table-seat-disabled-border)"
+          : isVisuallyEmpty
+            ? "border border-dashed border-(--table-seat-empty-border) bg-(--table-seat-empty-bg)"
+            : "min-w-0 overflow-visible bg-transparent",
+        isSeatOver &&
+          (isVisuallyEmpty
+            ? "border border-solid border-(--table-drop-border) bg-(--table-drop-bg)"
+            : "bg-(--table-drop-bg) outline-1 -outline-offset-1 outline-(--table-drop-border)"),
+        previewSeatKind === "added" && "bg-(--diff-added-slot-bg)",
+        previewSeatKind === "changed" && "bg-(--diff-changed-slot-bg)",
+        previewSeatKind === "deleted" &&
+          "bg-(--diff-deleted-slot-bg) shadow-[inset_0_0_0_1px_var(--diff-deleted-border)]"
+      )}>
       {!isDisabled && guestId ? (
-        // In preview mode render a plain non-draggable chip to prevent registering a
-        // second useDraggable with the same ID as the active drag, which kills the session.
-        isPreviewMode ? (
-          <div
-            className={[
-              "guest-chip",
-              "guest-chip--table",
-              previewSeatKind ? `guest-chip--preview-${previewSeatKind}` : null,
-            ]
-              .filter(Boolean)
-              .join(" ")}>
-            <span className="guest-name">{guestFullName ?? ""}</span>
-          </div>
-        ) : (
-          <GuestChip
-            guestId={guestId}
-            context="table"
-            tableNumber={tableNumber}
-            seatIndex={seatIndex}
-            className={[
-              isOriginSeat ? "guest-chip--origin-hidden" : null,
-              previewSeatKind ? `guest-chip--preview-${previewSeatKind}` : null,
-            ]
-              .filter(Boolean)
-              .join(" ")}
-          />
-        )
+        <GuestChip
+          guestId={guestId}
+          context="table"
+          tableNumber={tableNumber}
+          seatIndex={seatIndex}
+          suppressStateStyles={isPreviewMode}
+          suppressInteraction={isPreviewMode}
+          draggableDisabled={
+            isPreviewMode && !(activeDragKind === "guest" && guestId === activeDragGuestId)
+          }
+          fallbackName={guestFullName ?? undefined}
+          className={[
+            isOriginSeat ? "absolute inset-0 opacity-0 pointer-events-none" : null,
+            previewChipClass,
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        />
       ) : null}
     </div>
   );
@@ -159,6 +172,7 @@ export default function TableCard({
 }: Props) {
   const { dispatch, state, guests } = useSeating();
   const lockedSet = new Set(state.lockedGuestIds);
+  const isGuestDrag = activeDragKind === "guest";
   const {
     attributes,
     listeners,
@@ -171,6 +185,22 @@ export default function TableCard({
     data: { kind: "table", tableNumber: table.tableNumber, name: table.name, origin: "table" },
     animateLayoutChanges: ({ isSorting }) => isSorting,
   });
+
+  const containerListeners = {
+    ...listeners,
+    onPointerDown: (event: React.PointerEvent) => {
+      if ((event.target as Element).closest("[data-guest-chip]")) return;
+      listeners?.onPointerDown?.(event);
+    },
+    onMouseDown: (event: React.MouseEvent) => {
+      if ((event.target as Element).closest("[data-guest-chip]")) return;
+      listeners?.onMouseDown?.(event);
+    },
+    onTouchStart: (event: React.TouchEvent) => {
+      if ((event.target as Element).closest("[data-guest-chip]")) return;
+      listeners?.onTouchStart?.(event);
+    },
+  };
 
   const { setNodeRef: setDroppableNodeRef, isOver } = useDroppable({
     id: `table-${table.tableNumber}`,
@@ -193,15 +223,22 @@ export default function TableCard({
   const topRow = seated.slice(0, 4);
   const bottomRow = seated.slice(4, 8);
 
-  const cardClass = [
-    "table-card",
-    isOver && activeDragKind !== "table" ? "is-over" : null,
-    isFull ? "is-full" : null,
-    isDragging ? "is-dragging" : null,
-    hasTablePreviewChanges ? "table-card--preview" : null,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const cardClass = cn(
+    "flex min-h-0 cursor-grab flex-col gap-1.5 rounded-lg border border-border bg-card p-2.5 transition-[border-color,background,box-shadow] duration-150 active:cursor-grabbing",
+    "hover:border-(--card-hover-border) focus-within:border-(--card-hover-border)",
+    isOver &&
+      activeDragKind !== "table" &&
+      !isGuestDrag &&
+      "border-(--table-drop-border) bg-(--table-drop-bg)",
+    isFull &&
+      isOver &&
+      activeDragKind !== "table" &&
+      !isGuestDrag &&
+      "border-dashed border-muted-foreground bg-(--card-hover-bg)",
+    isDragging && !hasTablePreviewChanges && "cursor-grabbing opacity-0",
+    isDragging && hasTablePreviewChanges && "cursor-grabbing opacity-60",
+    hasTablePreviewChanges && "border border-(--table-preview-border) bg-(--table-preview-bg)"
+  );
 
   const sortableStyle = {
     transform: CSS.Transform.toString(transform),
@@ -209,12 +246,22 @@ export default function TableCard({
   };
 
   return (
-    <div ref={setSortableNodeRef} style={sortableStyle} className="table-card-shell">
+    <div
+      ref={setSortableNodeRef}
+      style={sortableStyle}
+      className="min-w-0"
+      data-table-drag-root
+      data-table-number={table.tableNumber}>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div ref={setDroppableNodeRef} className={cardClass}>
+          <div
+            ref={setDroppableNodeRef}
+            className={cardClass}
+            data-table-card
+            {...containerListeners}
+            {...attributes}>
             {/* Top 4 seats */}
-            <div className="table-seats table-seats-top">
+            <div className="grid min-w-0 grid-cols-4 gap-1">
               {topRow.map((guestId, i) => (
                 <SeatSlot
                   key={i}
@@ -253,17 +300,25 @@ export default function TableCard({
             </div>
 
             {/* Table label */}
-            <div className="table-label">
-              <div className="table-label-main" {...listeners} {...attributes}>
-                <span className="table-name">{table.name}</span>
-                <span className={`table-occupancy${isFull ? " full" : ""}`}>
+            <div className="relative flex min-h-8.5 items-center justify-center px-7 py-1">
+              <div className="flex w-full flex-1 select-none flex-col items-center justify-center gap-0.5 text-center">
+                <span
+                  data-table-name
+                  className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-muted-foreground">
+                  {table.name}
+                </span>
+                <span
+                  className={cn(
+                    "shrink-0 whitespace-nowrap text-2xs text-muted-foreground",
+                    isFull && "font-semibold text-foreground"
+                  )}>
                   {occupancy}/{effectiveCapacity}
                 </span>
               </div>
             </div>
 
             {/* Bottom 4 seats */}
-            <div className="table-seats table-seats-bottom">
+            <div className="grid min-w-0 grid-cols-4 gap-1">
               {bottomRow.map((guestId, i) => {
                 const seatIndex = i + 4;
                 return (

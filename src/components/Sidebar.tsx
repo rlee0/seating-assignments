@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import GroupCard from "./GroupCard";
 import HouseholdCard from "./HouseholdCard";
 import { Input } from "@/components/ui/input";
+import { cn } from "../lib/utils";
 import { chipToggleVariants } from "@/components/ui/chip";
 import { useDroppable } from "@dnd-kit/core";
 import { useSearch } from "../store/SearchContext";
@@ -43,7 +44,7 @@ function comparePartiesForSidebar(
 }
 
 export default function Sidebar() {
-  const { state, parties, guests, selectedGuestId, dispatch } = useSeating();
+  const { state, parties, guests } = useSeating();
   const {
     searchQuery,
     setSearchQuery,
@@ -165,17 +166,18 @@ export default function Sidebar() {
   }, [sortedPartiesWithUnassigned, unassignedSet]);
 
   const sortedGroups = useMemo(() => [...groupedParties.keys()], [groupedParties]);
-  const selectedGuest = selectedGuestId ? (guests.get(selectedGuestId) ?? null) : null;
-  const selectedGuestParty = selectedGuest ? (parties.get(selectedGuest.partyId) ?? null) : null;
-  const isSelectedGuestAnchored =
-    selectedGuestId != null && (state.lockedGuestIds ?? []).includes(selectedGuestId);
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar-search-row">
-        <div className="sidebar-search-controls">
-          <div className="sidebar-search-wrap">
-            <Search className="sidebar-search-icon" aria-hidden="true" />
+    <aside
+      data-sidebar
+      className="flex w-65 shrink-0 flex-col overflow-hidden overflow-x-clip border-r border-sidebar-border bg-sidebar overscroll-x-none *:min-w-0">
+      <div className="relative shrink-0 border-b border-sidebar-border bg-sidebar p-3">
+        <div className="flex items-center gap-2">
+          <div className="relative flex min-w-0 flex-1 items-center">
+            <Search
+              className="pointer-events-none absolute left-2.25 h-3.5 w-3.5 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
             <Input
               type="search"
               className="h-8 pl-8 text-xs"
@@ -188,11 +190,17 @@ export default function Sidebar() {
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="outline" size="sm" className="sidebar-filter-trigger">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 px-2.5 [&_svg]:h-3.5 [&_svg]:w-3.5">
                 <Filter aria-hidden="true" />
                 <span>Filter</span>
                 {activeHostFilterCount > 0 ? (
-                  <Badge className="h-5 min-w-5 rounded-full px-1.5 text-[11px] leading-5" variant="default">
+                  <Badge
+                    className="h-5 min-w-5 rounded-full px-1.5 text-2xs leading-5"
+                    variant="default">
                     {activeHostFilterCount}
                   </Badge>
                 ) : null}
@@ -200,11 +208,13 @@ export default function Sidebar() {
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
-              className="sidebar-filter-menu"
+              className="w-72"
               aria-label="Filter unassigned guests by host">
-              <DropdownMenuLabel className="sidebar-filter-menu-title">Hosts</DropdownMenuLabel>
+              <DropdownMenuLabel className="text-xs font-bold uppercase tracking-wider text-foreground">
+                Hosts
+              </DropdownMenuLabel>
               {availableHosts.length === 0 ? (
-                <DropdownMenuItem disabled className="sidebar-filter-empty">
+                <DropdownMenuItem disabled className="m-0 text-xs text-muted-foreground">
                   No hosts found
                 </DropdownMenuItem>
               ) : (
@@ -212,9 +222,9 @@ export default function Sidebar() {
                   <DropdownMenuCheckboxItem
                     key={host}
                     checked={selectedHosts.has(host)}
-                    className="sidebar-filter-item"
+                    className="text-xs"
                     onCheckedChange={() => toggleHostFilter(host)}>
-                    <span className="sidebar-filter-host-name">{host}</span>
+                    <span className="text-xs font-semibold text-foreground">{host}</span>
                   </DropdownMenuCheckboxItem>
                 ))
               )}
@@ -222,7 +232,7 @@ export default function Sidebar() {
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    className="sidebar-filter-clear"
+                    className="text-xs font-semibold text-muted-foreground hover:text-foreground"
                     onSelect={() => clearHostFilters()}>
                     Clear
                   </DropdownMenuItem>
@@ -231,11 +241,11 @@ export default function Sidebar() {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <div className="sidebar-highlight-controls" aria-label="Highlight views">
+        <div className="mt-2 flex gap-1.5" aria-label="Highlight views">
           <button
             type="button"
             className={[
-              "sidebar-highlight-toggle sidebar-highlight-toggle--group",
+              "text-2xs",
               chipToggleVariants({ state: isGroupHighlightOn ? "pressed" : "default", size: "sm" }),
             ]
               .filter(Boolean)
@@ -248,7 +258,7 @@ export default function Sidebar() {
           <button
             type="button"
             className={[
-              "sidebar-highlight-toggle sidebar-highlight-toggle--household",
+              "text-2xs",
               chipToggleVariants({
                 state: isHouseholdHighlightOn ? "pressed" : "default",
                 size: "sm",
@@ -264,7 +274,7 @@ export default function Sidebar() {
           <button
             type="button"
             className={[
-              "sidebar-highlight-toggle sidebar-highlight-toggle--host",
+              "text-2xs",
               chipToggleVariants({ state: isHostHighlightOn ? "pressed" : "default", size: "sm" }),
             ]
               .filter(Boolean)
@@ -276,24 +286,31 @@ export default function Sidebar() {
           </button>
         </div>
       </div>
-      <div className="sidebar-header">
+      <div className="flex shrink-0 items-center justify-between border-b border-sidebar-border px-3 py-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
         <span>Unassigned</span>
-        <Badge variant="secondary" className="h-auto rounded-full px-1.5 py-0 text-[11px]">
+        <Badge variant="secondary" className="h-auto rounded-full px-1.5 py-0 text-2xs">
           {state.unassigned.length}
         </Badge>
       </div>
       <div
         ref={setDropzoneRef}
-        className={["sidebar-dropzone", isOver ? "is-over" : null].filter(Boolean).join(" ")}>
+        className={cn(
+          "flex-1 overflow-y-auto overflow-x-clip p-3 overscroll-x-none [touch-action:pan-y]",
+          isOver && "bg-(--sidebar-drop-bg)"
+        )}>
         {state.unassigned.length === 0 ? (
-          <div className="sidebar-empty">All guests are seated ✓</div>
+          <div className="px-4 py-12 text-center text-sm text-muted-foreground">
+            All guests are seated ✓
+          </div>
         ) : partiesWithUnassigned.length === 0 ? (
-          <div className="sidebar-empty">{emptyStateMessage}</div>
+          <div className="px-4 py-12 text-center text-sm text-muted-foreground">
+            {emptyStateMessage}
+          </div>
         ) : (
           sortedGroups.map((groupName) => (
-            <div key={groupName} className="group-section">
+            <div key={groupName} className="grid gap-1 mb-4 last:mb-0">
               <GroupCard groupName={groupName} guestIds={groupedGuestIds.get(groupName) ?? []} />
-              <div className="group-party-list">
+              <div className="relative ml-0 grid gap-1.5 pl-5 pt-1 pb-1 before:absolute before:left-2 before:top-1 before:bottom-1 before:w-px before:bg-border">
                 {groupedParties.get(groupName)?.map((party) => (
                   <HouseholdCard key={party.id} party={party} />
                 ))}
@@ -302,52 +319,6 @@ export default function Sidebar() {
           ))
         )}
       </div>
-      {selectedGuest && (
-        <section
-          className="sidebar-selected-guest"
-          aria-live="polite"
-          aria-label="Selected guest details">
-          <p className="sidebar-selected-guest-name">{selectedGuest.fullName}</p>
-          <dl className="sidebar-selected-guest-meta">
-            <div>
-              <dt>Household</dt>
-              <dd>{selectedGuestParty?.household ?? "Unknown"}</dd>
-            </div>
-            <div>
-              <dt>Group</dt>
-              <dd>{selectedGuest.group || "No Group"}</dd>
-            </div>
-            <div>
-              <dt>Host</dt>
-              <dd>{selectedGuest.host}</dd>
-            </div>
-          </dl>
-          <div className="sidebar-selected-guest-actions">
-            <button
-              type="button"
-              className={[
-                "sidebar-selected-guest-anchor-toggle",
-                chipToggleVariants({
-                  state: isSelectedGuestAnchored ? "pressed" : "default",
-                  size: "sm",
-                }),
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              aria-pressed={isSelectedGuestAnchored}
-              aria-label="Anchor selected guest"
-              onClick={() => {
-                dispatch({
-                  type: "SET_GUEST_ANCHORED",
-                  guestId: selectedGuest.id,
-                  anchored: !isSelectedGuestAnchored,
-                });
-              }}>
-              Anchored
-            </button>
-          </div>
-        </section>
-      )}
     </aside>
   );
 }

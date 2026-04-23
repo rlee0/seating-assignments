@@ -1,6 +1,6 @@
-import type { Party, SeatingState, TableState } from "../types";
-import type { SeatingAction, GuestProfile } from "../store/reducer";
 import type { DragIntent, DropTarget } from "./types";
+import type { GuestProfile, SeatingAction } from "../store/reducer";
+import type { Party, SeatingState, TableState } from "../types";
 
 export interface RouterContext {
   state: SeatingState;
@@ -71,7 +71,7 @@ export function routeDrop(
     if (target.type === "autoseat") {
       const guestIds = getSeatedGuestIds(intent.tableNumber, state.tables);
       if (guestIds.length === 0) return null;
-      return { type: "AUTO_ASSIGN_GUESTS", guestIds, guestProfiles };
+      return { type: "AUTO_ASSIGN_GUESTS", guestIds, guestProfiles, allowReseatIncoming: true };
     }
 
     if (target.type === "table" || target.type === "seat") {
@@ -79,10 +79,9 @@ export function routeDrop(
       const overTableNumber = target.type === "table" ? target.tableNumber : target.tableNumber;
       if (overTableNumber === intent.tableNumber) return null;
       return {
-        type: "MOVE_TABLE",
+        type: "SWAP_TABLES",
         activeTableNumber: intent.tableNumber,
         overTableNumber,
-        guestProfiles,
       };
     }
 
@@ -126,6 +125,7 @@ export function routeDrop(
         guestProfiles,
         targetTableNumber: target.tableNumber,
         targetScope: "target-and-adjacent",
+        allowReseatIncoming: source === "seated",
       };
     }
 
@@ -156,6 +156,8 @@ export function routeDrop(
         guestProfiles,
         targetTableNumber: target.tableNumber,
         targetScope: "target-and-adjacent",
+        allowReseatIncoming: false,
+        allowPartialPlacementBypass: true,
       };
     }
 
@@ -185,6 +187,8 @@ export function routeDrop(
         guestProfiles,
         targetTableNumber: target.tableNumber,
         targetScope: "target-and-adjacent",
+        allowReseatIncoming: false,
+        allowPartialPlacementBypass: true,
       };
     }
 

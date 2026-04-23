@@ -27,6 +27,8 @@ export type SeatingAction =
       guestProfiles?: Record<string, GuestProfile>;
       targetTableNumber?: number;
       targetScope?: AutoAssignTargetScope;
+      allowReseatIncoming?: boolean;
+      allowPartialPlacementBypass?: boolean;
     }
   | { type: "REMOVE_GUESTS"; guestIds: string[] }
   | { type: "CLEAR_TABLE"; tableNumber: number }
@@ -386,21 +388,27 @@ function findBestRowRun(
   nextTables: TableState[],
   candidateTableIdxs: number[],
   guestCount: number,
-  candidateOrder: Map<number, number>
+  candidateOrder: Map<number, number>,
+  sideFilter?: "A" | "B" | null
 ): Array<{ tableIdx: number; seatIdx: number }> | null {
-  const runs = getRowContiguousSeatRuns(nextTables, candidateTableIdxs)
-    .filter((run) => run.length >= guestCount)
-    .sort((a, b) => {
-      const aPriority = Math.min(...a.map((seat) => candidateOrder.get(seat.tableIdx) ?? 999));
-      const bPriority = Math.min(...b.map((seat) => candidateOrder.get(seat.tableIdx) ?? 999));
-      if (aPriority !== bPriority) return aPriority - bPriority;
+  const allRuns = getRowContiguousSeatRuns(nextTables, candidateTableIdxs).filter(
+    (run) => run.length >= guestCount
+  );
+  const runs = (
+    sideFilter
+      ? allRuns.filter((run) => (sideFilter === "A" ? run[0].seatIdx <= 3 : run[0].seatIdx >= 4))
+      : allRuns
+  ).sort((a, b) => {
+    const aPriority = Math.min(...a.map((seat) => candidateOrder.get(seat.tableIdx) ?? 999));
+    const bPriority = Math.min(...b.map((seat) => candidateOrder.get(seat.tableIdx) ?? 999));
+    if (aPriority !== bPriority) return aPriority - bPriority;
 
-      const aSpan = a[a.length - 1].tableIdx - a[0].tableIdx;
-      const bSpan = b[b.length - 1].tableIdx - b[0].tableIdx;
-      if (aSpan !== bSpan) return aSpan - bSpan;
+    const aSpan = a[a.length - 1].tableIdx - a[0].tableIdx;
+    const bSpan = b[b.length - 1].tableIdx - b[0].tableIdx;
+    if (aSpan !== bSpan) return aSpan - bSpan;
 
-      return a[0].tableIdx - b[0].tableIdx;
-    });
+    return a[0].tableIdx - b[0].tableIdx;
+  });
 
   return runs[0]?.slice(0, guestCount) ?? null;
 }
@@ -416,23 +424,52 @@ function placeGuestsAtSeats(
   }
 }
 
+interface PlacementGroup {
+  groupId: string;
+  units: string[][];
+}
+
 function buildPlacementUnits(
   guestIds: string[],
   guestProfiles: Record<string, GuestProfile>
-): string[][] {
-  const households = new Map<string, string[]>();
-  const orderedHouseholdIds: string[] = [];
+): PlacementGroup[] {
+  // Group guests by their social group first, then by household within each group.
+  // Guests without a named group each get their own synthetic group so they are
+  // never subject to the group home-row constraint.
+  const groups = new Map<string, Map<string, string[]>>();
+  const orderedGroupIds: string[] = [];
 
   for (const guestId of guestIds) {
-    const householdId = guestProfiles[guestId]?.partyId ?? guestId;
-    if (!households.has(householdId)) {
-      households.set(householdId, []);
-      orderedHouseholdIds.push(householdId);
+    const profile = guestProfiles[guestId];
+    const partyId = profile?.partyId ?? guestId;
+    const groupId = profile?.group || `\0nogroup\0${partyId}`;
+    if (!groups.has(groupId)) {
+      groups.set(groupId, new Map());
+      orderedGroupIds.push(groupId);
     }
-    households.get(householdId)?.push(guestId);
+    const households = groups.get(groupId)!;
+    if (!households.has(partyId)) {
+      households.set(partyId, []);
+    }
+    households.get(partyId)!.push(guestId);
   }
 
-  return orderedHouseholdIds.map((householdId) => households.get(householdId) ?? []);
+  // Sort households within each group largest-first so the biggest household
+  // anchors the group's home row and side before smaller ones try to fit.
+  const placementGroups: PlacementGroup[] = orderedGroupIds.map((groupId) => ({
+    groupId,
+    units: Array.from(groups.get(groupId)!.values()).sort((a, b) => b.length - a.length),
+  }));
+
+  // Sort groups largest-first (by total guest count) so large groups claim rows
+  // before smaller groups fragment the available space.
+  placementGroups.sort((a, b) => {
+    const aTotal = a.units.reduce((sum, u) => sum + u.length, 0);
+    const bTotal = b.units.reduce((sum, u) => sum + u.length, 0);
+    return bTotal - aTotal;
+  });
+
+  return placementGroups;
 }
 
 function getCandidateTableIndexes(
@@ -636,19 +673,101 @@ function introducesNewHouseholdAdjacencyViolation(
 }
 
 /**
- * Returns true if the proposed table layout introduces a new situation where a
- * guest group is represented on a row surface but has only a single isolated
- * member there (surrounded by members of other groups).
- *
- * Currently implemented as a permissive stub — always returns false so that
- * group-row isolation is not enforced during swaps or manual assignments. A
- * full constraint implementation can be added here without changing callers.
+ * Returns the set of named group IDs whose members span more than one row.
+ * Groups are expected to stay within a single row; cross-row splits are blocked.
  */
+function getSplitGroups(
+  tables: TableState[],
+  guestProfiles: Record<string, GuestProfile>
+): Set<string> {
+  const groupRows = new Map<string, Set<number>>();
+  for (let tableIdx = 0; tableIdx < tables.length; tableIdx += 1) {
+    const rowIdx = Math.floor(tableIdx / TABLES_PER_ROW);
+    tables[tableIdx].guestIds.forEach((guestId) => {
+      if (!guestId) return;
+      const group = guestProfiles[guestId]?.group;
+      if (!group) return;
+      const rows = groupRows.get(group) ?? new Set<number>();
+      rows.add(rowIdx);
+      groupRows.set(group, rows);
+    });
+  }
+  const splitGroups = new Set<string>();
+  for (const [groupId, rows] of groupRows) {
+    if (rows.size > 1) splitGroups.add(groupId);
+  }
+  return splitGroups;
+}
+
 function introducesNewGroupRowIsolation(
-  _previousTables: TableState[],
-  _nextTables: TableState[],
-  _guestProfiles?: Record<string, GuestProfile>
+  previousTables: TableState[],
+  nextTables: TableState[],
+  guestProfiles?: Record<string, GuestProfile>
 ): boolean {
+  if (!guestProfiles) return false;
+  const previousSplits = getSplitGroups(previousTables, guestProfiles);
+  const nextSplits = getSplitGroups(nextTables, guestProfiles);
+  for (const groupId of nextSplits) {
+    if (!previousSplits.has(groupId)) return true;
+  }
+  return false;
+}
+
+/**
+ * Returns the set of named group IDs whose members span more than one table
+ * and are NOT all on the same side (Side A: slots 0–3, Side B: slots 4–7).
+ * Single-table groups are excluded because both sides are fine at one table.
+ *
+ * A violation requires that at least one table has the group on ONLY side A
+ * and another table has the group on ONLY side B (pure-side conflict).
+ * A table where the group occupies both sides (e.g. a large household filling
+ * the whole table) is treated as neutral and does not constitute a violation.
+ */
+function getNonSameSideGroups(
+  tables: TableState[],
+  guestProfiles: Record<string, GuestProfile>
+): Set<string> {
+  const groupTableSeats = new Map<string, Map<number, number[]>>();
+  for (let tableIdx = 0; tableIdx < tables.length; tableIdx += 1) {
+    tables[tableIdx].guestIds.forEach((guestId, seatIdx) => {
+      if (!guestId) return;
+      const group = guestProfiles[guestId]?.group;
+      if (!group) return;
+      if (!groupTableSeats.has(group)) groupTableSeats.set(group, new Map());
+      const tableMap = groupTableSeats.get(group)!;
+      if (!tableMap.has(tableIdx)) tableMap.set(tableIdx, []);
+      tableMap.get(tableIdx)!.push(seatIdx);
+    });
+  }
+  const violators = new Set<string>();
+  for (const [groupId, tableMap] of groupTableSeats) {
+    if (tableMap.size <= 1) continue; // single table — no side constraint
+    let hasPureSideA = false;
+    let hasPureSideB = false;
+    for (const seats of tableMap.values()) {
+      const allSideA = seats.every((s) => s <= 3);
+      const allSideB = seats.every((s) => s >= 4);
+      if (allSideA) hasPureSideA = true;
+      if (allSideB) hasPureSideB = true;
+    }
+    // Only a violation when one table is pure-A and another is pure-B.
+    // Mixed-side tables (large households) are neutral.
+    if (hasPureSideA && hasPureSideB) violators.add(groupId);
+  }
+  return violators;
+}
+
+function introducesNewGroupSideSplit(
+  previousTables: TableState[],
+  nextTables: TableState[],
+  guestProfiles?: Record<string, GuestProfile>
+): boolean {
+  if (!guestProfiles) return false;
+  const previousViolations = getNonSameSideGroups(previousTables, guestProfiles);
+  const nextViolations = getNonSameSideGroups(nextTables, guestProfiles);
+  for (const groupId of nextViolations) {
+    if (!previousViolations.has(groupId)) return true;
+  }
   return false;
 }
 
@@ -695,6 +814,7 @@ function assignGuestsSmart(
     targetTableNumber?: number;
     targetScope?: AutoAssignTargetScope;
     allowReseatIncoming?: boolean;
+    allowPartialPlacementBypass?: boolean;
   }
 ): SeatingState {
   const orderedGuestIds = getUniqueGuestIds(incomingGuestIds);
@@ -709,6 +829,7 @@ function assignGuestsSmart(
   );
 
   const allowReseatIncoming = options?.allowReseatIncoming ?? false;
+  const allowPartialPlacementBypass = options?.allowPartialPlacementBypass ?? false;
   const targetTableNumber = options?.targetTableNumber;
   const targetScope = options?.targetScope;
 
@@ -740,32 +861,107 @@ function assignGuestsSmart(
     targetScope,
     nextTables.length
   );
-  const candidateOrder = new Map(candidateTableIdxs.map((tableIdx, index) => [tableIdx, index]));
-  const placementUnits = buildPlacementUnits(toSeat, guestProfiles);
+  const placementGroups = buildPlacementUnits(toSeat, guestProfiles);
 
-  for (const guestIds of placementUnits) {
-    const singleTableRun = findBestSingleTableRun(nextTables, candidateTableIdxs, guestIds.length);
-    if (singleTableRun) {
-      placeGuestsAtSeats(nextTables, singleTableRun, guestIds);
-      continue;
+  for (const { groupId, units } of placementGroups) {
+    const isNamedGroup = !groupId.startsWith("\0nogroup\0");
+    let groupHomeRow: number | null = null;
+    let groupHomeSide: "A" | "B" | null = null;
+
+    for (const guestIds of units) {
+      // Restrict to the group's home row after the first household is placed (orphan rule).
+      let effectiveCandidates = candidateTableIdxs;
+      if (isNamedGroup && groupHomeRow !== null) {
+        const rowStart = groupHomeRow * TABLES_PER_ROW;
+        const rowEnd = Math.min(rowStart + TABLES_PER_ROW, nextTables.length);
+        effectiveCandidates = candidateTableIdxs.filter((idx) => idx >= rowStart && idx < rowEnd);
+        if (effectiveCandidates.length === 0) continue; // orphan: no candidates in home row
+      }
+
+      const effectiveCandidateOrder = new Map(
+        effectiveCandidates.map((tableIdx, index) => [tableIdx, index])
+      );
+
+      const singleTableRun = findBestSingleTableRun(
+        nextTables,
+        effectiveCandidates,
+        guestIds.length
+      );
+      // For named groups, a run that straddles side A and B will later violate the
+      // cross-table side-cohesion constraint. Prefer a side-respecting row run first.
+      const singleTableRunCrossesSides =
+        singleTableRun !== null &&
+        singleTableRun.some((s) => s.seatIdx <= 3) &&
+        singleTableRun.some((s) => s.seatIdx >= 4);
+      if (singleTableRun && !(isNamedGroup && singleTableRunCrossesSides)) {
+        placeGuestsAtSeats(nextTables, singleTableRun, guestIds);
+        if (isNamedGroup && groupHomeRow === null) {
+          groupHomeRow = Math.floor(singleTableRun[0].tableIdx / TABLES_PER_ROW);
+        }
+        continue;
+      }
+
+      // findBestRowRun is only reached when no single table fits the household,
+      // so any result spans multiple tables — enforce the group's established side.
+      const rowRun = findBestRowRun(
+        nextTables,
+        effectiveCandidates,
+        guestIds.length,
+        effectiveCandidateOrder,
+        isNamedGroup ? groupHomeSide : null
+      );
+      if (rowRun) {
+        placeGuestsAtSeats(nextTables, rowRun, guestIds);
+        if (isNamedGroup) {
+          if (groupHomeRow === null) {
+            groupHomeRow = Math.floor(rowRun[0].tableIdx / TABLES_PER_ROW);
+          }
+          if (groupHomeSide === null) {
+            groupHomeSide = rowRun[0].seatIdx <= 3 ? "A" : "B";
+          }
+        }
+        continue;
+      }
+
+      // Cross-side single-table fallback: if we deferred singleTableRun above because
+      // it straddled both sides, use it now that the side-aware row run also failed.
+      if (singleTableRun) {
+        placeGuestsAtSeats(nextTables, singleTableRun, guestIds);
+        if (isNamedGroup && groupHomeRow === null) {
+          groupHomeRow = Math.floor(singleTableRun[0].tableIdx / TABLES_PER_ROW);
+        }
+        continue;
+      }
+
+      // Partial fill fallback: apply side constraint when cross-table side is known.
+      let remainingSeats = effectiveCandidates.flatMap((tableIdx) =>
+        getOpenSeatIndexesForTable(nextTables[tableIdx]).map((seatIdx) => ({ tableIdx, seatIdx }))
+      );
+      if (isNamedGroup && groupHomeSide !== null) {
+        const side = groupHomeSide;
+        remainingSeats = remainingSeats.filter((s) =>
+          side === "A" ? s.seatIdx <= 3 : s.seatIdx >= 4
+        );
+      }
+
+      if (remainingSeats.length === 0) continue;
+
+      const partialGuests = guestIds.slice(0, remainingSeats.length);
+      placeGuestsAtSeats(nextTables, remainingSeats.slice(0, partialGuests.length), partialGuests);
+      if (isNamedGroup && partialGuests.length > 0) {
+        if (groupHomeRow === null) {
+          groupHomeRow = Math.floor(remainingSeats[0].tableIdx / TABLES_PER_ROW);
+        }
+        if (groupHomeSide === null) {
+          const placedTableIdxSet = new Set(
+            remainingSeats.slice(0, partialGuests.length).map((s) => s.tableIdx)
+          );
+          if (placedTableIdxSet.size > 1) {
+            groupHomeSide = remainingSeats[0].seatIdx <= 3 ? "A" : "B";
+          }
+        }
+      }
     }
-
-    const rowRun = findBestRowRun(nextTables, candidateTableIdxs, guestIds.length, candidateOrder);
-    if (rowRun) {
-      placeGuestsAtSeats(nextTables, rowRun, guestIds);
-      continue;
-    }
-
-    const remainingSeats = candidateTableIdxs.flatMap((tableIdx) =>
-      getOpenSeatIndexesForTable(nextTables[tableIdx]).map((seatIdx) => ({ tableIdx, seatIdx }))
-    );
-
-    if (remainingSeats.length === 0) {
-      continue;
-    }
-
-    const partialGuests = guestIds.slice(0, remainingSeats.length);
-    placeGuestsAtSeats(nextTables, remainingSeats.slice(0, partialGuests.length), partialGuests);
   }
 
   // Only remove from unassigned guests who were actually placed in nextTables.
@@ -775,11 +971,21 @@ function assignGuestsSmart(
   );
   const successfullyPlaced = new Set(toSeat.filter((id) => nowSeatedSet.has(id)));
 
-  if (introducesNewHouseholdSplit(state.tables, nextTables, guestProfiles)) {
-    return state;
-  }
-  if (introducesNewHouseholdAdjacencyViolation(state.tables, nextTables, guestProfiles)) {
-    return state;
+  // For manual drag-to-table drops, bypass cohesion guard rails so any placement
+  // that fits is accepted; otherwise enforce cohesion constraints to prevent splits.
+  if (!allowPartialPlacementBypass) {
+    if (introducesNewHouseholdSplit(state.tables, nextTables, guestProfiles)) {
+      return state;
+    }
+    if (introducesNewHouseholdAdjacencyViolation(state.tables, nextTables, guestProfiles)) {
+      return state;
+    }
+    if (introducesNewGroupRowIsolation(state.tables, nextTables, guestProfiles)) {
+      return state;
+    }
+    if (introducesNewGroupSideSplit(state.tables, nextTables, guestProfiles)) {
+      return state;
+    }
   }
 
   if (successfullyPlaced.size === 0) {
@@ -819,7 +1025,8 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       return assignGuestsSmart(state, action.guestIds, action.guestProfiles, {
         targetTableNumber: action.targetTableNumber,
         targetScope: action.targetScope,
-        allowReseatIncoming: action.targetTableNumber != null,
+        allowReseatIncoming: action.allowReseatIncoming ?? false,
+        allowPartialPlacementBypass: action.allowPartialPlacementBypass ?? false,
       });
     }
 
@@ -850,6 +1057,12 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
             guestProfiles
           )
         ) {
+          return state;
+        }
+        if (introducesNewGroupRowIsolation(state.tables, overflowState.tables, guestProfiles)) {
+          return state;
+        }
+        if (introducesNewGroupSideSplit(state.tables, overflowState.tables, guestProfiles)) {
           return state;
         }
         return overflowState;
@@ -890,6 +1103,9 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
               return state;
             }
             if (introducesNewGroupRowIsolation(state.tables, nextTables, guestProfiles)) {
+              return state;
+            }
+            if (introducesNewGroupSideSplit(state.tables, nextTables, guestProfiles)) {
               return state;
             }
           }
@@ -941,6 +1157,9 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
           return state;
         }
         if (introducesNewGroupRowIsolation(state.tables, newTables, guestProfiles)) {
+          return state;
+        }
+        if (introducesNewGroupSideSplit(state.tables, newTables, guestProfiles)) {
           return state;
         }
       }
