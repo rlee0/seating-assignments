@@ -1,14 +1,23 @@
+import { ChevronRight, Layers3 } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
-import { Layers3 } from "lucide-react";
+import React from "react";
 import { cn } from "../lib/utils";
 import { useDraggable } from "@dnd-kit/core";
 
 interface Props {
   groupName: string;
   guestIds: string[];
+  isExpanded: boolean;
+  onToggleExpanded: () => void;
 }
 
-export default function GroupCard({ groupName, guestIds }: Props) {
+const GroupCard = React.memo(function GroupCard({
+  groupName,
+  guestIds,
+  isExpanded,
+  onToggleExpanded,
+}: Props) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `group-${groupName}`,
     data: { kind: "group", groupName, origin: "sidebar" },
@@ -26,6 +35,27 @@ export default function GroupCard({ groupName, guestIds }: Props) {
         isDragging ? "opacity-0" : null
       )}>
       <div className="flex items-center gap-2 px-3 py-2.5 select-none">
+        <button
+          type="button"
+          className="-m-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          aria-label={
+            isExpanded ? `Collapse ${groupName || "No Group"}` : `Expand ${groupName || "No Group"}`
+          }
+          aria-expanded={isExpanded}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onToggleExpanded();
+          }}>
+          <ChevronRight
+            className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-90")}
+            aria-hidden="true"
+          />
+        </button>
         <Layers3 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
           {groupName || "No Group"}
@@ -36,4 +66,6 @@ export default function GroupCard({ groupName, guestIds }: Props) {
       </div>
     </div>
   );
-}
+});
+
+export default GroupCard;

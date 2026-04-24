@@ -15,5 +15,11 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["src/test-setup.ts"],
     include: ["tests/**/*.test.{ts,tsx}"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "html"],
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/vite-env.d.ts", "src/main.tsx", "src/test-setup.ts"],
+    },
   },
 });

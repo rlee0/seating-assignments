@@ -34,7 +34,6 @@ import {
   getGuestSourceSignature,
   normalizeGuestInputRows,
   parseGuestsFromRows,
-  type ParsedData,
 } from "./data/parseGuests";
 import {
   clearPersistedAppState,
@@ -59,33 +58,13 @@ import {
   type PersistedSeatingData,
   type TableState,
 } from "./types";
-import { createInitialState, seatingReducer, type GuestProfile } from "./store/reducer";
+import { createInitialState, seatingReducer } from "./store/reducer";
 import { dndCollisionDetection } from "./dnd/collision";
 import { parseDragIntent, parseDropTargetId, resolveDropTarget } from "./dnd/parsers";
 import { routeDrop } from "./dnd/router";
 import type { DragIntent, DragKind } from "./dnd/types";
 
 // ─── Utility functions ────────────────────────────────────────────────────────
-
-function buildGuestProfiles(
-  guests: ParsedData["guests"],
-  parties: ParsedData["parties"]
-): Record<string, GuestProfile> {
-  const profiles: Record<string, GuestProfile> = {};
-
-  for (const [guestId, guest] of guests) {
-    const party = parties.get(guest.partyId);
-
-    profiles[guestId] = {
-      partyId: guest.partyId,
-      group: guest.group || "",
-      host: guest.host,
-      household: party?.household ?? "",
-    };
-  }
-
-  return profiles;
-}
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -607,6 +586,7 @@ function SeatingApp({
     warnings,
     selectedGuestId,
     clearSelectedGuest,
+    guestProfiles,
   } = useSeating();
   const { restoreHighlightModeAfterGuestDeselection } = useSearch();
 
@@ -678,7 +658,6 @@ function SeatingApp({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const fileDragDepthRef = useRef(0);
 
-  const guestProfiles = useMemo(() => buildGuestProfiles(guests, parties), [guests, parties]);
   const guestRowsById = useMemo(
     () => new Map(guestRows.map((row) => [row.id, row] as const)),
     [guestRows]
@@ -1263,25 +1242,25 @@ function SeatingApp({
     [importFromFile]
   );
 
-  function handleFileDragEnter(event: ReactDragEvent<HTMLDivElement>) {
+  const handleFileDragEnter = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
     if (!Array.from(event.dataTransfer.types).includes("Files")) return;
     event.preventDefault();
     fileDragDepthRef.current += 1;
-  }
+  }, []);
 
-  function handleFileDragOver(event: ReactDragEvent<HTMLDivElement>) {
+  const handleFileDragOver = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
     if (!Array.from(event.dataTransfer.types).includes("Files")) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
-  }
+  }, []);
 
-  function handleFileDragLeave(event: ReactDragEvent<HTMLDivElement>) {
+  const handleFileDragLeave = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
     if (!Array.from(event.dataTransfer.types).includes("Files")) return;
     event.preventDefault();
     fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
-  }
+  }, []);
 
-  async function handleFileDrop(event: ReactDragEvent<HTMLDivElement>) {
+  const handleFileDrop = useCallback(async (event: ReactDragEvent<HTMLDivElement>) => {
     if (!Array.from(event.dataTransfer.types).includes("Files")) return;
     event.preventDefault();
     fileDragDepthRef.current = 0;
@@ -1290,7 +1269,7 @@ function SeatingApp({
     if (!file) return;
 
     await importFromFile(file);
-  }
+  }, [importFromFile]);
 
   function handleReset() {
     if (window.confirm("Reset all seating assignments? This will clear all table placements.")) {

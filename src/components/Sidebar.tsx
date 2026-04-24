@@ -1,22 +1,15 @@
 import { Crown, House, Layers3, Search, UserPlus, Users } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import GroupCard from "./GroupCard";
 import HouseholdCard from "./HouseholdCard";
 import { Input } from "@/components/ui/input";
-import { cn } from "../lib/utils";
+import { cn, normalizeForSearch } from "../lib/utils";
 import { useDroppable } from "@dnd-kit/core";
 import { useSearch } from "../store/SearchContext";
 import { useSeating } from "../store/SeatingContext";
-
-function normalizeForSearch(str: string): string {
-  return str
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
-}
 
 const sidebarSortCollator = new Intl.Collator(undefined, { sensitivity: "base" });
 
@@ -56,8 +49,29 @@ export default function Sidebar({
   const unassignedSet = useMemo(() => new Set(state.unassigned), [state.unassigned]);
   const normalizedQuery = useMemo(() => normalizeForSearch(searchQuery.trim()), [searchQuery]);
 
+  const normalizedPartyNames = useMemo(() => {
+    const map = new Map<string, { household: string; group: string }>();
+    for (const [id, party] of parties) {
+      map.set(id, {
+        household: normalizeForSearch(party.household),
+        group: normalizeForSearch(party.group || "No Group"),
+      });
+    }
+    return map;
+  }, [parties]);
+
+  const normalizedGuestNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [id, guest] of guests) {
+      map.set(id, normalizeForSearch(guest.fullName));
+    }
+    return map;
+  }, [guests]);
+
   const { setNodeRef, isOver } = useDroppable({ id: "unassigned" });
   const dropzoneRef = useRef<HTMLDivElement | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [collapsedHouseholds, setCollapsedHouseholds] = useState<Set<string>>(new Set());
 
   const setDropzoneRef = useCallback(
     (node: HTMLDivElement | null) => {
@@ -91,7 +105,7 @@ export default function Sidebar({
       ? "host"
       : "group";
   const highlightToggleItemClass =
-    "rounded-none border-l border-input bg-background first:rounded-l-md first:border-l-0 last:rounded-r-md";
+    "rounded-none border-l border-input bg-background text-muted-foreground first:rounded-l-md first:border-l-0 last:rounded-r-md data-[state=on]:bg-primary/12 data-[state=on]:text-primary";
   const emptyStateMessage =
     normalizedQuery.length > 0
       ? `No unassigned matches for "${searchQuery.trim()}"`
@@ -99,7 +113,6 @@ export default function Sidebar({
   const unassignedSummary =
     guests.size === 0 ? "No guests" : `${state.unassigned.length} of ${guests.size}`;
 
-  // Show parties that still have at least one unassigned member
   const partiesWithUnassigned = useMemo(
     () =>
       [...parties.values()].filter((party) => {
@@ -107,15 +120,16 @@ export default function Sidebar({
         if (unassignedGuestIds.length === 0) return false;
         if (!normalizedQuery) return true;
 
-        if (normalizeForSearch(party.household).includes(normalizedQuery)) return true;
-        if (normalizeForSearch(party.group || "No Group").includes(normalizedQuery)) return true;
+        const names = normalizedPartyNames.get(party.id);
+        if (names?.household.includes(normalizedQuery)) return true;
+        if (names?.group.includes(normalizedQuery)) return true;
 
         return unassignedGuestIds.some((id) => {
-          const guest = guests.get(id);
-          return guest && normalizeForSearch(guest.fullName).includes(normalizedQuery);
+          const normalizedName = normalizedGuestNames.get(id);
+          return normalizedName !== undefined && normalizedName.includes(normalizedQuery);
         });
       }),
-    [parties, unassignedSet, normalizedQuery, guests]
+    [parties, unassignedSet, normalizedQuery, normalizedPartyNames, normalizedGuestNames]
   );
 
   const sortedPartiesWithUnassigned = useMemo(
@@ -142,6 +156,30 @@ export default function Sidebar({
   }, [sortedPartiesWithUnassigned, unassignedSet]);
 
   const sortedGroups = useMemo(() => [...groupedParties.keys()], [groupedParties]);
+
+  const toggleGroupExpanded = useCallback((groupName: string) => {
+    setCollapsedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(groupName)) {
+        next.delete(groupName);
+      } else {
+        next.add(groupName);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleHouseholdExpanded = useCallback((partyId: string) => {
+    setCollapsedHouseholds((current) => {
+      const next = new Set(current);
+      if (next.has(partyId)) {
+        next.delete(partyId);
+      } else {
+        next.add(partyId);
+      }
+      return next;
+    });
+  }, []);
 
   return (
     <aside
@@ -246,18 +284,28 @@ export default function Sidebar({
           </div>
         ) : (
           sortedGroups.map((groupName) => (
-            <div key={groupName} className="grid gap-1 mb-4 last:mb-0">
-              <GroupCard groupName={groupName} guestIds={groupedGuestIds.get(groupName) ?? []} />
-              <div className="relative ml-0 grid gap-1.5 pl-5 pt-1 pb-1 before:absolute before:left-2 before:top-1 before:bottom-1 before:w-px before:bg-border">
-                {groupedParties.get(groupName)?.map((party) => (
-                  <HouseholdCard
-                    key={party.id}
-                    party={party}
-                    onEditGuest={onEditGuest}
-                    onDeleteGuest={onDeleteGuest}
-                  />
-                ))}
-              </div>
+            <div key={groupName} className="mb-4 grid gap-1 last:mb-0">
+              <GroupCard
+                groupName={groupName}
+                guestIds={groupedGuestIds.get(groupName) ?? []}
+                isExpanded={!collapsedGroups.has(groupName)}
+                onToggleExpanded={() => toggleGroupExpanded(groupName)}
+              />
+              {!collapsedGroups.has(groupName) ? (
+                <div className="relative ml-0 grid gap-1.5 pl-5 pt-1 pb-1 before:absolute before:bottom-1 before:left-2 before:top-1 before:w-px before:bg-border">
+                  {groupedParties.get(groupName)?.map((party) => (
+                    <HouseholdCard
+                      key={party.id}
+                      party={party}
+                      unassignedSet={unassignedSet}
+                      onEditGuest={onEditGuest}
+                      onDeleteGuest={onDeleteGuest}
+                      isExpanded={!collapsedHouseholds.has(party.id)}
+                      onToggleExpanded={() => toggleHouseholdExpanded(party.id)}
+                    />
+                  ))}
+                </div>
+              ) : null}
             </div>
           ))
         )}

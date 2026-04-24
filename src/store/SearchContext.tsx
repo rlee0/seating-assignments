@@ -1,9 +1,11 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 
 import type { ReactNode } from "react";
+import { normalizeForSearch } from "../lib/utils";
 
 interface SearchContextValue {
   searchQuery: string;
+  normalizedQuery: string;
   setSearchQuery: (query: string) => void;
   isGroupHighlightOn: boolean;
   setGroupHighlightOn: (isOn: boolean) => void;
@@ -20,6 +22,7 @@ const SearchContext = createContext<SearchContextValue | null>(null);
 
 export function SearchProvider({ children }: { children: ReactNode }) {
   const [searchQuery, setSearchQuery] = useState("");
+  const normalizedQuery = useMemo(() => normalizeForSearch(searchQuery.trim()), [searchQuery]);
   const [isGroupHighlightOn, setGroupHighlightOn] = useState(true);
   const [isHouseholdHighlightOn, setHouseholdHighlightOn] = useState(false);
   const [isHostHighlightOn, setHostHighlightOn] = useState(false);
@@ -94,6 +97,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     <SearchContext.Provider
       value={{
         searchQuery,
+        normalizedQuery,
         setSearchQuery,
         isGroupHighlightOn,
         setGroupHighlightOn: handleSetGroupHighlightOn,

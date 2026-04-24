@@ -11,13 +11,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CSS } from "@dnd-kit/utilities";
 import type { CSSProperties } from "react";
-import { cn } from "../lib/utils";
+import { cn, normalizeForSearch } from "../lib/utils";
 import { guestChipVariants } from "@/components/ui/chip";
 import { useDraggable } from "@dnd-kit/core";
 import {
-  assignTokenSlots,
   buildHighlightColor,
-  createHighlightPalettes,
   getDomainFromToken,
   type HighlightDomain,
   type PaletteSlot,
@@ -43,13 +41,6 @@ function subscribeToGuestHovercardChanges(listener: (hovercardId: string | null)
 function setActiveGuestHovercard(hovercardId: string | null) {
   activeGuestHovercardId = hovercardId;
   guestHovercardSubscribers.forEach((listener) => listener(hovercardId));
-}
-
-function normalizeForSearch(str: string): string {
-  return str
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
 }
 
 function getHighlightColor(
@@ -118,9 +109,11 @@ export default function GuestChip({
     clearSelectedGuest,
     relatedHouseholdGuestIds,
     relatedGroupGuestIds,
+    slotAssignments,
   } = useSeating();
   const {
     searchQuery,
+    normalizedQuery,
     isGroupHighlightOn,
     isHouseholdHighlightOn,
     isHostHighlightOn,
@@ -157,6 +150,7 @@ export default function GuestChip({
   });
 
   const guestName = guest?.fullName ?? fallbackName ?? "";
+  const normalizedGuestName = useMemo(() => normalizeForSearch(guestName), [guestName]);
 
   const householdName = guest
     ? parties.get(guest.partyId)?.household?.trim() || "Unknown household"
@@ -279,55 +273,6 @@ export default function GuestChip({
   const isRelatedHousehold = relatedHouseholdGuestIds.has(guestId);
   const isRelatedGroup = relatedGroupGuestIds.has(guestId);
 
-  const domainCounts = useMemo(() => {
-    const groupLabels = new Set<string>();
-    const householdIds = new Set<string>();
-    const hostLabels = new Set<string>();
-
-    for (const profile of guests.values()) {
-      groupLabels.add(profile.group || "No Group");
-      householdIds.add(profile.partyId);
-      hostLabels.add(profile.host || "Unknown");
-    }
-
-    return {
-      group: Math.max(1, groupLabels.size),
-      household: Math.max(1, householdIds.size),
-      host: Math.max(1, hostLabels.size),
-    };
-  }, [guests]);
-
-  const palettes = useMemo(
-    () => createHighlightPalettes(domainCounts),
-    [domainCounts.group, domainCounts.household, domainCounts.host]
-  );
-
-  const slotAssignments = useMemo(() => {
-    const tokensByDomain: Record<HighlightDomain, string[]> = {
-      group: [],
-      household: [],
-      host: [],
-      default: [],
-    };
-
-    for (const profile of guests.values()) {
-      tokensByDomain.group.push(`group:${profile.group || "No Group"}`);
-      tokensByDomain.household.push(`household:${profile.partyId}`);
-      tokensByDomain.host.push(`host:${profile.host || "Unknown"}`);
-    }
-
-    const groupAssignments = assignTokenSlots(tokensByDomain.group, palettes.group);
-    const householdAssignments = assignTokenSlots(tokensByDomain.household, palettes.household);
-    const hostAssignments = assignTokenSlots(tokensByDomain.host, palettes.host);
-
-    return {
-      group: groupAssignments,
-      household: householdAssignments,
-      host: hostAssignments,
-      default: groupAssignments,
-    } as Record<HighlightDomain, Map<string, PaletteSlot>>;
-  }, [guests, palettes.group, palettes.household, palettes.host]);
-
   const highlightColors = useMemo(
     () => (highlightToken ? getHighlightColor(highlightToken, slotAssignments) : null),
     [highlightToken, slotAssignments]
@@ -381,8 +326,8 @@ export default function GuestChip({
   const isSearchMatch =
     !suppressStateStyles &&
     !!guest &&
-    searchQuery.trim() &&
-    normalizeForSearch(guestName).includes(normalizeForSearch(searchQuery.trim()));
+    searchQuery.trim().length > 0 &&
+    normalizedGuestName.includes(normalizedQuery);
 
   if (visualState === "default" && isSearchMatch) visualState = "searchMatch";
 

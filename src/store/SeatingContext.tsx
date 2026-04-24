@@ -5,6 +5,7 @@ import React, {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
 } from "react";
 import type { PersistedSeatingData, SeatingState } from "../types";
@@ -19,6 +20,12 @@ import {
 } from "./localStorage";
 import type { GuestProfile } from "./reducer";
 import type { ParsedData } from "../data/parseGuests";
+import {
+  assignTokenSlots,
+  createHighlightPalettes,
+  type HighlightDomain,
+  type PaletteSlot,
+} from "../lib/palette";
 
 function buildGuestProfiles(
   guests: ParsedData["guests"],
@@ -58,6 +65,8 @@ interface SeatingContextValue {
   relatedHouseholdGuestIds: Set<string>;
   relatedGroupGuestIds: Set<string>;
   autoAssignGuestIds: (guestIds: string[]) => void;
+  slotAssignments: Record<HighlightDomain, Map<string, PaletteSlot>>;
+  guestProfiles: Record<string, GuestProfile>;
 }
 
 interface HistoryState {
@@ -232,6 +241,54 @@ export function SeatingProvider({
   const { guests, parties, allGuestIds, warnings } = parsedData;
   const defaultState = useMemo(() => createInitialState(allGuestIds), [allGuestIds]);
   const guestProfiles = useMemo(() => buildGuestProfiles(guests, parties), [guests, parties]);
+
+  const domainCounts = useMemo(() => {
+    const groupLabels = new Set<string>();
+    const householdIds = new Set<string>();
+    const hostLabels = new Set<string>();
+
+    for (const profile of Object.values(guestProfiles)) {
+      groupLabels.add(profile.group || "No Group");
+      householdIds.add(profile.partyId);
+      hostLabels.add(profile.host || "Unknown");
+    }
+
+    return {
+      group: Math.max(1, groupLabels.size),
+      household: Math.max(1, householdIds.size),
+      host: Math.max(1, hostLabels.size),
+    };
+  }, [guestProfiles]);
+
+  const palettes = useMemo(
+    () => createHighlightPalettes(domainCounts),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [domainCounts.group, domainCounts.household, domainCounts.host]
+  );
+
+  const slotAssignments = useMemo(() => {
+    const groupTokens: string[] = [];
+    const householdTokens: string[] = [];
+    const hostTokens: string[] = [];
+
+    for (const profile of Object.values(guestProfiles)) {
+      groupTokens.push(`group:${profile.group || "No Group"}`);
+      householdTokens.push(`household:${profile.partyId}`);
+      hostTokens.push(`host:${profile.host || "Unknown"}`);
+    }
+
+    const groupAssignments = assignTokenSlots(groupTokens, palettes.group);
+    const householdAssignments = assignTokenSlots(householdTokens, palettes.household);
+    const hostAssignments = assignTokenSlots(hostTokens, palettes.host);
+
+    return {
+      group: groupAssignments,
+      household: householdAssignments,
+      host: hostAssignments,
+      default: groupAssignments,
+    } as Record<HighlightDomain, Map<string, PaletteSlot>>;
+  }, [guestProfiles, palettes.group, palettes.household, palettes.host]);
+
   const [selectedGuestId, setSelectedGuestId] = useState<string | null>(null);
 
   const [historyState, historyDispatch] = useReducer(
@@ -296,9 +353,30 @@ export function SeatingProvider({
     historyDispatch({ type: "REDO" });
   }, []);
 
+  const saveTimerRef = useRef<number | null>(null);
+  const historyRef = useRef(historyState);
+  historyRef.current = historyState;
+
   useEffect(() => {
-    savePersistedSeating(historyState.present, historyState.history, historyState.future);
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+    }
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      savePersistedSeating(historyState.present, historyState.history, historyState.future);
+    }, 400);
   }, [historyState.future, historyState.history, historyState.present]);
+
+  // Flush any pending save synchronously when the provider unmounts.
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+      const h = historyRef.current;
+      savePersistedSeating(h.present, h.history, h.future);
+    };
+  }, []);
 
   useEffect(() => {
     historyDispatch({ type: "SYNC_GUEST_IDS", allGuestIds });
@@ -351,30 +429,55 @@ export function SeatingProvider({
     setSelectedGuestId(null);
   }, []);
 
-  return (
-    <SeatingContext.Provider
-      value={{
-        state: historyState.present,
-        snapshot,
-        dispatch,
-        undo,
-        redo,
-        canUndo: historyState.history.length > 0,
-        canRedo: historyState.future.length > 0,
-        guests,
-        parties,
-        allGuestIds,
-        warnings,
-        selectedGuestId,
-        selectGuest,
-        clearSelectedGuest,
-        relatedHouseholdGuestIds,
-        relatedGroupGuestIds,
-        autoAssignGuestIds,
-      }}>
-      {children}
-    </SeatingContext.Provider>
+  const canUndo = historyState.history.length > 0;
+  const canRedo = historyState.future.length > 0;
+
+  const contextValue = useMemo<SeatingContextValue>(
+    () => ({
+      state: historyState.present,
+      snapshot,
+      dispatch,
+      undo,
+      redo,
+      canUndo,
+      canRedo,
+      guests,
+      parties,
+      allGuestIds,
+      warnings,
+      selectedGuestId,
+      selectGuest,
+      clearSelectedGuest,
+      relatedHouseholdGuestIds,
+      relatedGroupGuestIds,
+      autoAssignGuestIds,
+      slotAssignments,
+      guestProfiles,
+    }),
+    [
+      historyState.present,
+      snapshot,
+      dispatch,
+      undo,
+      redo,
+      canUndo,
+      canRedo,
+      guests,
+      parties,
+      allGuestIds,
+      warnings,
+      selectedGuestId,
+      selectGuest,
+      clearSelectedGuest,
+      relatedHouseholdGuestIds,
+      relatedGroupGuestIds,
+      autoAssignGuestIds,
+      slotAssignments,
+      guestProfiles,
+    ]
   );
+
+  return <SeatingContext.Provider value={contextValue}>{children}</SeatingContext.Provider>;
 }
 
 export function useSeating(): SeatingContextValue {

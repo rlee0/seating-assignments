@@ -28,65 +28,51 @@ export const dndCollisionDetection: CollisionDetection = (args) => {
   const data = args.active.data.current;
   const kind = getDragKind(data);
 
+  // Single-pass categorisation: bucket each container exactly once.
+  const seatContainers: typeof args.droppableContainers = [];
+  const tableContainers: typeof args.droppableContainers = [];
+  const sortableTableContainers: typeof args.droppableContainers = [];
+  const sidebarContainers: typeof args.droppableContainers = [];
+  const autoSeatContainers: typeof args.droppableContainers = [];
+
+  for (const c of args.droppableContainers) {
+    const id = String(c.id);
+    if (id.startsWith("seat-")) { seatContainers.push(c); continue; }
+    if (id.startsWith("sortable-table-")) { sortableTableContainers.push(c); continue; }
+    if (id.startsWith("table-")) { tableContainers.push(c); continue; }
+    if (id === "unassigned" || id === "unassigned-panel") { sidebarContainers.push(c); continue; }
+    if (id === "auto-seat") { autoSeatContainers.push(c); }
+  }
+
   // ── Table drags ────────────────────────────────────────────────────────────
   if (kind === "table") {
-    const tableDragContainers = args.droppableContainers.filter((c) => {
-      const id = String(c.id);
-      return (
-        id.startsWith("sortable-table-") ||
-        id === "auto-seat" ||
-        id === "unassigned" ||
-        id === "unassigned-panel"
-      );
-    });
-
-    const sidebarContainers = tableDragContainers.filter(
-      (c) => String(c.id) === "unassigned" || String(c.id) === "unassigned-panel"
-    );
+    const tableDragContainers = [...sortableTableContainers, ...autoSeatContainers, ...sidebarContainers];
     const sidebarHits = pointerWithin({ ...args, droppableContainers: sidebarContainers });
     if (sidebarHits.length > 0) return sidebarHits;
-
     return closestCenter({ ...args, droppableContainers: tableDragContainers });
   }
 
-  // For all other drags, exclude sortable-table-* so the board never reorders.
-  const baseContainers = args.droppableContainers.filter(
-    (c) => !String(c.id).startsWith("sortable-table-")
-  );
-
   // ── Guest drags ────────────────────────────────────────────────────────────
   if (kind === "guest") {
-    const seatContainers = baseContainers.filter((c) => String(c.id).startsWith("seat-"));
     const seatHits = pointerWithin({ ...args, droppableContainers: seatContainers });
     if (seatHits.length > 0) return seatHits;
 
-    const nonSeatContainers = baseContainers.filter((c) => !String(c.id).startsWith("seat-"));
-    const tableContainers = nonSeatContainers.filter((c) => String(c.id).startsWith("table-"));
-    const sidebarContainers = nonSeatContainers.filter(
-      (c) => String(c.id) === "unassigned" || String(c.id) === "unassigned-panel"
-    );
-
-    // Seated guests: give sidebar containers extra pointer-within priority.
     if (getDragOrigin(data) === "table") {
       const sidebarHits = pointerWithin({ ...args, droppableContainers: sidebarContainers });
       if (sidebarHits.length > 0) return sidebarHits;
     }
 
-    const hits = pointerWithin({ ...args, droppableContainers: nonSeatContainers });
+    const nonSeatNonSortable = [...tableContainers, ...sidebarContainers, ...autoSeatContainers];
+    const hits = pointerWithin({ ...args, droppableContainers: nonSeatNonSortable });
     if (hits.length > 0) return hits;
 
-    // In board gaps, keep a nearby table target rather than snapping to sidebar,
-    // which creates noisy highlight jumps while moving across table spacing.
     if (tableContainers.length > 0) {
       return closestCenter({ ...args, droppableContainers: tableContainers });
     }
-
     return [];
   }
 
   // ── Household/group drags ──────────────────────────────────────────────────
-  return pointerWithin({
-    ...args,
-    droppableContainers: baseContainers.filter((c) => !String(c.id).startsWith("seat-")),
-  });
+  const nonSeatNonSortable = [...tableContainers, ...sidebarContainers, ...autoSeatContainers];
+  return pointerWithin({ ...args, droppableContainers: nonSeatNonSortable });
 };
