@@ -61,7 +61,7 @@ import {
 } from "./types";
 import { createInitialState, seatingReducer, type GuestProfile } from "./store/reducer";
 import { dndCollisionDetection } from "./dnd/collision";
-import { parseDragIntent, resolveDropTarget } from "./dnd/parsers";
+import { parseDragIntent, parseDropTargetId, resolveDropTarget } from "./dnd/parsers";
 import { routeDrop } from "./dnd/router";
 import type { DragIntent, DragKind } from "./dnd/types";
 
@@ -514,6 +514,19 @@ function sanitizeOverlayClone(node: HTMLElement): void {
   hiddenNodes.forEach((hiddenNode) => hiddenNode.classList.remove("opacity-0"));
 }
 
+function getDragProbePoint(active: DragOverEvent["active"] | DragEndEvent["active"]): {
+  x: number;
+  y: number;
+} | null {
+  const translatedRect = active.rect.current.translated;
+  if (!translatedRect) return null;
+
+  return {
+    x: translatedRect.left + translatedRect.width / 2,
+    y: translatedRect.top + translatedRect.height / 2,
+  };
+}
+
 function captureDragOverlaySnapshot(intent: DragIntent): DragOverlaySnapshot | null {
   const sourceNode = resolveDragOverlaySourceElement(intent);
   if (!sourceNode) return null;
@@ -559,6 +572,8 @@ type GuestSwapPreview = {
   sourceTableNumber: number;
   sourceSeatIndex: number;
   sourceGuestId: string;
+  targetTableNumber: number;
+  targetSeatIndex: number;
   targetGuestId: string;
 };
 
@@ -606,11 +621,14 @@ function SeatingApp({
     tables: import("./types").TableState[];
   } | null>(null);
   const [guestSwapPreview, setGuestSwapPreview] = useState<GuestSwapPreview | null>(null);
+  const guestSwapPreviewRef = useRef<GuestSwapPreview | null>(null);
   const [dragOverlaySnapshot, setDragOverlaySnapshot] = useState<DragOverlaySnapshot | null>(null);
   /** Tracks the latest pointer position for seat-level probe during drag-end. */
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
   const previewTargetKeyRef = useRef<string | null>(null);
   const previewLastComputedAtRef = useRef(0);
+  /** Timer ID for the grace-period before clearing the swap preview. */
+  const swapPreviewClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Derived drag state passed down to child components.
   const activeDragKind: DragKind | null = activeDragIntent?.kind ?? null;
@@ -687,9 +705,9 @@ function SeatingApp({
   );
   const hostOptions = useMemo(
     () =>
-      [...new Set(guestRows.map((row) => row.host.trim()).filter((value) => value.length > 0))].sort(
-        (left, right) => optionCollator.compare(left, right)
-      ),
+      [
+        ...new Set(guestRows.map((row) => row.host.trim()).filter((value) => value.length > 0)),
+      ].sort((left, right) => optionCollator.compare(left, right)),
     [guestRows, optionCollator]
   );
   const householdHostByName = useMemo(() => {
@@ -815,6 +833,109 @@ function SeatingApp({
     };
   }, [activeDragIntent]);
 
+  // ── Swap preview tracking via pointermove ─────────────────────────────────
+  // Drive seated-guest swap preview directly from DOM hit-testing rather than
+  // from dnd-kit's collision detection, which is too coarse near seat boundaries.
+  useEffect(() => {
+    if (
+      activeDragIntent?.kind !== "guest" ||
+      activeDragIntent.source !== "seated" ||
+      typeof activeDragIntent.tableNumber !== "number" ||
+      typeof activeDragIntent.seatIndex !== "number"
+    ) {
+      return;
+    }
+
+    const sourceTableNumber = activeDragIntent.tableNumber;
+    const sourceSeatIndex = activeDragIntent.seatIndex;
+    const sourceGuestId = activeDragIntent.guestId;
+    const CLEAR_DELAY_MS = 80;
+
+    const cancelClearTimer = () => {
+      if (swapPreviewClearTimerRef.current !== null) {
+        clearTimeout(swapPreviewClearTimerRef.current);
+        swapPreviewClearTimerRef.current = null;
+      }
+    };
+
+    const scheduleClear = () => {
+      if (swapPreviewClearTimerRef.current !== null) return;
+      swapPreviewClearTimerRef.current = setTimeout(() => {
+        swapPreviewClearTimerRef.current = null;
+        guestSwapPreviewRef.current = null;
+        setGuestSwapPreview(null);
+      }, CLEAR_DELAY_MS);
+    };
+
+    const updateFromPoint = (x: number, y: number) => {
+      const elements =
+        typeof document.elementsFromPoint === "function"
+          ? document.elementsFromPoint(x, y)
+          : (() => {
+              const el = document.elementFromPoint(x, y);
+              return el ? [el] : [];
+            })();
+
+      for (const el of elements) {
+        const slotEl = el.closest<HTMLElement>("[data-seat-slot]");
+        if (slotEl) {
+          const rawSeatId = slotEl.dataset.seatId ?? null;
+          const targetGuestId = slotEl.dataset.guestId || null;
+          const parsed = rawSeatId ? parseDropTargetId(rawSeatId) : null;
+
+          if (
+            parsed?.type === "seat" &&
+            targetGuestId &&
+            targetGuestId !== sourceGuestId &&
+            !(parsed.tableNumber === sourceTableNumber && parsed.seatIndex === sourceSeatIndex)
+          ) {
+            // Pointer is over an occupied non-self seat — activate swap preview.
+            cancelClearTimer();
+            const nextPreview: GuestSwapPreview = {
+              sourceTableNumber,
+              sourceSeatIndex,
+              sourceGuestId,
+              targetTableNumber: parsed.tableNumber,
+              targetSeatIndex: parsed.seatIndex,
+              targetGuestId,
+            };
+            if (
+              guestSwapPreviewRef.current?.targetTableNumber !== nextPreview.targetTableNumber ||
+              guestSwapPreviewRef.current?.targetSeatIndex !== nextPreview.targetSeatIndex
+            ) {
+              guestSwapPreviewRef.current = nextPreview;
+              setGuestSwapPreview(nextPreview);
+            }
+            return;
+          }
+
+          // Found a seat slot but it's empty or the source — schedule preview clear.
+          scheduleClear();
+          return;
+        }
+      }
+
+      // No seat slot found (gap between tables, overlay-only hit, etc.) — let
+      // preview stick briefly so it doesn't flash at seat edges.
+      scheduleClear();
+    };
+
+    const handlePointerMove = (e: PointerEvent) => updateFromPoint(e.clientX, e.clientY);
+    const handleTouchMove = (e: TouchEvent) => {
+      const touch = e.touches[0] ?? e.changedTouches[0];
+      if (touch) updateFromPoint(touch.clientX, touch.clientY);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove, { passive: true });
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("touchmove", handleTouchMove);
+      cancelClearTimer();
+    };
+  }, [activeDragIntent]);
+
   // ── Keyboard shortcuts ────────────────────────────────────────────────────────
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -890,16 +1011,26 @@ function SeatingApp({
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const intent = parseDragIntent(event.active.data.current);
     if (!intent) return;
+    if (swapPreviewClearTimerRef.current !== null) {
+      clearTimeout(swapPreviewClearTimerRef.current);
+      swapPreviewClearTimerRef.current = null;
+    }
     previewTargetKeyRef.current = null;
     previewLastComputedAtRef.current = 0;
+    guestSwapPreviewRef.current = null;
     setGuestSwapPreview(null);
     setDragOverlaySnapshot(captureDragOverlaySnapshot(intent));
     setActiveDragIntent(intent);
   }, []);
 
   const handleDragCancel = useCallback(() => {
+    if (swapPreviewClearTimerRef.current !== null) {
+      clearTimeout(swapPreviewClearTimerRef.current);
+      swapPreviewClearTimerRef.current = null;
+    }
     setActiveDragIntent(null);
     setAutoSeatPreview(null);
+    guestSwapPreviewRef.current = null;
     setGuestSwapPreview(null);
     setDragOverlaySnapshot(null);
     pointerRef.current = null;
@@ -909,75 +1040,42 @@ function SeatingApp({
 
   const handleDragOver = useCallback(
     ({ active, over }: DragOverEvent) => {
-      const clearPreview = () => {
+      const clearAllPreview = () => {
         previewTargetKeyRef.current = null;
         setAutoSeatPreview((prev) => (prev === null ? prev : null));
-        setGuestSwapPreview((prev) => (prev === null ? prev : null));
       };
 
-      if (!over) {
-        clearPreview();
-        return;
-      }
-      const intent = parseDragIntent(active.data.current);
+      const clearAutoSeatPreview = () => {
+        previewTargetKeyRef.current = null;
+        setAutoSeatPreview((prev) => (prev === null ? prev : null));
+      };
+
+      const intent = parseDragIntent(active.data.current) ?? activeDragIntent;
       if (!intent) {
-        clearPreview();
+        clearAllPreview();
         return;
       }
 
-      // Guest seat drops need stable local feedback; table-level preview introduces
-      // seat-vs-table flicker as the pointer crosses slot boundaries.
-      if (intent.kind === "guest") {
-        const target = resolveDropTarget(over, null);
-        if (
-          intent.source === "seated" &&
-          typeof intent.tableNumber === "number" &&
-          typeof intent.seatIndex === "number" &&
-          target?.type === "seat"
-        ) {
-          const sourceTableNumber = intent.tableNumber;
-          const sourceSeatIndex = intent.seatIndex;
-          const targetTable = state.tables.find(
-            (table) => table.tableNumber === target.tableNumber
-          );
-          const targetGuestId = targetTable?.guestIds[target.seatIndex] ?? null;
-          const sourceSeatMatchesTarget =
-            sourceTableNumber === target.tableNumber && sourceSeatIndex === target.seatIndex;
-
-          if (targetGuestId && !sourceSeatMatchesTarget && targetGuestId !== intent.guestId) {
-            setGuestSwapPreview((prev) => {
-              if (
-                prev &&
-                prev.sourceTableNumber === sourceTableNumber &&
-                prev.sourceSeatIndex === sourceSeatIndex &&
-                prev.sourceGuestId === intent.guestId &&
-                prev.targetGuestId === targetGuestId
-              ) {
-                return prev;
-              }
-
-              return {
-                sourceTableNumber,
-                sourceSeatIndex,
-                sourceGuestId: intent.guestId,
-                targetGuestId,
-              };
-            });
-          } else {
-            setGuestSwapPreview((prev) => (prev === null ? prev : null));
-          }
+      if (!over) {
+        if (intent.kind === "guest") {
+          clearAutoSeatPreview();
         } else {
-          setGuestSwapPreview((prev) => (prev === null ? prev : null));
+          clearAllPreview();
         }
+        return;
+      }
 
-        clearPreview();
+      // Swap preview for seated guests is driven entirely by the pointermove
+      // useEffect (DOM hit-testing), not by dnd-kit collision events.
+      if (intent.kind === "guest") {
+        clearAutoSeatPreview();
         return;
       }
 
       // Only preview table-level and autoseat drops — seat drops are single-slot.
-      const target = resolveDropTarget(over, null);
+      const target = resolveDropTarget(over, pointerRef.current);
       if (!target || target.type === "seat" || target.type === "unassigned") {
-        clearPreview();
+        clearAllPreview();
         return;
       }
 
@@ -996,7 +1094,7 @@ function SeatingApp({
 
       const action = routeDrop(intent, target, { state, guestProfiles, parties });
       if (!action) {
-        clearPreview();
+        clearAllPreview();
         return;
       }
 
@@ -1012,9 +1110,15 @@ function SeatingApp({
   );
 
   const handleDragEnd = useCallback(
-    ({ active, over }: DragEndEvent) => {
+    ({ active, over, collisions }: DragEndEvent) => {
+      if (swapPreviewClearTimerRef.current !== null) {
+        clearTimeout(swapPreviewClearTimerRef.current);
+        swapPreviewClearTimerRef.current = null;
+      }
+      const swapPreviewAtDrop = guestSwapPreviewRef.current;
       setActiveDragIntent(null);
       setAutoSeatPreview(null);
+      guestSwapPreviewRef.current = null;
       setGuestSwapPreview(null);
       setDragOverlaySnapshot(null);
       const ptr = pointerRef.current;
@@ -1022,10 +1126,42 @@ function SeatingApp({
       previewTargetKeyRef.current = null;
       previewLastComputedAtRef.current = 0;
 
-      const intent = parseDragIntent(active.data.current);
+      const intent = parseDragIntent(active.data.current) ?? activeDragIntent;
       if (!intent) return;
 
-      const target = resolveDropTarget(over, ptr);
+      const probePoint = ptr ?? getDragProbePoint(active);
+      const collisionSeatTarget =
+        collisions
+          ?.map((collision) => parseDropTargetId(String(collision.id)))
+          .find(
+            (candidate): candidate is { type: "seat"; tableNumber: number; seatIndex: number } =>
+              candidate?.type === "seat"
+          ) ?? null;
+      const overTarget = parseDropTargetId(over ? String(over.id) : null);
+      const pointerTarget = resolveDropTarget(null, probePoint);
+      const fallbackTarget =
+        (pointerTarget?.type === "seat" || pointerTarget?.type === "unassigned"
+          ? pointerTarget
+          : overTarget) ?? collisionSeatTarget;
+      let target: ReturnType<typeof parseDropTargetId> =
+        overTarget && overTarget.type !== "table" ? overTarget : (fallbackTarget ?? overTarget);
+      const isExplicitNonSwapTarget =
+        overTarget?.type === "unassigned" || overTarget?.type === "autoseat";
+      if (
+        intent.kind === "guest" &&
+        intent.source === "seated" &&
+        swapPreviewAtDrop &&
+        swapPreviewAtDrop.sourceGuestId === intent.guestId &&
+        swapPreviewAtDrop.sourceTableNumber === intent.tableNumber &&
+        swapPreviewAtDrop.sourceSeatIndex === intent.seatIndex &&
+        !isExplicitNonSwapTarget
+      ) {
+        target = {
+          type: "seat",
+          tableNumber: swapPreviewAtDrop.targetTableNumber,
+          seatIndex: swapPreviewAtDrop.targetSeatIndex,
+        };
+      }
       if (!target) return;
 
       const action = routeDrop(intent, target, { state, guestProfiles, parties });
@@ -1055,7 +1191,7 @@ function SeatingApp({
         dispatch(action);
       }
     },
-    [dispatch, guestProfiles, parties, state]
+    [activeDragIntent, dispatch, guestProfiles, parties, state]
   );
 
   // ── File import/export ────────────────────────────────────────────────────────

@@ -87,15 +87,24 @@ export function resolveDropTarget(
 ): DropTarget | null {
   // Probe the element at pointer position first for precise seat detection.
   if (pointer) {
-    const el = document.elementFromPoint(pointer.x, pointer.y);
-    const seatId = el?.closest<HTMLElement>("[data-seat-slot]")?.dataset.seatId ?? null;
-    if (seatId) {
-      const seat = parseDropTargetId(seatId);
-      if (seat) return seat;
-    }
-    // If the pointer is over the sidebar, treat as unassigned drop.
-    if (el?.closest("[data-sidebar]")) {
-      return { type: "unassigned" };
+    const stack =
+      typeof document.elementsFromPoint === "function"
+        ? document.elementsFromPoint(pointer.x, pointer.y)
+        : (() => {
+            const single = document.elementFromPoint(pointer.x, pointer.y);
+            return single ? [single] : [];
+          })();
+    for (const el of stack) {
+      const seatId = el.closest<HTMLElement>("[data-seat-slot]")?.dataset.seatId ?? null;
+      if (seatId) {
+        const seat = parseDropTargetId(seatId);
+        if (seat) return seat;
+      }
+
+      // If the pointer is over the sidebar, treat as unassigned drop.
+      if (el.closest("[data-sidebar]")) {
+        return { type: "unassigned" };
+      }
     }
   }
 

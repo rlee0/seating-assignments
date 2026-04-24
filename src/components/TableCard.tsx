@@ -95,7 +95,16 @@ function SeatSlot({
   });
 
   const isSeatOver = !isDisabled && activeDragKind === "guest" && droppable.isOver;
-  const isSwapTarget = isSeatOver && !isVisuallyEmpty;
+  const isSwapTargetPreview =
+    !isPreviewMode &&
+    activeDragKind === "guest" &&
+    !!activeDragGuestId &&
+    guestId !== null &&
+    guestSwapPreview?.sourceGuestId === activeDragGuestId &&
+    guestSwapPreview?.targetTableNumber === tableNumber &&
+    guestSwapPreview?.targetSeatIndex === seatIndex &&
+    guestSwapPreview?.targetGuestId === guestId;
+  const isSwapTarget = isSwapTargetPreview;
   const isSwapOriginPreview =
     isOriginSeat &&
     guestSwapPreview?.sourceTableNumber === tableNumber &&
@@ -121,6 +130,7 @@ function SeatSlot({
       ref={droppable.setNodeRef}
       data-seat-id={`seat-${tableNumber}-${seatIndex}`}
       data-seat-slot
+      data-guest-id={guestId ?? ""}
       data-disabled={isDisabled || undefined}
       className={cn(
         "relative flex h-4.75 min-h-4.75 min-w-0 items-center overflow-hidden rounded-sm transition-[background-color,border-color,box-shadow] duration-100 box-border",

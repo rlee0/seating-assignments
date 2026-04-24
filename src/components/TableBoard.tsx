@@ -20,6 +20,8 @@ export interface GuestSwapPreview {
   sourceTableNumber: number;
   sourceSeatIndex: number;
   sourceGuestId: string;
+  targetTableNumber: number;
+  targetSeatIndex: number;
   targetGuestId: string;
 }
 
