@@ -64,18 +64,18 @@ export function parseGuestsFromRows(rawRows: GuestInputRow[]): ParsedData {
   const guests = new Map<string, Guest>();
   const parties = new Map<string, Party>();
   const warnings: string[] = [];
-  const householdToPartyId = new Map<string, string>();
+  const partyNameToPartyId = new Map<string, string>();
 
   rawRows.forEach((row) => {
     const guestId = row.id;
 
-    // Get or create a stable party id keyed by household
+    // Get or create a stable party id keyed by party name
     let partyId: string;
-    if (householdToPartyId.has(row.household)) {
-      partyId = householdToPartyId.get(row.household)!;
+    if (partyNameToPartyId.has(row.party)) {
+      partyId = partyNameToPartyId.get(row.party)!;
     } else {
-      partyId = `p${householdToPartyId.size}`;
-      householdToPartyId.set(row.household, partyId);
+      partyId = `p${partyNameToPartyId.size}`;
+      partyNameToPartyId.set(row.party, partyId);
     }
 
     const guest: Guest = {
@@ -83,15 +83,15 @@ export function parseGuestsFromRows(rawRows: GuestInputRow[]): ParsedData {
       fullName: row.fullName,
       partyId,
       host: row.host,
-      group: row.group,
+      circle: row.circle,
     };
     guests.set(guestId, guest);
 
     if (!parties.has(partyId)) {
       parties.set(partyId, {
         id: partyId,
-        household: row.household,
-        group: row.group,
+        party: row.party,
+        circle: row.circle,
         host: row.host,
         guestIds: [],
       });
@@ -99,18 +99,18 @@ export function parseGuestsFromRows(rawRows: GuestInputRow[]): ParsedData {
     const party = parties.get(partyId)!;
     party.guestIds.push(guestId);
 
-    if (!row.group) {
-      warnings.push(`"${row.fullName}" has no group assigned`);
+    if (!row.circle) {
+      warnings.push(`"${row.fullName}" has no circle assigned`);
     }
 
     if (party.host !== row.host) {
-      warnings.push(`Household "${row.household}": mixed hosts ("${party.host}", "${row.host}")`);
+      warnings.push(`Party "${row.party}": mixed hosts ("${party.host}", "${row.host}")`);
     }
 
-    // Warn on mixed-group households (same household, different group value)
-    if (party.group && row.group && party.group !== row.group) {
+    // Warn on mixed-circle parties (same party, different circle value)
+    if (party.circle && row.circle && party.circle !== row.circle) {
       warnings.push(
-        `Household "${row.household}": mixed groups ("${party.group}", "${row.group}")`
+        `Party "${row.party}": mixed circles ("${party.circle}", "${row.circle}")`
       );
     }
   });

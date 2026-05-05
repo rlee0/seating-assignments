@@ -1,8 +1,8 @@
-export type HighlightDomain = "group" | "household" | "host" | "default";
+export type HighlightDomain = "circle" | "party" | "host" | "default";
 
 export interface DomainCounts {
-  group: number;
-  household: number;
+  circle: number;
+  party: number;
   host: number;
 }
 
@@ -21,15 +21,15 @@ const GOLDEN_ANGLE = 137.508;
 const TONE_PATTERN = [0, 1, -1, 2, -2, 3, -3, 4, -4];
 
 const DISTINCT_HUE_CAPACITY: Record<HighlightDomain, number> = {
-  group: 20,
-  household: 120,
+  circle: 20,
+  party: 120,
   host: 24,
   default: 20,
 };
 
 const DOMAIN_SEED: Record<HighlightDomain, number> = {
-  group: 11,
-  household: 17,
+  circle: 11,
+  party: 17,
   host: 7,
   default: 11,
 };
@@ -53,7 +53,7 @@ export function getDomainFromToken(token: string): HighlightDomain {
   if (separatorIndex < 0) return "default";
 
   const domain = token.slice(0, separatorIndex);
-  if (domain === "group" || domain === "household" || domain === "host") return domain;
+  if (domain === "circle" || domain === "party" || domain === "host") return domain;
   return "default";
 }
 
@@ -108,10 +108,10 @@ export function createHighlightPalettes(
   counts: DomainCounts
 ): Record<HighlightDomain, DomainPalette> {
   return {
-    group: buildDomainPalette("group", counts.group),
-    household: buildDomainPalette("household", counts.household),
+    circle: buildDomainPalette("circle", counts.circle),
+    party: buildDomainPalette("party", counts.party),
     host: buildDomainPalette("host", counts.host),
-    default: buildDomainPalette("default", counts.group),
+    default: buildDomainPalette("default", counts.circle),
   };
 }
 
