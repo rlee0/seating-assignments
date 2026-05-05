@@ -4,6 +4,7 @@ import React from "react";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../src/App";
+import { BOARD_ZOOM_STORAGE_KEY } from "../src/store/localStorage";
 import { GUEST_DATA_SOURCE_KEY, GUEST_DATA_STORAGE_KEY, STORAGE_KEY } from "../src/types";
 import { getGuestSourceSignature } from "../src/data/parseGuests";
 import { createInitialState, seatingReducer, type GuestProfile } from "../src/store/reducer";
@@ -1042,6 +1043,32 @@ describe("Flow 9 — table drag updates table positions", () => {
     seedApp(rows, state);
 
     const { container } = render(<App />);
+
+    triggerDragEnd({
+      id: "sortable-table-1",
+      data: { kind: "table", tableNumber: 1, name: "Table 1", origin: "table" },
+      overId: "cell-4-4",
+    });
+
+    expect(getTableNameAtCell(container, 4, 4)).toBe("Table 1");
+    expect(getTableNameAtCell(container, 0, 0)).toBeNull();
+    expect(getSeatGuestName(container, 1, 0)).toBe("Alice");
+  });
+
+  it("keeps table drag targets stable when board starts at non-default zoom", () => {
+    const rows = makeRows([{ name: "Alice" }]);
+    let state = createInitialState(["g0"]);
+    state = assignSingle(state, 1, "g0", 0);
+    state = {
+      ...state,
+      tables: state.tables.filter((table) => table.tableNumber !== 25),
+    };
+    seedApp(rows, state);
+    localStorage.setItem(BOARD_ZOOM_STORAGE_KEY, "1.4");
+
+    const { container } = render(<App />);
+    const resetZoomButton = screen.getByRole("button", { name: /reset zoom/i });
+    expect(resetZoomButton.textContent).toContain("140%");
 
     triggerDragEnd({
       id: "sortable-table-1",

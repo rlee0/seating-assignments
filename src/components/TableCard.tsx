@@ -135,12 +135,12 @@ function SeatSlot({
       data-guest-id={guestId ?? ""}
       data-disabled={isDisabled || undefined}
       className={cn(
-        "relative flex h-4.75 min-h-4.75 min-w-0 items-center overflow-hidden rounded-sm transition-[background-color,border-color,box-shadow] duration-100 box-border",
+        "relative flex h-4.75 w-16 shrink-0 items-center overflow-hidden rounded-md transition-[background-color,border-color,box-shadow] duration-100 box-border",
         isDisabled
           ? "border bg-[repeating-linear-gradient(135deg,var(--table-seat-disabled-bg-a),var(--table-seat-disabled-bg-a)_3px,var(--table-seat-disabled-bg-b)_3px,var(--table-seat-disabled-bg-b)_8px)] border-(--table-seat-disabled-border)"
           : isVisuallyEmpty
-            ? "border border-dashed border-(--table-seat-empty-border) bg-(--table-seat-empty-bg)"
-            : "min-w-0 overflow-visible bg-transparent",
+            ? "border-2 border-dashed border-(--table-seat-empty-border) bg-(--table-seat-empty-bg)"
+            : "overflow-hidden bg-transparent",
         isSeatOver &&
           (isVisuallyEmpty
             ? "border border-solid border-(--table-drop-border) bg-(--table-drop-bg)"
@@ -170,6 +170,7 @@ function SeatSlot({
             isPreviewMode || isSwapTarget || isSwapOriginPreview ? undefined : onEditGuest
           }
           className={[
+            "h-full w-full",
             isOriginSeat && !isSwapOriginPreview
               ? "absolute inset-0 opacity-0 pointer-events-none"
               : null,
@@ -317,6 +318,7 @@ export default function TableCard({
   );
   const allSeatedGuestsLocked = occupancy > 0 && seatedGuestIds.every((id) => lockedSet.has(id));
   const isFull = occupancy >= effectiveCapacity;
+  const isLargeRoundTable = table.seatConfig.shape === "round" && totalCapacity >= 10;
 
   // Compute seat index ranges based on shape
   const sideCounts = table.seatConfig.shape === "rectangular" ? table.seatConfig.sideCounts : null;
@@ -329,6 +331,15 @@ export default function TableCard({
   const rightSeats = seated.slice(topCount, topCount + rightCount);
   const bottomSeats = seated.slice(topCount + rightCount, topCount + rightCount + bottomCount);
   const leftSeats = seated.slice(topCount + rightCount + bottomCount);
+
+  // Keep side rails and top/bottom tracks on the same horizontal span for rectangular tables.
+  const seatTrackRem = 4;
+  const seatGapRem = 0.5;
+  const horizontalSeatCount = Math.max(topCount, bottomCount, 1);
+  const horizontalSpanRem =
+    horizontalSeatCount * seatTrackRem + Math.max(0, horizontalSeatCount - 1) * seatGapRem;
+  const centerTrackRem = Math.max(8, horizontalSpanRem - seatTrackRem * 2 - seatGapRem * 2);
+  const middleRowTemplate = `${seatTrackRem}rem ${centerTrackRem}rem ${seatTrackRem}rem`;
 
   const cardClass = cn(
     "flex min-h-0 cursor-grab flex-col gap-1.5 rounded-lg border border-border bg-card p-2.5 transition-[border-color,background,box-shadow] duration-150 active:cursor-grabbing",
@@ -429,7 +440,10 @@ export default function TableCard({
                 const radiusPercent = seatCount <= 4 ? 34 : seatCount <= 8 ? 39 : 42;
 
                 return (
-                  <div className="relative min-h-44" data-table-card-body data-table-shape="round">
+                  <div
+                    className="relative min-h-44 px-1.5 py-1.5"
+                    data-table-card-body
+                    data-table-shape="round">
                     {seated.map((guestId, seatIndex) => {
                       const angle =
                         -Math.PI / 2 + (Math.PI * 2 * seatIndex) / Math.max(1, seatCount);
@@ -453,7 +467,12 @@ export default function TableCard({
                     <div
                       data-table-center-label
                       data-table-shape="round"
-                      className="absolute top-1/2 left-1/2 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border border-border bg-background/80 px-3 py-2">
+                      className={cn(
+                        "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 border border-border/80 bg-background/88 shadow-[inset_0_1px_0_rgba(255,255,255,0.35)]",
+                        isLargeRoundTable
+                          ? "w-36 rounded-full px-5 py-3.5"
+                          : "w-32 rounded-full px-4 py-3"
+                      )}>
                       {tableLabelContent}
                     </div>
                   </div>
@@ -462,22 +481,24 @@ export default function TableCard({
 
               return (
                 <div
-                  className="flex min-h-44 flex-col justify-center gap-3"
+                  className="grid min-h-44 grid-rows-[auto_minmax(0,1fr)_auto] gap-2.5 px-1.5 py-1.5"
                   data-table-card-body
                   data-table-shape="rectangular">
                   {/* Top seats */}
                   {topCount > 0 && (
                     <div
-                      className="grid min-w-0 gap-1.5 px-1"
-                      style={{ gridTemplateColumns: `repeat(${topCount}, minmax(0, 1fr))` }}>
+                      className="grid min-w-0 justify-center gap-2"
+                      style={{ gridTemplateColumns: `repeat(${topCount}, minmax(4rem, 4rem))` }}>
                       {topSeats.map((guestId, i) => renderSeat(guestId, i))}
                     </div>
                   )}
 
-                  {/* Middle row: left | label | right with a fixed center column for stable alignment. */}
-                  <div className="grid min-w-0 grid-cols-[4rem_minmax(0,1fr)_4rem] items-center gap-1.5">
+                  {/* Middle row: balanced outer rails around a centered label shell. */}
+                  <div
+                    className="grid min-w-0 items-center justify-center gap-2"
+                    style={{ gridTemplateColumns: middleRowTemplate }}>
                     {leftCount > 0 && (
-                      <div className="flex min-w-0 flex-col gap-1">
+                      <div className="grid min-w-0 content-center gap-2">
                         {leftSeats.map((guestId, i) =>
                           renderSeat(guestId, topCount + rightCount + bottomCount + i)
                         )}
@@ -487,11 +508,11 @@ export default function TableCard({
                     <div
                       data-table-center-label
                       data-table-shape="rectangular"
-                      className="mx-auto flex w-full max-w-28 rounded-lg border border-border bg-background/80 px-3 py-2">
+                      className="mx-auto flex min-h-16 w-full items-center justify-center rounded-xl border border-border/80 bg-background/88 px-4 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.35)]">
                       {tableLabelContent}
                     </div>
                     {rightCount > 0 && (
-                      <div className="flex min-w-0 flex-col gap-1">
+                      <div className="grid min-w-0 content-center gap-2">
                         {rightSeats.map((guestId, i) => renderSeat(guestId, topCount + i))}
                       </div>
                     )}
@@ -501,9 +522,9 @@ export default function TableCard({
                   {/* Bottom seats */}
                   {bottomCount > 0 && (
                     <div
-                      className="grid min-w-0 gap-1.5 px-1"
+                      className="grid min-w-0 justify-center gap-2"
                       style={{
-                        gridTemplateColumns: `repeat(${bottomCount}, minmax(0, 1fr))`,
+                        gridTemplateColumns: `repeat(${bottomCount}, minmax(4rem, 4rem))`,
                       }}>
                       {bottomSeats.map((guestId, i) =>
                         renderSeat(guestId, topCount + rightCount + i)

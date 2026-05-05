@@ -9,7 +9,17 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { AlertTriangle, Download, Moon, Plus, RotateCcw, Sun, Upload } from "lucide-react";
+import {
+  AlertTriangle,
+  Download,
+  Moon,
+  Plus,
+  RotateCcw,
+  Sun,
+  Upload,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SeatingProvider, useSeating } from "./store/SeatingContext";
 import { SearchProvider, useSearch } from "./store/SearchContext";
@@ -45,12 +55,14 @@ import {
   isCompatibleState,
   isGuestInputRowLike,
   loadPersistedGuestData,
+  loadPersistedZoom,
   resolvePreferredTheme,
   reconcileStateToGuestIds,
   saveGuestDataSourceSignature,
   savePersistedGuestData,
   savePersistedSeating,
   saveTheme,
+  saveZoom,
   type AppTheme,
 } from "./store/localStorage";
 import { cn } from "./lib/utils";
@@ -96,6 +108,11 @@ function getInitialGuestData(): {
   return {
     guestRows: persisted?.rows ?? [],
   };
+}
+
+function clampBoardZoom(value: number): number {
+  const roundedToTenth = Math.round(value * 10) / 10;
+  return Math.min(1.5, Math.max(0.5, roundedToTenth));
 }
 
 function isSeatValue(value: unknown): value is string | null {
@@ -863,8 +880,25 @@ function SeatingApp({
   }, []);
 
   const [mobilePanel, setMobilePanel] = useState<"sidebar" | "tables">("sidebar");
+  const [boardZoom, setBoardZoom] = useState(() => loadPersistedZoom());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const fileDragDepthRef = useRef(0);
+
+  useEffect(() => {
+    saveZoom(boardZoom);
+  }, [boardZoom]);
+
+  const handleZoomOut = useCallback(() => {
+    setBoardZoom((value) => clampBoardZoom(value - 0.1));
+  }, []);
+
+  const handleZoomReset = useCallback(() => {
+    setBoardZoom(1);
+  }, []);
+
+  const handleZoomIn = useCallback(() => {
+    setBoardZoom((value) => clampBoardZoom(value + 0.1));
+  }, []);
 
   const guestRowsById = useMemo(
     () => new Map(guestRows.map((row) => [row.id, row] as const)),
@@ -1634,6 +1668,37 @@ function SeatingApp({
               <Plus size={14} aria-hidden="true" />
               <span className="max-sm:hidden">Add Table</span>
             </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-label="Zoom out"
+                onClick={handleZoomOut}
+                disabled={boardZoom <= 0.5}>
+                <ZoomOut size={14} aria-hidden="true" />
+                <span className="max-sm:hidden">Zoom Out</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-label="Reset zoom"
+                onClick={handleZoomReset}
+                disabled={boardZoom === 1}>
+                {Math.round(boardZoom * 100)}%
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-label="Zoom in"
+                onClick={handleZoomIn}
+                disabled={boardZoom >= 1.5}>
+                <ZoomIn size={14} aria-hidden="true" />
+                <span className="max-sm:hidden">Zoom In</span>
+              </Button>
+            </div>
             <Button type="button" variant="outline" size="sm" onClick={onThemeToggle}>
               {theme === "dark" ? (
                 <Sun size={14} aria-hidden="true" />
@@ -1736,6 +1801,7 @@ function SeatingApp({
               activeDragGuestId={activeDragGuestId}
               autoSeatPreview={autoSeatPreview}
               guestSwapPreview={guestSwapPreview}
+              zoom={boardZoom}
               onEditGuest={handleEditGuest}
               onDeleteGuest={handleDeleteGuest}
               onEditTable={handleEditTable}

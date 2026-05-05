@@ -1,12 +1,13 @@
 /* @vitest-environment jsdom */
 
-import React from "react";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { GUEST_DATA_SOURCE_KEY, GUEST_DATA_STORAGE_KEY, STORAGE_KEY } from "../src/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import App from "../src/App";
+import { BOARD_ZOOM_STORAGE_KEY } from "../src/store/localStorage";
+import React from "react";
 import { getGuestSourceSignature } from "../src/data/parseGuests";
-import { GUEST_DATA_SOURCE_KEY, GUEST_DATA_STORAGE_KEY, STORAGE_KEY } from "../src/types";
 
 vi.mock("@dnd-kit/core", async () => {
   const ReactLib = await import("react");
@@ -195,5 +196,56 @@ describe("table management dialog flows", () => {
     expect(table2Card).not.toBeNull();
     fireEvent.contextMenu(table2Card!);
     expect(screen.getByRole("menuitem", { name: /^edit table$/i })).not.toBeNull();
+  });
+
+  it("supports zoom controls, persists zoom, and scales board content after board resize", async () => {
+    localStorage.setItem(BOARD_ZOOM_STORAGE_KEY, "1.3");
+
+    const { container } = render(<App />);
+    const zoomInButton = screen.getByRole("button", { name: /zoom in/i });
+    const zoomOutButton = screen.getByRole("button", { name: /zoom out/i });
+    const resetZoomButton = screen.getByRole("button", { name: /reset zoom/i });
+
+    expect(resetZoomButton.textContent).toContain("130%");
+
+    while (!zoomInButton.hasAttribute("disabled")) {
+      fireEvent.click(zoomInButton);
+    }
+
+    expect(resetZoomButton.textContent).toContain("150%");
+    expect(localStorage.getItem(BOARD_ZOOM_STORAGE_KEY)).toBe("1.5");
+
+    while (!zoomOutButton.hasAttribute("disabled")) {
+      fireEvent.click(zoomOutButton);
+    }
+
+    expect(resetZoomButton.textContent).toContain("50%");
+    expect(localStorage.getItem(BOARD_ZOOM_STORAGE_KEY)).toBe("0.5");
+
+    fireEvent.click(resetZoomButton);
+    expect(resetZoomButton.textContent).toContain("100%");
+    expect(localStorage.getItem(BOARD_ZOOM_STORAGE_KEY)).toBe("1");
+
+    const contentSize = container.querySelector<HTMLElement>("[data-board-content-size]");
+    const viewport = container.querySelector<HTMLElement>("[data-board-viewport]");
+    expect(contentSize).not.toBeNull();
+    expect(viewport).not.toBeNull();
+
+    const initialMinWidth = Number.parseFloat(contentSize?.style.minWidth ?? "0");
+    fireEvent.contextMenu(viewport!);
+    fireEvent.click(screen.getByRole("menuitem", { name: /board settings/i }));
+
+    const dialog = screen.getByRole("dialog", { name: /board settings/i });
+    fireEvent.change(within(dialog).getByLabelText(/rows/i), { target: { value: "8" } });
+    fireEvent.change(within(dialog).getByLabelText(/columns/i), { target: { value: "12" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /save settings/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /board settings/i })).toBeNull();
+    });
+
+    const resizedContent = container.querySelector<HTMLElement>("[data-board-content-size]");
+    const resizedMinWidth = Number.parseFloat(resizedContent?.style.minWidth ?? "0");
+    expect(resizedMinWidth).toBeGreaterThan(initialMinWidth);
   });
 });

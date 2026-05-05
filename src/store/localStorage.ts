@@ -15,6 +15,7 @@ import { normalizeGuestInputRows } from "../data/parseGuests";
 
 export const MAX_UNDO_HISTORY = 100;
 export const THEME_STORAGE_KEY = "seating-theme";
+export const BOARD_ZOOM_STORAGE_KEY = "seating-board-zoom-v1";
 export type AppTheme = "light" | "dark";
 
 export function resolvePreferredTheme(): AppTheme {
@@ -42,6 +43,29 @@ export function applyTheme(theme: AppTheme): void {
 export function saveTheme(theme: AppTheme): void {
   try {
     localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {
+    // Ignore storage errors silently
+  }
+}
+
+export function loadPersistedZoom(): number {
+  try {
+    const raw = localStorage.getItem(BOARD_ZOOM_STORAGE_KEY);
+    if (!raw) return 1;
+
+    const parsed = Number.parseFloat(raw);
+    if (!Number.isFinite(parsed)) return 1;
+    if (parsed < 0.5 || parsed > 1.5) return 1;
+
+    return parsed;
+  } catch {
+    return 1;
+  }
+}
+
+export function saveZoom(zoom: number): void {
+  try {
+    localStorage.setItem(BOARD_ZOOM_STORAGE_KEY, String(zoom));
   } catch {
     // Ignore storage errors silently
   }
@@ -288,6 +312,7 @@ export function clearPersistedAppState(): void {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(GUEST_DATA_STORAGE_KEY);
     localStorage.removeItem(GUEST_DATA_SOURCE_KEY);
+    localStorage.removeItem(BOARD_ZOOM_STORAGE_KEY);
   } catch {
     // Ignore storage errors silently
   }

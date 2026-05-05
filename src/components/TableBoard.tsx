@@ -37,12 +37,18 @@ interface Props {
   activeDragGuestId: string | null;
   autoSeatPreview: AutoSeatPreview | null;
   guestSwapPreview: GuestSwapPreview | null;
+  zoom: number;
   onEditGuest: (guestId: string) => void;
   onDeleteGuest: (guestId: string) => void;
   onEditTable: (tableNumber: number) => void;
   onDeleteTable: (tableNumber: number) => void;
   onBoardSettings: () => void;
 }
+
+const BASE_BOARD_CELL_WIDTH_REM = 20;
+const BASE_BOARD_CELL_HEIGHT_REM = 12;
+const DEFAULT_GRID_GAP_REM = 0.625;
+const DENSE_GRID_GAP_REM = 0.375;
 
 function getPositionKey(row: number, column: number): string {
   return `${row}:${column}`;
@@ -71,7 +77,7 @@ function BoardCell({
       data-board-cell-id={cellId}
       data-board-cell
       className={cn(
-        "relative min-h-41 rounded-md border border-dashed border-border/70 p-1",
+        "relative min-h-48 rounded-md border border-dashed border-border/70 p-1",
         isOver && "border-(--table-drop-border) bg-(--table-drop-bg)"
       )}>
       {children}
@@ -97,6 +103,7 @@ export default function TableBoard({
   activeDragGuestId,
   autoSeatPreview,
   guestSwapPreview,
+  zoom,
   onEditGuest,
   onDeleteGuest,
   onEditTable,
@@ -105,21 +112,8 @@ export default function TableBoard({
 }: Props) {
   const { state } = useSeating();
 
-  const { setNodeRef: setAutoSeatRef, isOver: isAutoSeatOver } = useDroppable({
-    id: "auto-seat",
-    disabled: activeDragKind === null,
-  });
-
   const tableIds = state.tables.map((table) => `sortable-table-${table.tableNumber}`);
   const showPreview = autoSeatPreview !== null;
-  const isAutoSeatEnabled = activeDragKind !== null;
-
-  const autoSeatTitle = isAutoSeatOver ? "Release to auto-seat" : "Auto-seat guests";
-  const autoSeatCopy = !isAutoSeatEnabled
-    ? "Drag a guest, circle, party, or table here to auto-seat them."
-    : isAutoSeatOver
-      ? "We will find the best available seats across tables."
-      : "Drop here to assign guests across tables automatically.";
 
   const previewTablesByNumber = useMemo(() => {
     if (!autoSeatPreview) return null;
@@ -144,73 +138,93 @@ export default function TableBoard({
     () => Array.from({ length: state.board.columns }, (_, i) => i),
     [state.board.columns]
   );
+  const useDenseGap = state.board.rows > 5 || state.board.columns > 5;
+  const gridGapRem = useDenseGap ? DENSE_GRID_GAP_REM : DEFAULT_GRID_GAP_REM;
+  const boardWidthRem =
+    state.board.columns * BASE_BOARD_CELL_WIDTH_REM +
+    Math.max(0, state.board.columns - 1) * gridGapRem;
+  const boardHeightRem =
+    state.board.rows * BASE_BOARD_CELL_HEIGHT_REM + Math.max(0, state.board.rows - 1) * gridGapRem;
+  const scaledBoardWidthRem = boardWidthRem * zoom;
+  const scaledBoardHeightRem = boardHeightRem * zoom;
 
   return (
     <SortableContext items={tableIds} strategy={swapSortingStrategy}>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <main className="flex min-h-0 flex-1 flex-col items-stretch gap-3 overflow-y-auto p-3">
-            <section
-              ref={setAutoSeatRef}
-              className={cn(
-                "flex min-h-16 flex-none flex-col items-center justify-center rounded-[10px] border border-dashed border-border bg-[linear-gradient(180deg,var(--card)_0%,var(--auto-seat-bg-end)_100%)] px-4 py-3.5 text-center transition-[border-color,background,color] duration-150",
-                activeDragKind !== null && "border-(--auto-seat-active-border)",
-                isAutoSeatOver && "border-(--table-drop-border) bg-(--table-drop-bg)"
-              )}>
-              <h3 className="m-0 text-xs font-semibold text-foreground">{autoSeatTitle}</h3>
-              <p className="mt-1 mb-0 text-xs text-muted-foreground">{autoSeatCopy}</p>
-            </section>
+          <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+            <div className="min-h-0 flex-1 overflow-auto p-3" data-board-viewport>
+              <div
+                data-board-content-size
+                style={{
+                  minWidth: `${scaledBoardWidthRem}rem`,
+                  minHeight: `${scaledBoardHeightRem}rem`,
+                }}>
+                <div
+                  data-board-scale
+                  style={{
+                    width: `${boardWidthRem}rem`,
+                    minHeight: `${boardHeightRem}rem`,
+                    transform: `scale(${zoom})`,
+                    transformOrigin: "top left",
+                  }}>
+                  <div
+                    className={cn("grid content-start", useDenseGap ? "gap-1.5" : "gap-2.5")}
+                    style={{
+                      gridTemplateColumns: `repeat(${state.board.columns}, minmax(${BASE_BOARD_CELL_WIDTH_REM}rem, 1fr))`,
+                    }}>
+                    {rowIndexes.flatMap((row) =>
+                      columnIndexes.map((column) => {
+                        const table = tablesByPosition.get(getPositionKey(row, column)) ?? null;
 
-            <div
-              className="grid content-start gap-2.5"
-              style={{ gridTemplateColumns: `repeat(${state.board.columns}, minmax(0, 1fr))` }}>
-              {rowIndexes.flatMap((row) =>
-                columnIndexes.map((column) => {
-                  const table = tablesByPosition.get(getPositionKey(row, column)) ?? null;
+                        if (!table) {
+                          return (
+                            <BoardCell
+                              key={getPositionKey(row, column)}
+                              row={row}
+                              column={column}
+                              activeDragKind={activeDragKind}
+                            />
+                          );
+                        }
 
-                  if (!table) {
-                    return (
-                      <BoardCell
-                        key={getPositionKey(row, column)}
-                        row={row}
-                        column={column}
-                        activeDragKind={activeDragKind}
-                      />
-                    );
-                  }
+                        const previewTable = previewTablesByNumber?.get(table.tableNumber) ?? null;
+                        const displayGuestIds = previewTable
+                          ? previewTable.guestIds
+                          : table.guestIds;
+                        const previewSeatKinds = previewTable
+                          ? computePreviewSeatKinds(table.guestIds, previewTable.guestIds)
+                          : table.guestIds.map(() => null);
+                        const hasTablePreviewChanges =
+                          previewTable !== null && previewSeatKinds.some((k) => k !== null);
 
-                  const previewTable = previewTablesByNumber?.get(table.tableNumber) ?? null;
-                  const displayGuestIds = previewTable ? previewTable.guestIds : table.guestIds;
-                  const previewSeatKinds = previewTable
-                    ? computePreviewSeatKinds(table.guestIds, previewTable.guestIds)
-                    : table.guestIds.map(() => null);
-                  const hasTablePreviewChanges =
-                    previewTable !== null && previewSeatKinds.some((k) => k !== null);
-
-                  return (
-                    <BoardCell
-                      key={getPositionKey(row, column)}
-                      row={row}
-                      column={column}
-                      activeDragKind={activeDragKind}>
-                      <TableCard
-                        table={table}
-                        activeDragKind={activeDragKind}
-                        activeDragGuestId={activeDragGuestId}
-                        guestSwapPreview={guestSwapPreview}
-                        onEditGuest={onEditGuest}
-                        onDeleteGuest={onDeleteGuest}
-                        onEditTable={onEditTable}
-                        onDeleteTable={onDeleteTable}
-                        displayGuestIds={displayGuestIds}
-                        previewSeatKinds={previewSeatKinds}
-                        isPreviewMode={showPreview}
-                        hasTablePreviewChanges={hasTablePreviewChanges}
-                      />
-                    </BoardCell>
-                  );
-                })
-              )}
+                        return (
+                          <BoardCell
+                            key={getPositionKey(row, column)}
+                            row={row}
+                            column={column}
+                            activeDragKind={activeDragKind}>
+                            <TableCard
+                              table={table}
+                              activeDragKind={activeDragKind}
+                              activeDragGuestId={activeDragGuestId}
+                              guestSwapPreview={guestSwapPreview}
+                              onEditGuest={onEditGuest}
+                              onDeleteGuest={onDeleteGuest}
+                              onEditTable={onEditTable}
+                              onDeleteTable={onDeleteTable}
+                              displayGuestIds={displayGuestIds}
+                              previewSeatKinds={previewSeatKinds}
+                              isPreviewMode={showPreview}
+                              hasTablePreviewChanges={hasTablePreviewChanges}
+                            />
+                          </BoardCell>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </main>
         </ContextMenuTrigger>
