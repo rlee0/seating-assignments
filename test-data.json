@@ -2,14 +2,14 @@
   "version": 2,
   "exportedAt": "2026-04-22T00:00:00.000Z",
   "guests": [
-    { "name": "Alice", "household": "Alpha Household", "group": "Ceremony", "host": "Ryan" },
-    { "name": "Bob", "household": "Alpha Household", "group": "Ceremony", "host": "Ryan" },
-    { "name": "Charlie", "household": "Beta Household", "group": "Ceremony", "host": "Ryan" },
-    { "name": "Diana", "household": "Beta Household", "group": "Ceremony", "host": "Ryan" },
-    { "name": "Eve", "household": "Gamma Household", "group": "Reception", "host": "Ryan" },
-    { "name": "Frank", "household": "Gamma Household", "group": "Reception", "host": "Ryan" },
-    { "name": "Grace", "household": "Delta Household", "group": "Reception", "host": "Ryan" },
-    { "name": "Henry", "household": "Delta Household", "group": "Reception", "host": "Ryan" }
+    { "name": "Alice", "party": "Alpha Party", "circle": "Ceremony", "host": "Ryan" },
+    { "name": "Bob", "party": "Alpha Party", "circle": "Ceremony", "host": "Ryan" },
+    { "name": "Charlie", "party": "Beta Party", "circle": "Ceremony", "host": "Ryan" },
+    { "name": "Diana", "party": "Beta Party", "circle": "Ceremony", "host": "Ryan" },
+    { "name": "Eve", "party": "Gamma Party", "circle": "Reception", "host": "Ryan" },
+    { "name": "Frank", "party": "Gamma Party", "circle": "Reception", "host": "Ryan" },
+    { "name": "Grace", "party": "Delta Party", "circle": "Reception", "host": "Ryan" },
+    { "name": "Henry", "party": "Delta Party", "circle": "Reception", "host": "Ryan" }
   ],
   "tables": [
     {
