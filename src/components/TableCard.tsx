@@ -19,20 +19,22 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import GuestChip from "./GuestChip";
 import type { GuestSwapPreview } from "./TableBoard";
-import { TABLE_CAPACITY } from "../types";
 import type { TableState } from "../types";
 import { cn } from "../lib/utils";
+import { getTableSeatCount } from "../types";
 import { useDroppable } from "@dnd-kit/core";
 import { useSeating } from "../store/SeatingContext";
 import { useSortable } from "@dnd-kit/sortable";
 
 interface Props {
   table: TableState;
-  activeDragKind: "household" | "guest" | "group" | "table" | null;
+  activeDragKind: "party" | "guest" | "circle" | "table" | null;
   activeDragGuestId: string | null;
   guestSwapPreview: GuestSwapPreview | null;
   onEditGuest: (guestId: string) => void;
   onDeleteGuest: (guestId: string) => void;
+  onEditTable: (tableNumber: number) => void;
+  onDeleteTable: (tableNumber: number) => void;
   displayGuestIds?: Array<string | null>;
   previewSeatKinds?: Array<"added" | "changed" | "deleted" | null>;
   isPreviewMode?: boolean;
@@ -62,7 +64,7 @@ function SeatSlot({
   guestId: string | null;
   /** Full name used in preview mode to avoid registering a duplicate useDraggable ID that kills the active drag. */
   guestFullName: string | null;
-  activeDragKind: "household" | "guest" | "group" | "table" | null;
+  activeDragKind: "party" | "guest" | "circle" | "table" | null;
   activeDragGuestId: string | null;
   guestSwapPreview: GuestSwapPreview | null;
   isPreviewMode: boolean;
@@ -258,6 +260,8 @@ export default function TableCard({
   guestSwapPreview,
   onEditGuest,
   onDeleteGuest,
+  onEditTable,
+  onDeleteTable,
   displayGuestIds,
   previewSeatKinds,
   isPreviewMode = false,
@@ -303,7 +307,8 @@ export default function TableCard({
   const seated = displayGuestIds ?? table.guestIds;
   const seatedGuestIds = seated.filter((guestId): guestId is string => guestId !== null);
   const occupancy = seatedGuestIds.length;
-  const effectiveCapacity = TABLE_CAPACITY - disabledSeatsSet.size;
+  const totalCapacity = getTableSeatCount(table.seatConfig);
+  const effectiveCapacity = totalCapacity - disabledSeatsSet.size;
   const hasDisabledEmptySeats = table.guestIds.some(
     (guestId, seatIndex) => guestId === null && disabledSeatsSet.has(seatIndex)
   );
@@ -313,8 +318,17 @@ export default function TableCard({
   const allSeatedGuestsLocked = occupancy > 0 && seatedGuestIds.every((id) => lockedSet.has(id));
   const isFull = occupancy >= effectiveCapacity;
 
-  const topRow = seated.slice(0, 4);
-  const bottomRow = seated.slice(4, 8);
+  // Compute seat index ranges based on shape
+  const sideCounts = table.seatConfig.shape === "rectangular" ? table.seatConfig.sideCounts : null;
+  const topCount = sideCounts?.top ?? Math.ceil(seated.length / 2);
+  const rightCount = sideCounts?.right ?? 0;
+  const bottomCount = sideCounts?.bottom ?? Math.floor(seated.length / 2);
+  const leftCount = sideCounts?.left ?? 0;
+
+  const topSeats = seated.slice(0, topCount);
+  const rightSeats = seated.slice(topCount, topCount + rightCount);
+  const bottomSeats = seated.slice(topCount + rightCount, topCount + rightCount + bottomCount);
+  const leftSeats = seated.slice(topCount + rightCount + bottomCount);
 
   const cardClass = cn(
     "flex min-h-0 cursor-grab flex-col gap-1.5 rounded-lg border border-border bg-card p-2.5 transition-[border-color,background,box-shadow] duration-150 active:cursor-grabbing",
@@ -353,27 +367,26 @@ export default function TableCard({
             data-table-card
             {...containerListeners}
             {...attributes}>
-            {/* Top 4 seats */}
-            <div className="grid min-w-0 grid-cols-4 gap-1">
-              {topRow.map((guestId, i) => (
+            {(() => {
+              const renderSeat = (guestId: string | null, seatIndex: number) => (
                 <SeatSlot
-                  key={i}
+                  key={seatIndex}
                   tableNumber={table.tableNumber}
-                  seatIndex={i}
+                  seatIndex={seatIndex}
                   guestId={guestId}
                   guestFullName={guestId ? (guests.get(guestId)?.fullName ?? null) : null}
                   activeDragKind={activeDragKind}
                   activeDragGuestId={activeDragGuestId}
                   guestSwapPreview={guestSwapPreview}
                   isPreviewMode={isPreviewMode}
-                  previewSeatKind={previewSeatKinds?.[i] ?? null}
-                  isDisabled={disabledSeatsSet.has(i)}
+                  previewSeatKind={previewSeatKinds?.[seatIndex] ?? null}
+                  isDisabled={disabledSeatsSet.has(seatIndex)}
                   isLocked={guestId !== null && lockedSet.has(guestId)}
                   onToggleDisabled={() =>
                     dispatch({
                       type: "TOGGLE_SEAT_DISABLED",
                       tableNumber: table.tableNumber,
-                      seatIndex: i,
+                      seatIndex,
                     })
                   }
                   onToggleLock={() => {
@@ -392,74 +405,128 @@ export default function TableCard({
                   onEditGuest={onEditGuest}
                   onDeleteGuest={onDeleteGuest}
                 />
-              ))}
-            </div>
+              );
 
-            {/* Table label */}
-            <div className="relative flex min-h-8.5 items-center justify-center px-7 py-1">
-              <div className="flex w-full flex-1 select-none flex-col items-center justify-center gap-0.5 text-center">
-                <span
-                  data-table-name
-                  className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-muted-foreground">
-                  {table.name}
-                </span>
-                <span
-                  className={cn(
-                    "shrink-0 whitespace-nowrap text-2xs text-muted-foreground",
-                    isFull && "font-semibold text-foreground"
-                  )}>
-                  {occupancy}/{effectiveCapacity}
-                </span>
-              </div>
-            </div>
+              const tableLabelContent = (
+                <div className="flex min-h-8.5 select-none flex-col items-center justify-center gap-0.5 text-center">
+                  <span
+                    data-table-name
+                    className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-muted-foreground">
+                    {table.name}
+                  </span>
+                  <span
+                    className={cn(
+                      "shrink-0 whitespace-nowrap text-2xs text-muted-foreground",
+                      isFull && "font-semibold text-foreground"
+                    )}>
+                    {occupancy}/{effectiveCapacity}
+                  </span>
+                </div>
+              );
 
-            {/* Bottom 4 seats */}
-            <div className="grid min-w-0 grid-cols-4 gap-1">
-              {bottomRow.map((guestId, i) => {
-                const seatIndex = i + 4;
+              if (table.seatConfig.shape === "round") {
+                const seatCount = seated.length;
+                const radiusPercent = seatCount <= 4 ? 34 : seatCount <= 8 ? 39 : 42;
+
                 return (
-                  <SeatSlot
-                    key={seatIndex}
-                    tableNumber={table.tableNumber}
-                    seatIndex={seatIndex}
-                    guestId={guestId}
-                    guestFullName={guestId ? (guests.get(guestId)?.fullName ?? null) : null}
-                    activeDragKind={activeDragKind}
-                    activeDragGuestId={activeDragGuestId}
-                    guestSwapPreview={guestSwapPreview}
-                    isPreviewMode={isPreviewMode}
-                    previewSeatKind={previewSeatKinds?.[seatIndex] ?? null}
-                    isDisabled={disabledSeatsSet.has(seatIndex)}
-                    isLocked={guestId !== null && lockedSet.has(guestId)}
-                    onToggleDisabled={() =>
-                      dispatch({
-                        type: "TOGGLE_SEAT_DISABLED",
-                        tableNumber: table.tableNumber,
-                        seatIndex,
-                      })
-                    }
-                    onToggleLock={() => {
-                      if (guestId)
-                        dispatch({
-                          type: "SET_GUEST_ANCHORED",
-                          guestId,
-                          anchored: !lockedSet.has(guestId),
-                        });
-                    }}
-                    onUnassign={() => {
-                      if (guestId) {
-                        dispatch({ type: "REMOVE_GUESTS", guestIds: [guestId] });
-                      }
-                    }}
-                    onEditGuest={onEditGuest}
-                    onDeleteGuest={onDeleteGuest}
-                  />
+                  <div className="relative min-h-44" data-table-card-body data-table-shape="round">
+                    {seated.map((guestId, seatIndex) => {
+                      const angle =
+                        -Math.PI / 2 + (Math.PI * 2 * seatIndex) / Math.max(1, seatCount);
+                      const x = 50 + radiusPercent * Math.cos(angle);
+                      const y = 50 + radiusPercent * Math.sin(angle);
+
+                      return (
+                        <div
+                          key={seatIndex}
+                          className="absolute w-16"
+                          style={{
+                            left: `${x}%`,
+                            top: `${y}%`,
+                            transform: "translate(-50%, -50%)",
+                          }}>
+                          {renderSeat(guestId, seatIndex)}
+                        </div>
+                      );
+                    })}
+
+                    <div
+                      data-table-center-label
+                      data-table-shape="round"
+                      className="absolute top-1/2 left-1/2 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border border-border bg-background/80 px-3 py-2">
+                      {tableLabelContent}
+                    </div>
+                  </div>
                 );
-              })}
-            </div>
+              }
+
+              return (
+                <div
+                  className="flex min-h-44 flex-col justify-center gap-3"
+                  data-table-card-body
+                  data-table-shape="rectangular">
+                  {/* Top seats */}
+                  {topCount > 0 && (
+                    <div
+                      className="grid min-w-0 gap-1.5 px-1"
+                      style={{ gridTemplateColumns: `repeat(${topCount}, minmax(0, 1fr))` }}>
+                      {topSeats.map((guestId, i) => renderSeat(guestId, i))}
+                    </div>
+                  )}
+
+                  {/* Middle row: left | label | right with a fixed center column for stable alignment. */}
+                  <div className="grid min-w-0 grid-cols-[4rem_minmax(0,1fr)_4rem] items-center gap-1.5">
+                    {leftCount > 0 && (
+                      <div className="flex min-w-0 flex-col gap-1">
+                        {leftSeats.map((guestId, i) =>
+                          renderSeat(guestId, topCount + rightCount + bottomCount + i)
+                        )}
+                      </div>
+                    )}
+                    {leftCount === 0 && <div aria-hidden="true" />}
+                    <div
+                      data-table-center-label
+                      data-table-shape="rectangular"
+                      className="mx-auto flex w-full max-w-28 rounded-lg border border-border bg-background/80 px-3 py-2">
+                      {tableLabelContent}
+                    </div>
+                    {rightCount > 0 && (
+                      <div className="flex min-w-0 flex-col gap-1">
+                        {rightSeats.map((guestId, i) => renderSeat(guestId, topCount + i))}
+                      </div>
+                    )}
+                    {rightCount === 0 && <div aria-hidden="true" />}
+                  </div>
+
+                  {/* Bottom seats */}
+                  {bottomCount > 0 && (
+                    <div
+                      className="grid min-w-0 gap-1.5 px-1"
+                      style={{
+                        gridTemplateColumns: `repeat(${bottomCount}, minmax(0, 1fr))`,
+                      }}>
+                      {bottomSeats.map((guestId, i) =>
+                        renderSeat(guestId, topCount + rightCount + i)
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
+          <ContextMenuItem onSelect={() => onEditTable(table.tableNumber)}>
+            <Pencil className="mr-2 h-4 w-4" />
+            Edit table
+          </ContextMenuItem>
+          <ContextMenuItem
+            className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+            onSelect={() => onDeleteTable(table.tableNumber)}>
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete table
+          </ContextMenuItem>
+          <ContextMenuSeparator />
           <ContextMenuItem
             disabled={occupancy === 0}
             onSelect={() =>
