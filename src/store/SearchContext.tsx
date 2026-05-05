@@ -7,14 +7,14 @@ interface SearchContextValue {
   searchQuery: string;
   normalizedQuery: string;
   setSearchQuery: (query: string) => void;
-  isGroupHighlightOn: boolean;
-  setGroupHighlightOn: (isOn: boolean) => void;
-  isHouseholdHighlightOn: boolean;
-  setHouseholdHighlightOn: (isOn: boolean) => void;
+  isCircleHighlightOn: boolean;
+  setCircleHighlightOn: (isOn: boolean) => void;
+  isPartyHighlightOn: boolean;
+  setPartyHighlightOn: (isOn: boolean) => void;
   isHostHighlightOn: boolean;
   setHostHighlightOn: (isOn: boolean) => void;
-  householdPulseNonce: number;
-  activateHouseholdFocusFromGuestSelection: () => void;
+  partyPulseNonce: number;
+  activatePartyFocusFromGuestSelection: () => void;
   restoreHighlightModeAfterGuestDeselection: () => void;
 }
 
@@ -23,72 +23,72 @@ const SearchContext = createContext<SearchContextValue | null>(null);
 export function SearchProvider({ children }: { children: ReactNode }) {
   const [searchQuery, setSearchQuery] = useState("");
   const normalizedQuery = useMemo(() => normalizeForSearch(searchQuery.trim()), [searchQuery]);
-  const [isGroupHighlightOn, setGroupHighlightOn] = useState(true);
-  const [isHouseholdHighlightOn, setHouseholdHighlightOn] = useState(false);
+  const [isCircleHighlightOn, setCircleHighlightOn] = useState(true);
+  const [isPartyHighlightOn, setPartyHighlightOn] = useState(false);
   const [isHostHighlightOn, setHostHighlightOn] = useState(false);
-  const [householdPulseNonce, setHouseholdPulseNonce] = useState(0);
+  const [partyPulseNonce, setPartyPulseNonce] = useState(0);
   const [previousHighlightMode, setPreviousHighlightMode] = useState<
-    "group" | "household" | "host" | null
+    "circle" | "party" | "host" | null
   >(null);
 
-  function getActiveHighlightMode(): "group" | "household" | "host" {
-    if (isHouseholdHighlightOn) return "household";
+  function getActiveHighlightMode(): "circle" | "party" | "host" {
+    if (isPartyHighlightOn) return "party";
     if (isHostHighlightOn) return "host";
-    return "group";
+    return "circle";
   }
 
-  function handleSetGroupHighlightOn(isOn: boolean) {
+  function handleSetCircleHighlightOn(isOn: boolean) {
     if (isOn) {
-      setGroupHighlightOn(true);
-      setHouseholdHighlightOn(false);
+      setCircleHighlightOn(true);
+      setPartyHighlightOn(false);
       setHostHighlightOn(false);
       return;
     }
 
-    if (!isHouseholdHighlightOn && !isHostHighlightOn) return;
+    if (!isPartyHighlightOn && !isHostHighlightOn) return;
 
-    setGroupHighlightOn(false);
+    setCircleHighlightOn(false);
   }
 
-  function handleSetHouseholdHighlightOn(isOn: boolean) {
+  function handleSetPartyHighlightOn(isOn: boolean) {
     if (isOn) {
-      setHouseholdHighlightOn(true);
-      setGroupHighlightOn(false);
+      setPartyHighlightOn(true);
+      setCircleHighlightOn(false);
       setHostHighlightOn(false);
       return;
     }
 
-    if (!isGroupHighlightOn && !isHostHighlightOn) return;
+    if (!isCircleHighlightOn && !isHostHighlightOn) return;
 
-    setHouseholdHighlightOn(false);
+    setPartyHighlightOn(false);
   }
 
   function handleSetHostHighlightOn(isOn: boolean) {
     if (isOn) {
       setHostHighlightOn(true);
-      setGroupHighlightOn(false);
-      setHouseholdHighlightOn(false);
+      setCircleHighlightOn(false);
+      setPartyHighlightOn(false);
       return;
     }
 
-    if (!isGroupHighlightOn && !isHouseholdHighlightOn) return;
+    if (!isCircleHighlightOn && !isPartyHighlightOn) return;
 
     setHostHighlightOn(false);
   }
 
-  function activateHouseholdFocusFromGuestSelection() {
+  function activatePartyFocusFromGuestSelection() {
     setPreviousHighlightMode((current) => current ?? getActiveHighlightMode());
-    setHouseholdPulseNonce((current) => current + 1);
-    setHouseholdHighlightOn(true);
-    setGroupHighlightOn(false);
+    setPartyPulseNonce((current) => current + 1);
+    setPartyHighlightOn(true);
+    setCircleHighlightOn(false);
     setHostHighlightOn(false);
   }
 
   function restoreHighlightModeAfterGuestDeselection() {
     if (!previousHighlightMode) return;
 
-    setGroupHighlightOn(previousHighlightMode === "group");
-    setHouseholdHighlightOn(previousHighlightMode === "household");
+    setCircleHighlightOn(previousHighlightMode === "circle");
+    setPartyHighlightOn(previousHighlightMode === "party");
     setHostHighlightOn(previousHighlightMode === "host");
     setPreviousHighlightMode(null);
   }
@@ -99,14 +99,14 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         searchQuery,
         normalizedQuery,
         setSearchQuery,
-        isGroupHighlightOn,
-        setGroupHighlightOn: handleSetGroupHighlightOn,
-        isHouseholdHighlightOn,
-        setHouseholdHighlightOn: handleSetHouseholdHighlightOn,
+        isCircleHighlightOn,
+        setCircleHighlightOn: handleSetCircleHighlightOn,
+        isPartyHighlightOn,
+        setPartyHighlightOn: handleSetPartyHighlightOn,
         isHostHighlightOn,
         setHostHighlightOn: handleSetHostHighlightOn,
-        householdPulseNonce,
-        activateHouseholdFocusFromGuestSelection,
+        partyPulseNonce,
+        activatePartyFocusFromGuestSelection,
         restoreHighlightModeAfterGuestDeselection,
       }}>
       {children}

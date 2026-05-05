@@ -8,8 +8,13 @@ import React, {
   useRef,
   useState,
 } from "react";
-import type { PersistedSeatingData, SeatingState } from "../types";
-import { TABLE_CAPACITY } from "../types";
+import type { BoardState, PersistedSeatingData, SeatingState, TableState } from "../types";
+import {
+  TABLE_CAPACITY,
+  createDefaultBoardState,
+  createDefaultTableSeatConfig,
+  getTableSeatCount,
+} from "../types";
 import { seatingReducer, createInitialState, type SeatingAction } from "./reducer";
 import {
   isCompatibleState,
@@ -38,9 +43,9 @@ function buildGuestProfiles(
 
     profiles[guestId] = {
       partyId: guest.partyId,
-      group: guest.group || "",
+      circle: guest.circle || "",
       host: guest.host,
-      household: party?.household ?? "",
+      party: party?.party ?? "",
     };
   }
 
@@ -62,8 +67,8 @@ interface SeatingContextValue {
   selectedGuestId: string | null;
   selectGuest: (guestId: string) => void;
   clearSelectedGuest: () => void;
-  relatedHouseholdGuestIds: Set<string>;
-  relatedGroupGuestIds: Set<string>;
+  relatedPartyGuestIds: Set<string>;
+  relatedCircleGuestIds: Set<string>;
   autoAssignGuestIds: (guestIds: string[]) => void;
   slotAssignments: Record<HighlightDomain, Map<string, PaletteSlot>>;
   guestProfiles: Record<string, GuestProfile>;
@@ -91,29 +96,154 @@ function isSeatValue(value: unknown): value is string | null {
   return value === null || typeof value === "string";
 }
 
-function normalizeSeatSlots(values: unknown): Array<string | null> | null {
-  if (!Array.isArray(values) || values.length > TABLE_CAPACITY) return null;
-  if (!values.every(isSeatValue)) return null;
+function normalizeBoardState(board: SeatingState["board"] | undefined): BoardState {
+  const fallback = createDefaultBoardState();
 
-  const seatSlots = values.slice(0, TABLE_CAPACITY) as Array<string | null>;
-  return [
-    ...seatSlots,
-    ...Array<string | null>(Math.max(0, TABLE_CAPACITY - seatSlots.length)).fill(null),
+  if (!board) return fallback;
+
+  const rows = Number.isInteger(board.rows) && board.rows > 0 ? board.rows : fallback.rows;
+  const columns =
+    Number.isInteger(board.columns) && board.columns > 0 ? board.columns : fallback.columns;
+  const labelPrefix =
+    typeof board.newTableDefaults?.labelPrefix === "string" &&
+    board.newTableDefaults.labelPrefix.trim().length > 0
+      ? board.newTableDefaults.labelPrefix.trim()
+      : fallback.newTableDefaults.labelPrefix;
+  const shape =
+    board.newTableDefaults?.shape === "rectangular"
+      ? "rectangular"
+      : fallback.newTableDefaults.shape;
+  const roundSeatCount =
+    Number.isInteger(board.newTableDefaults?.roundSeatCount) &&
+    (board.newTableDefaults?.roundSeatCount ?? 0) > 0
+      ? (board.newTableDefaults?.roundSeatCount as number)
+      : fallback.newTableDefaults.roundSeatCount;
+  const rectangularSideCounts =
+    board.newTableDefaults?.rectangularSideCounts ??
+    fallback.newTableDefaults.rectangularSideCounts;
+
+  return {
+    rows,
+    columns,
+    newTableDefaults: {
+      labelPrefix,
+      shape,
+      roundSeatCount,
+      rectangularSideCounts: {
+        top: Number.isInteger(rectangularSideCounts.top)
+          ? rectangularSideCounts.top
+          : fallback.newTableDefaults.rectangularSideCounts.top,
+        right: Number.isInteger(rectangularSideCounts.right)
+          ? rectangularSideCounts.right
+          : fallback.newTableDefaults.rectangularSideCounts.right,
+        bottom: Number.isInteger(rectangularSideCounts.bottom)
+          ? rectangularSideCounts.bottom
+          : fallback.newTableDefaults.rectangularSideCounts.bottom,
+        left: Number.isInteger(rectangularSideCounts.left)
+          ? rectangularSideCounts.left
+          : fallback.newTableDefaults.rectangularSideCounts.left,
+      },
+    },
+  };
+}
+
+function normalizeTableState(
+  table: TableState,
+  tableIndex: number,
+  board: BoardState
+): TableState | null {
+  const shape = table.shape === "rectangular" ? "rectangular" : "round";
+  const fallbackSeatConfig = createDefaultTableSeatConfig(shape);
+  const seatConfig =
+    table.seatConfig?.shape === "rectangular"
+      ? {
+          shape: "rectangular" as const,
+          sideCounts: {
+            top: Number.isInteger(table.seatConfig.sideCounts?.top)
+              ? table.seatConfig.sideCounts.top
+              : fallbackSeatConfig.shape === "rectangular"
+                ? fallbackSeatConfig.sideCounts.top
+                : 0,
+            right: Number.isInteger(table.seatConfig.sideCounts?.right)
+              ? table.seatConfig.sideCounts.right
+              : fallbackSeatConfig.shape === "rectangular"
+                ? fallbackSeatConfig.sideCounts.right
+                : 0,
+            bottom: Number.isInteger(table.seatConfig.sideCounts?.bottom)
+              ? table.seatConfig.sideCounts.bottom
+              : fallbackSeatConfig.shape === "rectangular"
+                ? fallbackSeatConfig.sideCounts.bottom
+                : 0,
+            left: Number.isInteger(table.seatConfig.sideCounts?.left)
+              ? table.seatConfig.sideCounts.left
+              : fallbackSeatConfig.shape === "rectangular"
+                ? fallbackSeatConfig.sideCounts.left
+                : 0,
+          },
+        }
+      : {
+          shape: "round" as const,
+          seatCount:
+            Number.isInteger(
+              table.seatConfig?.shape === "round" ? table.seatConfig.seatCount : null
+            ) && (table.seatConfig?.shape === "round" ? table.seatConfig.seatCount : 0) > 0
+              ? table.seatConfig.seatCount
+              : Array.isArray(table.guestIds)
+                ? Math.max(table.guestIds.length, 1)
+                : TABLE_CAPACITY,
+        };
+  const expectedSeatCount = getTableSeatCount(seatConfig);
+
+  if (!Array.isArray(table.guestIds) || !table.guestIds.every(isSeatValue)) {
+    return null;
+  }
+
+  const guestIds = [
+    ...(table.guestIds.slice(0, expectedSeatCount) as Array<string | null>),
+    ...Array<string | null>(Math.max(0, expectedSeatCount - table.guestIds.length)).fill(null),
   ];
+  const row =
+    Number.isInteger(table.gridPosition?.row) && (table.gridPosition?.row ?? -1) >= 0
+      ? table.gridPosition.row
+      : Math.floor(tableIndex / board.columns);
+  const column =
+    Number.isInteger(table.gridPosition?.column) && (table.gridPosition?.column ?? -1) >= 0
+      ? table.gridPosition.column
+      : tableIndex % board.columns;
+
+  return {
+    ...table,
+    id:
+      typeof table.id === "string" && table.id.length > 0 ? table.id : `table-${table.tableNumber}`,
+    tableNumber: table.tableNumber,
+    name:
+      typeof table.name === "string" && table.name.length > 0
+        ? table.name
+        : `Table ${table.tableNumber}`,
+    shape,
+    gridPosition: { row, column },
+    seatConfig,
+    guestIds,
+    disabledSeats: Array.isArray(table.disabledSeats)
+      ? table.disabledSeats.filter(
+          (seatIndex, index, source): seatIndex is number =>
+            Number.isInteger(seatIndex) &&
+            seatIndex >= 0 &&
+            seatIndex < guestIds.length &&
+            guestIds[seatIndex] === null &&
+            source.indexOf(seatIndex) === index
+        )
+      : [],
+  };
 }
 
 function normalizeSeatingState(state: SeatingState): SeatingState | null {
   if (!Array.isArray(state.tables) || !Array.isArray(state.unassigned)) return null;
+  const board = normalizeBoardState(state.board);
 
-  const normalizedTables = state.tables.map((table) => {
-    const seatSlots = normalizeSeatSlots(table.guestIds);
-    if (!seatSlots) return null;
-
-    return {
-      ...table,
-      guestIds: seatSlots,
-    };
-  });
+  const normalizedTables = state.tables.map((table, tableIndex) =>
+    normalizeTableState(table, tableIndex, board)
+  );
 
   if (normalizedTables.some((table) => table === null)) {
     return null;
@@ -121,6 +251,7 @@ function normalizeSeatingState(state: SeatingState): SeatingState | null {
 
   return {
     ...state,
+    board,
     tables: normalizedTables as SeatingState["tables"],
     lockedGuestIds: Array.isArray(state.lockedGuestIds)
       ? (state.lockedGuestIds as unknown[]).filter((v): v is string => typeof v === "string")
@@ -130,6 +261,18 @@ function normalizeSeatingState(state: SeatingState): SeatingState | null {
 
 function areSeatingStatesEqual(left: SeatingState, right: SeatingState): boolean {
   if (left === right) return true;
+
+  if (left.board.rows !== right.board.rows || left.board.columns !== right.board.columns) {
+    return false;
+  }
+
+  if (
+    left.board.newTableDefaults.labelPrefix !== right.board.newTableDefaults.labelPrefix ||
+    left.board.newTableDefaults.shape !== right.board.newTableDefaults.shape ||
+    left.board.newTableDefaults.roundSeatCount !== right.board.newTableDefaults.roundSeatCount
+  ) {
+    return false;
+  }
 
   if (left.tables.length !== right.tables.length) return false;
   if (!areSeatArraysEqual(left.unassigned, right.unassigned)) return false;
@@ -142,8 +285,13 @@ function areSeatingStatesEqual(left: SeatingState, right: SeatingState): boolean
       const rightDisabled = [...(other.disabledSeats ?? [])].sort((a, b) => a - b);
 
       return (
+        table.id === other.id &&
         table.tableNumber === other.tableNumber &&
         table.name === other.name &&
+        table.shape === other.shape &&
+        table.gridPosition.row === other.gridPosition.row &&
+        table.gridPosition.column === other.gridPosition.column &&
+        JSON.stringify(table.seatConfig) === JSON.stringify(other.seatConfig) &&
         areSeatArraysEqual(table.guestIds, other.guestIds) &&
         leftDisabled.length === rightDisabled.length &&
         leftDisabled.every((v, i) => v === rightDisabled[i])
@@ -243,19 +391,19 @@ export function SeatingProvider({
   const guestProfiles = useMemo(() => buildGuestProfiles(guests, parties), [guests, parties]);
 
   const domainCounts = useMemo(() => {
-    const groupLabels = new Set<string>();
-    const householdIds = new Set<string>();
+    const circleLabels = new Set<string>();
+    const partyIds = new Set<string>();
     const hostLabels = new Set<string>();
 
     for (const profile of Object.values(guestProfiles)) {
-      groupLabels.add(profile.group || "No Group");
-      householdIds.add(profile.partyId);
+      circleLabels.add(profile.circle || "No Circle");
+      partyIds.add(profile.partyId);
       hostLabels.add(profile.host || "Unknown");
     }
 
     return {
-      group: Math.max(1, groupLabels.size),
-      household: Math.max(1, householdIds.size),
+      circle: Math.max(1, circleLabels.size),
+      party: Math.max(1, partyIds.size),
       host: Math.max(1, hostLabels.size),
     };
   }, [guestProfiles]);
@@ -263,31 +411,31 @@ export function SeatingProvider({
   const palettes = useMemo(
     () => createHighlightPalettes(domainCounts),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [domainCounts.group, domainCounts.household, domainCounts.host]
+    [domainCounts.circle, domainCounts.party, domainCounts.host]
   );
 
   const slotAssignments = useMemo(() => {
-    const groupTokens: string[] = [];
-    const householdTokens: string[] = [];
+    const circleTokens: string[] = [];
+    const partyTokens: string[] = [];
     const hostTokens: string[] = [];
 
     for (const profile of Object.values(guestProfiles)) {
-      groupTokens.push(`group:${profile.group || "No Group"}`);
-      householdTokens.push(`household:${profile.partyId}`);
+      circleTokens.push(`circle:${profile.circle || "No Circle"}`);
+      partyTokens.push(`party:${profile.partyId}`);
       hostTokens.push(`host:${profile.host || "Unknown"}`);
     }
 
-    const groupAssignments = assignTokenSlots(groupTokens, palettes.group);
-    const householdAssignments = assignTokenSlots(householdTokens, palettes.household);
+    const circleAssignments = assignTokenSlots(circleTokens, palettes.circle);
+    const partyAssignments = assignTokenSlots(partyTokens, palettes.party);
     const hostAssignments = assignTokenSlots(hostTokens, palettes.host);
 
     return {
-      group: groupAssignments,
-      household: householdAssignments,
+      circle: circleAssignments,
+      party: partyAssignments,
       host: hostAssignments,
-      default: groupAssignments,
+      default: circleAssignments,
     } as Record<HighlightDomain, Map<string, PaletteSlot>>;
-  }, [guestProfiles, palettes.group, palettes.household, palettes.host]);
+  }, [guestProfiles, palettes.circle, palettes.party, palettes.host]);
 
   const [selectedGuestId, setSelectedGuestId] = useState<string | null>(null);
 
@@ -393,7 +541,7 @@ export function SeatingProvider({
     [guests, selectedGuestId]
   );
 
-  const relatedHouseholdGuestIds = useMemo(() => {
+  const relatedPartyGuestIds = useMemo(() => {
     if (!selectedGuest) return new Set<string>();
 
     const relatedIds = new Set<string>();
@@ -407,13 +555,13 @@ export function SeatingProvider({
     return relatedIds;
   }, [guests, selectedGuest]);
 
-  const relatedGroupGuestIds = useMemo(() => {
+  const relatedCircleGuestIds = useMemo(() => {
     if (!selectedGuest) return new Set<string>();
 
     const relatedIds = new Set<string>();
     for (const guest of guests.values()) {
       if (guest.id === selectedGuest.id) continue;
-      if (guest.group === selectedGuest.group) {
+      if (guest.circle === selectedGuest.circle) {
         relatedIds.add(guest.id);
       }
     }
@@ -448,8 +596,8 @@ export function SeatingProvider({
       selectedGuestId,
       selectGuest,
       clearSelectedGuest,
-      relatedHouseholdGuestIds,
-      relatedGroupGuestIds,
+      relatedPartyGuestIds,
+      relatedCircleGuestIds,
       autoAssignGuestIds,
       slotAssignments,
       guestProfiles,
@@ -469,8 +617,8 @@ export function SeatingProvider({
       selectedGuestId,
       selectGuest,
       clearSelectedGuest,
-      relatedHouseholdGuestIds,
-      relatedGroupGuestIds,
+      relatedPartyGuestIds,
+      relatedCircleGuestIds,
       autoAssignGuestIds,
       slotAssignments,
       guestProfiles,

@@ -1,14 +1,23 @@
-import type { Host, SeatingState, TableState } from "../types";
-import { TABLES_PER_ROW, TABLE_CAPACITY, TABLE_COUNT } from "../types";
+import type {
+  BoardState,
+  GridPosition,
+  Host,
+  NewTableDefaults,
+  SeatingState,
+  TableSeatConfig,
+  TableState,
+  TableShape,
+} from "../types";
+import { TABLE_CAPACITY, createDefaultBoardState, getTableSeatCount } from "../types";
 
-type AssignmentMode = "single-table" | "group-overflow";
+type AssignmentMode = "single-table" | "circle-overflow";
 type AutoAssignTargetScope = "target-only" | "target-and-adjacent";
 
 export interface GuestProfile {
   partyId: string;
-  group: string;
+  circle: string;
   host: Host;
-  household: string;
+  party: string;
 }
 
 export type SeatingAction =
@@ -42,13 +51,269 @@ export type SeatingAction =
       type: "SWAP_TABLES";
       activeTableNumber: number;
       overTableNumber: number;
+      guestProfiles?: Record<string, GuestProfile>;
     }
+  | {
+      type: "MOVE_TABLE_POSITION";
+      activeTableNumber: number;
+      targetGridPosition: GridPosition;
+    }
+  | {
+      type: "UPDATE_BOARD_CONFIG";
+      updates: Partial<Pick<BoardState, "rows" | "columns">>;
+      newTableDefaults?: Partial<NewTableDefaults>;
+    }
+  | {
+      type: "CREATE_TABLE";
+      name?: string;
+      shape?: TableShape;
+      gridPosition?: GridPosition;
+      seatConfig?: TableSeatConfig;
+    }
+  | {
+      type: "UPDATE_TABLE_CONFIG";
+      tableNumber: number;
+      updates: {
+        name?: string;
+        shape?: TableShape;
+        gridPosition?: GridPosition;
+        seatConfig?: TableSeatConfig;
+      };
+    }
+  | { type: "DELETE_TABLE"; tableNumber: number }
   | { type: "TOGGLE_SEAT_DISABLED"; tableNumber: number; seatIndex: number }
   | { type: "TOGGLE_TABLE_GUEST_LOCKS"; tableNumber: number }
   | { type: "TOGGLE_EMPTY_TABLE_SEATS"; tableNumber: number };
 
-function createEmptySeatSlots(): Array<string | null> {
-  return Array<string | null>(TABLE_CAPACITY).fill(null);
+function createEmptySeatSlots(capacity = TABLE_CAPACITY): Array<string | null> {
+  return Array<string | null>(capacity).fill(null);
+}
+
+function createSeatConfigFromDefaults(
+  board: BoardState,
+  shape: TableShape = board.newTableDefaults.shape
+): TableSeatConfig {
+  if (shape === "rectangular") {
+    return {
+      shape,
+      sideCounts: { ...board.newTableDefaults.rectangularSideCounts },
+    };
+  }
+
+  return {
+    shape,
+    seatCount: board.newTableDefaults.roundSeatCount,
+  };
+}
+
+function getDefaultTableName(board: BoardState, tableNumber: number): string {
+  return `${board.newTableDefaults.labelPrefix} ${tableNumber}`;
+}
+
+function getGridPositionKey(position: GridPosition): string {
+  return `${position.row}:${position.column}`;
+}
+
+function isGridPositionWithinBoard(position: GridPosition, board: BoardState): boolean {
+  return (
+    position.row >= 0 &&
+    position.column >= 0 &&
+    position.row < board.rows &&
+    position.column < board.columns
+  );
+}
+
+function hasGridConflict(
+  tables: TableState[],
+  position: GridPosition,
+  ignoredTableNumber?: number
+): boolean {
+  return tables.some(
+    (table) =>
+      table.tableNumber !== ignoredTableNumber &&
+      getGridPositionKey(table.gridPosition) === getGridPositionKey(position)
+  );
+}
+
+function sortTablesByGridPosition(tables: TableState[]): TableState[] {
+  return [...tables].sort((left, right) => {
+    if (left.gridPosition.row !== right.gridPosition.row) {
+      return left.gridPosition.row - right.gridPosition.row;
+    }
+
+    if (left.gridPosition.column !== right.gridPosition.column) {
+      return left.gridPosition.column - right.gridPosition.column;
+    }
+
+    return left.tableNumber - right.tableNumber;
+  });
+}
+
+function findFirstOpenGridPosition(board: BoardState, tables: TableState[]): GridPosition | null {
+  const occupied = new Set(tables.map((table) => getGridPositionKey(table.gridPosition)));
+
+  for (let row = 0; row < board.rows; row += 1) {
+    for (let column = 0; column < board.columns; column += 1) {
+      const position = { row, column };
+      if (!occupied.has(getGridPositionKey(position))) {
+        return position;
+      }
+    }
+  }
+
+  return null;
+}
+
+function updateBoardState(
+  board: BoardState,
+  updates: Partial<Pick<BoardState, "rows" | "columns">>,
+  newTableDefaults?: Partial<NewTableDefaults>
+): BoardState {
+  return {
+    rows:
+      Number.isInteger(updates.rows) && (updates.rows ?? 0) > 0
+        ? (updates.rows as number)
+        : board.rows,
+    columns:
+      Number.isInteger(updates.columns) && (updates.columns ?? 0) > 0
+        ? (updates.columns as number)
+        : board.columns,
+    newTableDefaults: {
+      labelPrefix:
+        typeof newTableDefaults?.labelPrefix === "string" &&
+        newTableDefaults.labelPrefix.trim().length > 0
+          ? newTableDefaults.labelPrefix.trim()
+          : board.newTableDefaults.labelPrefix,
+      shape: newTableDefaults?.shape ?? board.newTableDefaults.shape,
+      roundSeatCount:
+        Number.isInteger(newTableDefaults?.roundSeatCount) &&
+        (newTableDefaults?.roundSeatCount ?? 0) > 0
+          ? (newTableDefaults?.roundSeatCount as number)
+          : board.newTableDefaults.roundSeatCount,
+      rectangularSideCounts: {
+        top:
+          newTableDefaults?.rectangularSideCounts?.top ??
+          board.newTableDefaults.rectangularSideCounts.top,
+        right:
+          newTableDefaults?.rectangularSideCounts?.right ??
+          board.newTableDefaults.rectangularSideCounts.right,
+        bottom:
+          newTableDefaults?.rectangularSideCounts?.bottom ??
+          board.newTableDefaults.rectangularSideCounts.bottom,
+        left:
+          newTableDefaults?.rectangularSideCounts?.left ??
+          board.newTableDefaults.rectangularSideCounts.left,
+      },
+    },
+  };
+}
+
+function applyTableSeatConfig(
+  table: TableState,
+  seatConfig: TableSeatConfig
+): { table: TableState; displacedGuestIds: string[] } {
+  const nextSeatCount = getTableSeatCount(seatConfig);
+  const displacedGuestIds: string[] = [];
+  let guestIds: Array<string | null>;
+
+  if (nextSeatCount === table.guestIds.length) {
+    guestIds = [...table.guestIds];
+  } else {
+    const seatedGuestIds = table.guestIds.filter((guestId): guestId is string => guestId !== null);
+    const keptGuestIds = seatedGuestIds.slice(0, nextSeatCount);
+    +displacedGuestIds.push(...seatedGuestIds.slice(nextSeatCount));
+    guestIds = createEmptySeatSlots(nextSeatCount);
+    keptGuestIds.forEach((guestId, index) => {
+      guestIds[index] = guestId;
+    });
+  }
+
+  return {
+    table: {
+      ...table,
+      seatConfig,
+      guestIds,
+      disabledSeats: (table.disabledSeats ?? []).filter(
+        (seatIndex) => seatIndex >= 0 && seatIndex < guestIds.length && guestIds[seatIndex] === null
+      ),
+    },
+    displacedGuestIds,
+  };
+}
+
+function normalizeDisabledSeatsForGuestIds(
+  disabledSeats: number[] | undefined,
+  guestIds: Array<string | null>
+): number[] {
+  if (!Array.isArray(disabledSeats)) return [];
+
+  return disabledSeats.filter(
+    (seatIndex, index, source) =>
+      Number.isInteger(seatIndex) &&
+      seatIndex >= 0 &&
+      seatIndex < guestIds.length &&
+      guestIds[seatIndex] === null &&
+      source.indexOf(seatIndex) === index
+  );
+}
+
+function placeGuestsByPreferredIndex(
+  guestIds: string[],
+  preferredIndexes: number[],
+  targetGuestIds: Array<string | null>,
+  disabledSeatIndexes: Set<number>
+): { placedGuestIds: string[]; overflowGuestIds: string[] } {
+  const placedGuestIds: string[] = [];
+  const overflowGuestIds: string[] = [];
+
+  for (let index = 0; index < guestIds.length; index += 1) {
+    const guestId = guestIds[index];
+    const preferredSeatIndex = preferredIndexes[index];
+    const canUsePreferredIndex =
+      Number.isInteger(preferredSeatIndex) &&
+      preferredSeatIndex >= 0 &&
+      preferredSeatIndex < targetGuestIds.length &&
+      targetGuestIds[preferredSeatIndex] === null &&
+      !disabledSeatIndexes.has(preferredSeatIndex);
+
+    if (canUsePreferredIndex) {
+      targetGuestIds[preferredSeatIndex] = guestId;
+      placedGuestIds.push(guestId);
+    } else {
+      overflowGuestIds.push(guestId);
+    }
+  }
+
+  return { placedGuestIds, overflowGuestIds };
+}
+
+function createTableState(
+  tableNumber: number,
+  board: BoardState,
+  options?: {
+    shape?: TableShape;
+    seatConfig?: TableSeatConfig;
+    gridPosition?: GridPosition;
+    name?: string;
+  }
+): TableState {
+  const shape = options?.shape ?? board.newTableDefaults.shape;
+  const seatConfig = options?.seatConfig ?? createSeatConfigFromDefaults(board, shape);
+  const tableIndex = tableNumber - 1;
+
+  return {
+    id: `table-${tableNumber}`,
+    tableNumber,
+    name: options?.name ?? getDefaultTableName(board, tableNumber),
+    shape,
+    gridPosition: options?.gridPosition ?? {
+      row: Math.floor(tableIndex / board.columns),
+      column: tableIndex % board.columns,
+    },
+    seatConfig,
+    guestIds: createEmptySeatSlots(getTableSeatCount(seatConfig)),
+    disabledSeats: [],
+  };
 }
 
 function getUniqueGuestIds(guestIds: string[]): string[] {
@@ -61,7 +326,7 @@ function getUniqueGuestIds(guestIds: string[]): string[] {
   });
 }
 
-function getSeatedHouseholdGuestIds(
+function getSeatedPartyGuestIds(
   tables: TableState[],
   partyId: string,
   guestProfiles: Record<string, GuestProfile>
@@ -115,7 +380,7 @@ function getAvailableSeatIndexes(
   if (startIndex != null) {
     if (
       startIndex < 0 ||
-      startIndex >= TABLE_CAPACITY ||
+      startIndex >= seatSlots.length ||
       seatSlots[startIndex] !== null ||
       disabledSet.has(startIndex)
     ) {
@@ -123,7 +388,7 @@ function getAvailableSeatIndexes(
     }
 
     const indexes = [startIndex];
-    for (let index = startIndex + 1; index < TABLE_CAPACITY; index += 1) {
+    for (let index = startIndex + 1; index < seatSlots.length; index += 1) {
       if (seatSlots[index] === null && !disabledSet.has(index)) indexes.push(index);
     }
     return indexes;
@@ -151,14 +416,18 @@ function placeGuestsIntoSeatSlots(
 }
 
 export function createInitialState(allGuestIds: string[]): SeatingState {
-  const tables: TableState[] = Array.from({ length: TABLE_COUNT }, (_, index) => ({
-    tableNumber: index + 1,
-    name: `Table ${index + 1}`,
-    guestIds: createEmptySeatSlots(),
-    disabledSeats: [],
-  }));
+  const board = createDefaultBoardState();
+  const tableCount = board.rows * board.columns;
+  const tables: TableState[] = Array.from({ length: tableCount }, (_, index) =>
+    createTableState(index + 1, board)
+  );
 
-  return { tables, unassigned: [...allGuestIds], lockedGuestIds: [] };
+  return {
+    board,
+    tables,
+    unassigned: [...allGuestIds],
+    lockedGuestIds: [],
+  };
 }
 
 function assignGuestsWithOverflow(
@@ -197,7 +466,7 @@ function assignGuestsWithOverflow(
 
       for (
         let currentSeatIdx = startSeatIndex;
-        currentSeatIdx < TABLE_CAPACITY;
+        currentSeatIdx < nextTables[currentTableIdx].guestIds.length;
         currentSeatIdx += 1
       ) {
         if (disabledSet.has(currentSeatIdx)) continue;
@@ -231,6 +500,7 @@ function assignGuestsWithOverflow(
     }
 
     return {
+      board: state.board,
       tables: nextTables,
       unassigned: state.unassigned.filter((guestId) => !incomingSet.has(guestId)),
       lockedGuestIds: state.lockedGuestIds ?? [],
@@ -274,6 +544,7 @@ function assignGuestsWithOverflow(
   }
 
   return {
+    board: state.board,
     tables: nextTables,
     unassigned: state.unassigned.filter((guestId) => !incomingSet.has(guestId)),
     lockedGuestIds: state.lockedGuestIds ?? [],
@@ -306,25 +577,86 @@ function getContiguousRuns(indexes: number[], minimumLength: number): number[][]
   return runs;
 }
 
+function getRowSideSeatIndexes(table: TableState): { A: number[]; B: number[] } {
+  if (table.seatConfig.shape === "round") {
+    const seatCount = table.guestIds.length;
+    const half = Math.ceil(seatCount / 2);
+    return {
+      A: Array.from({ length: half }, (_, index) => index),
+      B: Array.from({ length: seatCount - half }, (_, index) => seatCount - 1 - index),
+    };
+  }
+
+  const { top, right, bottom } = table.seatConfig.sideCounts;
+  const topStart = 0;
+  const topEnd = topStart + top;
+  const bottomStart = topEnd + right;
+  const bottomEnd = bottomStart + bottom;
+
+  return {
+    A: Array.from({ length: top }, (_, index) => topStart + index),
+    B: Array.from({ length: bottom }, (_, index) => bottomEnd - 1 - index),
+  };
+}
+
+function getSeatRowSide(table: TableState, seatIdx: number): "A" | "B" | null {
+  const sideIndexes = getRowSideSeatIndexes(table);
+  if (sideIndexes.A.includes(seatIdx)) return "A";
+  if (sideIndexes.B.includes(seatIdx)) return "B";
+  return null;
+}
+
+function getSeatRowSideOrder(table: TableState, seatIdx: number, side: "A" | "B"): number {
+  const sideIndexes = getRowSideSeatIndexes(table)[side];
+  return sideIndexes.indexOf(seatIdx);
+}
+
+function areSeatsAdjacentInTable(table: TableState, a: number, b: number): boolean {
+  if (a === b) return true;
+
+  if (table.seatConfig.shape === "round") {
+    const seatCount = table.guestIds.length;
+    if (seatCount <= 1) return false;
+    const distance = Math.abs(a - b);
+    return distance === 1 || distance === seatCount - 1;
+  }
+
+  if (Math.abs(a - b) === 1) return true;
+
+  const sideA = getSeatRowSide(table, a);
+  const sideB = getSeatRowSide(table, b);
+  if (!sideA || !sideB || sideA === sideB) return false;
+
+  const orderA = getSeatRowSideOrder(table, a, sideA);
+  const orderB = getSeatRowSideOrder(table, b, sideB);
+  return orderA >= 0 && orderA === orderB;
+}
+
 function getRowContiguousSeatRuns(
   nextTables: TableState[],
   candidateTableIdxs: number[]
 ): Array<Array<{ tableIdx: number; seatIdx: number }>> {
-  const sortedTableIdxs = [...candidateTableIdxs].sort((a, b) => a - b);
+  const sortedTableIdxs = [...candidateTableIdxs].sort((leftIdx, rightIdx) => {
+    const left = nextTables[leftIdx].gridPosition;
+    const right = nextTables[rightIdx].gridPosition;
+    if (left.row !== right.row) return left.row - right.row;
+    return left.column - right.column;
+  });
   const sideARow: Array<{ tableIdx: number; seatIdx: number }> = [];
   const sideBRow: Array<{ tableIdx: number; seatIdx: number }> = [];
 
   for (const tableIdx of sortedTableIdxs) {
     const table = nextTables[tableIdx];
     const openSeatIndexes = new Set(getOpenSeatIndexesForTable(table));
+    const sideIndexes = getRowSideSeatIndexes(table);
 
-    for (const seatIdx of [0, 1, 2, 3]) {
+    for (const seatIdx of sideIndexes.A) {
       if (openSeatIndexes.has(seatIdx)) {
         sideARow.push({ tableIdx, seatIdx });
       }
     }
 
-    for (const seatIdx of [7, 6, 5, 4]) {
+    for (const seatIdx of sideIndexes.B) {
       if (openSeatIndexes.has(seatIdx)) {
         sideBRow.push({ tableIdx, seatIdx });
       }
@@ -342,16 +674,41 @@ function getRowContiguousSeatRuns(
     for (let i = 1; i < seats.length; i += 1) {
       const previous = seats[i - 1];
       const current = seats[i];
+      const previousTable = nextTables[previous.tableIdx];
+      const currentTable = nextTables[current.tableIdx];
       const sameTable = previous.tableIdx === current.tableIdx;
-      const tableDelta = current.tableIdx - previous.tableIdx;
-      const onSameSide =
-        (previous.seatIdx <= 3 && current.seatIdx <= 3) ||
-        (previous.seatIdx >= 4 && current.seatIdx >= 4);
-      const isAdjacentWithinTable = sameTable && Math.abs(previous.seatIdx - current.seatIdx) === 1;
+      const sameRow = previousTable.gridPosition.row === currentTable.gridPosition.row;
+      const previousSide = getSeatRowSide(previousTable, previous.seatIdx);
+      const currentSide = getSeatRowSide(currentTable, current.seatIdx);
+      const onSameSide = previousSide !== null && previousSide === currentSide;
+
+      const isAdjacentWithinTable =
+        sameTable &&
+        previousSide !== null &&
+        currentSide !== null &&
+        Math.abs(
+          getSeatRowSideOrder(previousTable, previous.seatIdx, previousSide) -
+            getSeatRowSideOrder(currentTable, current.seatIdx, currentSide)
+        ) === 1;
+
+      const previousSideIndexes = previousSide
+        ? getRowSideSeatIndexes(previousTable)[previousSide]
+        : [];
+      const previousOrder =
+        previousSide !== null
+          ? getSeatRowSideOrder(previousTable, previous.seatIdx, previousSide)
+          : -1;
+      const currentOrder =
+        currentSide !== null ? getSeatRowSideOrder(currentTable, current.seatIdx, currentSide) : -1;
       const isAdjacentAcrossTables =
-        tableDelta === 1 &&
-        ((previous.seatIdx === 3 && current.seatIdx === 0) ||
-          (previous.seatIdx === 4 && current.seatIdx === 7));
+        !sameTable &&
+        sameRow &&
+        previousSide !== null &&
+        currentSide !== null &&
+        previousSide === currentSide &&
+        currentTable.gridPosition.column - previousTable.gridPosition.column === 1 &&
+        previousOrder === previousSideIndexes.length - 1 &&
+        currentOrder === 0;
 
       if (onSameSide && (isAdjacentWithinTable || isAdjacentAcrossTables)) {
         currentRun.push(current);
@@ -396,7 +753,10 @@ function findBestRowRun(
   );
   const runs = (
     sideFilter
-      ? allRuns.filter((run) => (sideFilter === "A" ? run[0].seatIdx <= 3 : run[0].seatIdx >= 4))
+      ? allRuns.filter((run) => {
+          const table = nextTables[run[0].tableIdx];
+          return getSeatRowSide(table, run[0].seatIdx) === sideFilter;
+        })
       : allRuns
   ).sort((a, b) => {
     const aPriority = Math.min(...a.map((seat) => candidateOrder.get(seat.tableIdx) ?? 999));
@@ -424,68 +784,68 @@ function placeGuestsAtSeats(
   }
 }
 
-interface PlacementGroup {
-  groupId: string;
+interface PlacementCircle {
+  circleId: string;
   units: string[][];
 }
 
 function buildPlacementUnits(
   guestIds: string[],
   guestProfiles: Record<string, GuestProfile>
-): PlacementGroup[] {
-  // Group guests by their social group first, then by household within each group.
-  // Guests without a named group each get their own synthetic group so they are
-  // never subject to the group home-row constraint.
-  const groups = new Map<string, Map<string, string[]>>();
-  const orderedGroupIds: string[] = [];
+): PlacementCircle[] {
+  // Group guests by their social circle first, then by party within each circle.
+  // Guests without a named circle each get their own synthetic circle so they are
+  // never subject to the circle home-row constraint.
+  const circles = new Map<string, Map<string, string[]>>();
+  const orderedCircleIds: string[] = [];
 
   for (const guestId of guestIds) {
     const profile = guestProfiles[guestId];
     const partyId = profile?.partyId ?? guestId;
-    const groupId = profile?.group || `\0nogroup\0${partyId}`;
-    if (!groups.has(groupId)) {
-      groups.set(groupId, new Map());
-      orderedGroupIds.push(groupId);
+    const circleId = profile?.circle || `\0nocircle\0${partyId}`;
+    if (!circles.has(circleId)) {
+      circles.set(circleId, new Map());
+      orderedCircleIds.push(circleId);
     }
-    const households = groups.get(groupId)!;
-    if (!households.has(partyId)) {
-      households.set(partyId, []);
+    const parties = circles.get(circleId)!;
+    if (!parties.has(partyId)) {
+      parties.set(partyId, []);
     }
-    households.get(partyId)!.push(guestId);
+    parties.get(partyId)!.push(guestId);
   }
 
-  // Sort households within each group largest-first so the biggest household
-  // anchors the group's home row and side before smaller ones try to fit.
-  const placementGroups: PlacementGroup[] = orderedGroupIds.map((groupId) => ({
-    groupId,
-    units: Array.from(groups.get(groupId)!.values()).sort((a, b) => b.length - a.length),
+  // Sort parties within each circle largest-first so the biggest party
+  // anchors the circle's home row and side before smaller ones try to fit.
+  const placementCircles: PlacementCircle[] = orderedCircleIds.map((circleId) => ({
+    circleId,
+    units: Array.from(circles.get(circleId)!.values()).sort((a, b) => b.length - a.length),
   }));
 
-  // Sort groups largest-first (by total guest count) so large groups claim rows
-  // before smaller groups fragment the available space.
-  placementGroups.sort((a, b) => {
+  // Sort circles largest-first (by total guest count) so large circles claim rows
+  // before smaller circles fragment the available space.
+  placementCircles.sort((a, b) => {
     const aTotal = a.units.reduce((sum, u) => sum + u.length, 0);
     const bTotal = b.units.reduce((sum, u) => sum + u.length, 0);
     return bTotal - aTotal;
   });
 
-  return placementGroups;
+  return placementCircles;
 }
 
 function getCandidateTableIndexes(
   targetTableIdx: number | null,
   targetScope: AutoAssignTargetScope | undefined,
-  tableCount: number
+  tables: TableState[]
 ): number[] {
   if (targetTableIdx == null) {
-    return Array.from({ length: tableCount }, (_, index) => index);
+    return Array.from({ length: tables.length }, (_, index) => index);
   }
 
   if (targetScope === "target-only") {
     return [targetTableIdx];
   }
 
-  return getAdjacentTableIndexesInRow(targetTableIdx, tableCount);
+  return getAdjacentTableIndexesInRow(targetTableIdx, tables);
 }
 
 /**
@@ -498,28 +858,28 @@ function getCandidateTableIndexes(
  *   2. All members are in the same table row.
  *   3. Their physical positions on that side are consecutive (no gaps).
  */
-function getSplitHouseholds(
+function getSplitParties(
   tables: TableState[],
   guestProfiles: Record<string, GuestProfile>
 ): Set<string> {
-  // Map each household to its members' positions (display index + seat slot).
-  const householdPositions = new Map<string, Array<{ tableIdx: number; seatIdx: number }>>();
+  // Map each party to its members' positions (display index + seat slot).
+  const partyPositions = new Map<string, Array<{ tableIdx: number; seatIdx: number }>>();
 
   for (let tableIdx = 0; tableIdx < tables.length; tableIdx += 1) {
     const table = tables[tableIdx];
     table.guestIds.forEach((guestId, seatIdx) => {
       if (!guestId) return;
-      const householdId = guestProfiles[guestId]?.partyId;
-      if (!householdId) return;
-      const positions = householdPositions.get(householdId) ?? [];
+      const partyId = guestProfiles[guestId]?.partyId;
+      if (!partyId) return;
+      const positions = partyPositions.get(partyId) ?? [];
       positions.push({ tableIdx, seatIdx });
-      householdPositions.set(householdId, positions);
+      partyPositions.set(partyId, positions);
     });
   }
 
-  const splitHouseholds = new Set<string>();
+  const splitParties = new Set<string>();
 
-  for (const [householdId, positions] of householdPositions.entries()) {
+  for (const [partyId, positions] of partyPositions.entries()) {
     if (positions.length <= 1) continue;
 
     // Same table — adjacency is checked separately.
@@ -527,28 +887,37 @@ function getSplitHouseholds(
     if (tableIdxSet.size === 1) continue;
 
     // Members span multiple tables. Check same-side + same-row + contiguous.
-    const isAllSideA = positions.every((p) => p.seatIdx <= 3);
-    const isAllSideB = positions.every((p) => p.seatIdx >= 4);
+    const seatsWithTables = positions.map((position) => ({
+      ...position,
+      table: tables[position.tableIdx],
+      side: getSeatRowSide(tables[position.tableIdx], position.seatIdx),
+    }));
+    if (seatsWithTables.some((position) => position.side === null)) {
+      // Round-table and non-row-side seats are exempt from row-side split checks.
+      continue;
+    }
+
+    const isAllSideA = seatsWithTables.every((p) => p.side === "A");
+    const isAllSideB = seatsWithTables.every((p) => p.side === "B");
 
     if (!isAllSideA && !isAllSideB) {
       // Members are on different sides — always a split.
-      splitHouseholds.add(householdId);
+      splitParties.add(partyId);
       continue;
     }
 
     // All members must be in the same table row.
-    const rows = new Set(positions.map((p) => Math.floor(p.tableIdx / TABLES_PER_ROW)));
+    const rows = new Set(seatsWithTables.map((p) => p.table.gridPosition.row));
     if (rows.size > 1) {
-      splitHouseholds.add(householdId);
+      splitParties.add(partyId);
       continue;
     }
 
-    // Compute physical left-to-right linear position on the side.
-    // Side A: slot s  → column * 4 + s         (order 0→1→2→3)
-    // Side B: slot s  → column * 4 + (7 - s)   (order 7→6→5→4, i.e. slot 7 leftmost)
-    const linearPositions = positions.map((p) => {
-      const col = p.tableIdx % TABLES_PER_ROW;
-      return isAllSideA ? col * 4 + p.seatIdx : col * 4 + (7 - p.seatIdx);
+    const side = isAllSideA ? "A" : "B";
+    const linearPositions = seatsWithTables.map((p) => {
+      const sideOrder = getSeatRowSideOrder(p.table, p.seatIdx, side);
+      const sideLength = getRowSideSeatIndexes(p.table)[side].length;
+      return p.table.gridPosition.column * Math.max(sideLength, 1) + sideOrder;
     });
 
     linearPositions.sort((a, b) => a - b);
@@ -561,11 +930,11 @@ function getSplitHouseholds(
     }
 
     if (!contiguous) {
-      splitHouseholds.add(householdId);
+      splitParties.add(partyId);
     }
   }
 
-  return splitHouseholds;
+  return splitParties;
 }
 
 /**
@@ -580,43 +949,38 @@ function getSplitHouseholds(
  * Cross-table households that pass getSplitHouseholds are on the same side and
  * contiguous, which implies adjacency, so they are not re-checked here.
  */
-function getNonAdjacentHouseholds(
+function getNonAdjacentParties(
   tables: TableState[],
   guestProfiles: Record<string, GuestProfile>
 ): Set<string> {
-  const householdToSeats = new Map<string, Array<{ tableNumber: number; seatIdx: number }>>();
+  const partyToSeats = new Map<string, Array<{ tableNumber: number; seatIdx: number }>>();
 
   for (const table of tables) {
     table.guestIds.forEach((guestId, seatIdx) => {
       if (!guestId) return;
-      const householdId = guestProfiles[guestId]?.partyId;
-      if (!householdId) return;
+      const partyId = guestProfiles[guestId]?.partyId;
+      if (!partyId) return;
 
-      const seats = householdToSeats.get(householdId) ?? [];
+      const seats = partyToSeats.get(partyId) ?? [];
       seats.push({ tableNumber: table.tableNumber, seatIdx });
-      householdToSeats.set(householdId, seats);
+      partyToSeats.set(partyId, seats);
     });
-  }
-
-  // Two seat slot indices are adjacent under the new rules.
-  function areSlotsAdjacent(a: number, b: number): boolean {
-    // Same side, consecutive
-    if (Math.abs(a - b) === 1 && a <= 3 === b <= 3) return true;
-    // Directly across from each other
-    if (a + b === 7) return true;
-    return false;
   }
 
   const nonAdjacent = new Set<string>();
 
-  for (const [householdId, seats] of householdToSeats.entries()) {
+  for (const [partyId, seats] of partyToSeats.entries()) {
     if (seats.length <= 1) continue;
 
-    // Cross-table households: adjacency is already guaranteed by getSplitHouseholds.
+    // Cross-table parties: adjacency is already guaranteed by getSplitParties.
     const tableNumbers = new Set(seats.map((s) => s.tableNumber));
     if (tableNumbers.size !== 1) continue;
 
     // BFS connectivity check on the single-table adjacency graph.
+    const tableNumber = seats[0].tableNumber;
+    const table = tables.find((entry) => entry.tableNumber === tableNumber);
+    if (!table) continue;
+
     const seatIdxs = seats.map((s) => s.seatIdx);
     const visited = new Set<number>();
     const queue = [seatIdxs[0]];
@@ -625,7 +989,7 @@ function getNonAdjacentHouseholds(
     while (queue.length > 0) {
       const current = queue.shift()!;
       for (const other of seatIdxs) {
-        if (!visited.has(other) && areSlotsAdjacent(current, other)) {
+        if (!visited.has(other) && areSeatsAdjacentInTable(table, current, other)) {
           visited.add(other);
           queue.push(other);
         }
@@ -633,40 +997,40 @@ function getNonAdjacentHouseholds(
     }
 
     if (visited.size !== seatIdxs.length) {
-      nonAdjacent.add(householdId);
+      nonAdjacent.add(partyId);
     }
   }
 
   return nonAdjacent;
 }
 
-function introducesNewHouseholdSplit(
+function introducesNewPartySplit(
   previousTables: TableState[],
   nextTables: TableState[],
   guestProfiles?: Record<string, GuestProfile>
 ): boolean {
   if (!guestProfiles) return false;
 
-  const previousSplits = getSplitHouseholds(previousTables, guestProfiles);
-  const nextSplits = getSplitHouseholds(nextTables, guestProfiles);
-  for (const householdId of nextSplits) {
-    if (!previousSplits.has(householdId)) return true;
+  const previousSplits = getSplitParties(previousTables, guestProfiles);
+  const nextSplits = getSplitParties(nextTables, guestProfiles);
+  for (const partyId of nextSplits) {
+    if (!previousSplits.has(partyId)) return true;
   }
 
   return false;
 }
 
-function introducesNewHouseholdAdjacencyViolation(
+function introducesNewPartyAdjacencyViolation(
   previousTables: TableState[],
   nextTables: TableState[],
   guestProfiles?: Record<string, GuestProfile>
 ): boolean {
   if (!guestProfiles) return false;
 
-  const previousViolations = getNonAdjacentHouseholds(previousTables, guestProfiles);
-  const nextViolations = getNonAdjacentHouseholds(nextTables, guestProfiles);
-  for (const householdId of nextViolations) {
-    if (!previousViolations.has(householdId)) return true;
+  const previousViolations = getNonAdjacentParties(previousTables, guestProfiles);
+  const nextViolations = getNonAdjacentParties(nextTables, guestProfiles);
+  for (const partyId of nextViolations) {
+    if (!previousViolations.has(partyId)) return true;
   }
 
   return false;
@@ -676,132 +1040,120 @@ function introducesNewHouseholdAdjacencyViolation(
  * Returns the set of named group IDs whose members span more than one row.
  * Groups are expected to stay within a single row; cross-row splits are blocked.
  */
-function getSplitGroups(
+function getSplitCircles(
   tables: TableState[],
   guestProfiles: Record<string, GuestProfile>
 ): Set<string> {
-  const groupRows = new Map<string, Set<number>>();
+  const circleRows = new Map<string, Set<number>>();
   for (let tableIdx = 0; tableIdx < tables.length; tableIdx += 1) {
-    const rowIdx = Math.floor(tableIdx / TABLES_PER_ROW);
+    const rowIdx = tables[tableIdx].gridPosition.row;
     tables[tableIdx].guestIds.forEach((guestId) => {
       if (!guestId) return;
-      const group = guestProfiles[guestId]?.group;
-      if (!group) return;
-      const rows = groupRows.get(group) ?? new Set<number>();
+      const circle = guestProfiles[guestId]?.circle;
+      if (!circle) return;
+      const rows = circleRows.get(circle) ?? new Set<number>();
       rows.add(rowIdx);
-      groupRows.set(group, rows);
+      circleRows.set(circle, rows);
     });
   }
-  const splitGroups = new Set<string>();
-  for (const [groupId, rows] of groupRows) {
-    if (rows.size > 1) splitGroups.add(groupId);
+  const splitCircles = new Set<string>();
+  for (const [circleId, rows] of circleRows) {
+    if (rows.size > 1) splitCircles.add(circleId);
   }
-  return splitGroups;
+  return splitCircles;
 }
 
-function introducesNewGroupRowIsolation(
+function introducesNewCircleRowIsolation(
   previousTables: TableState[],
   nextTables: TableState[],
   guestProfiles?: Record<string, GuestProfile>
 ): boolean {
   if (!guestProfiles) return false;
-  const previousSplits = getSplitGroups(previousTables, guestProfiles);
-  const nextSplits = getSplitGroups(nextTables, guestProfiles);
-  for (const groupId of nextSplits) {
-    if (!previousSplits.has(groupId)) return true;
+  const previousSplits = getSplitCircles(previousTables, guestProfiles);
+  const nextSplits = getSplitCircles(nextTables, guestProfiles);
+  for (const circleId of nextSplits) {
+    if (!previousSplits.has(circleId)) return true;
   }
   return false;
 }
 
 /**
- * Returns the set of named group IDs whose members span more than one table
+ * Returns the set of named circle IDs whose members span more than one table
  * and are NOT all on the same side (Side A: slots 0–3, Side B: slots 4–7).
- * Single-table groups are excluded because both sides are fine at one table.
+ * Single-table circles are excluded because both sides are fine at one table.
  *
- * A violation requires that at least one table has the group on ONLY side A
- * and another table has the group on ONLY side B (pure-side conflict).
- * A table where the group occupies both sides (e.g. a large household filling
+ * A violation requires that at least one table has the circle on ONLY side A
+ * and another table has the circle on ONLY side B (pure-side conflict).
+ * A table where the circle occupies both sides (e.g. a large party filling
  * the whole table) is treated as neutral and does not constitute a violation.
  */
-function getNonSameSideGroups(
+function getNonSameSideCircles(
   tables: TableState[],
   guestProfiles: Record<string, GuestProfile>
 ): Set<string> {
-  const groupTableSeats = new Map<string, Map<number, number[]>>();
+  const circleTableSeats = new Map<string, Map<number, number[]>>();
   for (let tableIdx = 0; tableIdx < tables.length; tableIdx += 1) {
     tables[tableIdx].guestIds.forEach((guestId, seatIdx) => {
       if (!guestId) return;
-      const group = guestProfiles[guestId]?.group;
-      if (!group) return;
-      if (!groupTableSeats.has(group)) groupTableSeats.set(group, new Map());
-      const tableMap = groupTableSeats.get(group)!;
+      const circle = guestProfiles[guestId]?.circle;
+      if (!circle) return;
+      if (!circleTableSeats.has(circle)) circleTableSeats.set(circle, new Map());
+      const tableMap = circleTableSeats.get(circle)!;
       if (!tableMap.has(tableIdx)) tableMap.set(tableIdx, []);
       tableMap.get(tableIdx)!.push(seatIdx);
     });
   }
   const violators = new Set<string>();
-  for (const [groupId, tableMap] of groupTableSeats) {
+  for (const [circleId, tableMap] of circleTableSeats) {
     if (tableMap.size <= 1) continue; // single table — no side constraint
     let hasPureSideA = false;
     let hasPureSideB = false;
-    for (const seats of tableMap.values()) {
-      const allSideA = seats.every((s) => s <= 3);
-      const allSideB = seats.every((s) => s >= 4);
+    for (const [tableIdx, seats] of tableMap.entries()) {
+      const table = tables[tableIdx];
+      const seatSides = seats.map((seatIdx) => getSeatRowSide(table, seatIdx));
+      if (seatSides.some((side) => side === null)) continue;
+      const allSideA = seatSides.every((side) => side === "A");
+      const allSideB = seatSides.every((side) => side === "B");
       if (allSideA) hasPureSideA = true;
       if (allSideB) hasPureSideB = true;
     }
     // Only a violation when one table is pure-A and another is pure-B.
-    // Mixed-side tables (large households) are neutral.
-    if (hasPureSideA && hasPureSideB) violators.add(groupId);
+    // Mixed-side tables (large parties) are neutral.
+    if (hasPureSideA && hasPureSideB) violators.add(circleId);
   }
   return violators;
 }
 
-function introducesNewGroupSideSplit(
+function introducesNewCircleSideSplit(
   previousTables: TableState[],
   nextTables: TableState[],
   guestProfiles?: Record<string, GuestProfile>
 ): boolean {
   if (!guestProfiles) return false;
-  const previousViolations = getNonSameSideGroups(previousTables, guestProfiles);
-  const nextViolations = getNonSameSideGroups(nextTables, guestProfiles);
-  for (const groupId of nextViolations) {
-    if (!previousViolations.has(groupId)) return true;
+  const previousViolations = getNonSameSideCircles(previousTables, guestProfiles);
+  const nextViolations = getNonSameSideCircles(nextTables, guestProfiles);
+  for (const circleId of nextViolations) {
+    if (!previousViolations.has(circleId)) return true;
   }
   return false;
 }
 
-function getRowBoundsForTableIndex(
-  tableIdx: number,
-  tableCount: number
-): {
-  rowStart: number;
-  rowEndExclusive: number;
-} {
-  const rowStart = Math.floor(tableIdx / TABLES_PER_ROW) * TABLES_PER_ROW;
-  return {
-    rowStart,
-    rowEndExclusive: Math.min(rowStart + TABLES_PER_ROW, tableCount),
-  };
-}
-
-function getAdjacentTableIndexesInRow(targetTableIdx: number, tableCount: number): number[] {
-  const { rowStart, rowEndExclusive } = getRowBoundsForTableIndex(targetTableIdx, tableCount);
-  const indexes: number[] = [targetTableIdx];
-
-  for (
-    let distance = 1;
-    rowStart <= targetTableIdx - distance || targetTableIdx + distance < rowEndExclusive;
-    distance += 1
-  ) {
-    const left = targetTableIdx - distance;
-    if (left >= rowStart) indexes.push(left);
-
-    const right = targetTableIdx + distance;
-    if (right < rowEndExclusive) indexes.push(right);
-  }
-
-  return indexes;
+function getAdjacentTableIndexesInRow(targetTableIdx: number, tables: TableState[]): number[] {
+  const targetTable = tables[targetTableIdx];
+  return tables
+    .map((table, index) => ({ table, index }))
+    .filter(({ table }) => table.gridPosition.row === targetTable.gridPosition.row)
+    .sort((left, right) => {
+      const leftDistance = Math.abs(
+        left.table.gridPosition.column - targetTable.gridPosition.column
+      );
+      const rightDistance = Math.abs(
+        right.table.gridPosition.column - targetTable.gridPosition.column
+      );
+      if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+      return left.table.gridPosition.column - right.table.gridPosition.column;
+    })
+    .map(({ index }) => index);
 }
 
 // ─── Main algorithm ───────────────────────────────────────────────────────────
@@ -856,25 +1208,21 @@ function assignGuestsSmart(
       : nextTables.findIndex((table) => table.tableNumber === targetTableNumber);
   if (targetTableNumber != null && targetTableIdx === -1) return state;
 
-  const candidateTableIdxs = getCandidateTableIndexes(
-    targetTableIdx,
-    targetScope,
-    nextTables.length
-  );
-  const placementGroups = buildPlacementUnits(toSeat, guestProfiles);
+  const candidateTableIdxs = getCandidateTableIndexes(targetTableIdx, targetScope, nextTables);
+  const placementCircles = buildPlacementUnits(toSeat, guestProfiles);
 
-  for (const { groupId, units } of placementGroups) {
-    const isNamedGroup = !groupId.startsWith("\0nogroup\0");
-    let groupHomeRow: number | null = null;
-    let groupHomeSide: "A" | "B" | null = null;
+  for (const { circleId, units } of placementCircles) {
+    const isNamedCircle = !circleId.startsWith("\0nocircle\0");
+    let circleHomeRow: number | null = null;
+    let circleHomeSide: "A" | "B" | null = null;
 
     for (const guestIds of units) {
-      // Restrict to the group's home row after the first household is placed (orphan rule).
+      // Restrict to the circle's home row after the first party is placed (orphan rule).
       let effectiveCandidates = candidateTableIdxs;
-      if (isNamedGroup && groupHomeRow !== null) {
-        const rowStart = groupHomeRow * TABLES_PER_ROW;
-        const rowEnd = Math.min(rowStart + TABLES_PER_ROW, nextTables.length);
-        effectiveCandidates = candidateTableIdxs.filter((idx) => idx >= rowStart && idx < rowEnd);
+      if (isNamedCircle && circleHomeRow !== null) {
+        effectiveCandidates = candidateTableIdxs.filter(
+          (idx) => nextTables[idx].gridPosition.row === circleHomeRow
+        );
         if (effectiveCandidates.length === 0) continue; // orphan: no candidates in home row
       }
 
@@ -887,37 +1235,41 @@ function assignGuestsSmart(
         effectiveCandidates,
         guestIds.length
       );
-      // For named groups, a run that straddles side A and B will later violate the
+      // For named circles, a run that straddles side A and B will later violate the
       // cross-table side-cohesion constraint. Prefer a side-respecting row run first.
       const singleTableRunCrossesSides =
         singleTableRun !== null &&
-        singleTableRun.some((s) => s.seatIdx <= 3) &&
-        singleTableRun.some((s) => s.seatIdx >= 4);
-      if (singleTableRun && !(isNamedGroup && singleTableRunCrossesSides)) {
+        singleTableRun.some(
+          (seat) => getSeatRowSide(nextTables[seat.tableIdx], seat.seatIdx) === "A"
+        ) &&
+        singleTableRun.some(
+          (seat) => getSeatRowSide(nextTables[seat.tableIdx], seat.seatIdx) === "B"
+        );
+      if (singleTableRun && !(isNamedCircle && singleTableRunCrossesSides)) {
         placeGuestsAtSeats(nextTables, singleTableRun, guestIds);
-        if (isNamedGroup && groupHomeRow === null) {
-          groupHomeRow = Math.floor(singleTableRun[0].tableIdx / TABLES_PER_ROW);
+        if (isNamedCircle && circleHomeRow === null) {
+          circleHomeRow = nextTables[singleTableRun[0].tableIdx].gridPosition.row;
         }
         continue;
       }
 
-      // findBestRowRun is only reached when no single table fits the household,
-      // so any result spans multiple tables — enforce the group's established side.
+      // findBestRowRun is only reached when no single table fits the party,
+      // so any result spans multiple tables — enforce the circle's established side.
       const rowRun = findBestRowRun(
         nextTables,
         effectiveCandidates,
         guestIds.length,
         effectiveCandidateOrder,
-        isNamedGroup ? groupHomeSide : null
+        isNamedCircle ? circleHomeSide : null
       );
       if (rowRun) {
         placeGuestsAtSeats(nextTables, rowRun, guestIds);
-        if (isNamedGroup) {
-          if (groupHomeRow === null) {
-            groupHomeRow = Math.floor(rowRun[0].tableIdx / TABLES_PER_ROW);
+        if (isNamedCircle) {
+          if (circleHomeRow === null) {
+            circleHomeRow = nextTables[rowRun[0].tableIdx].gridPosition.row;
           }
-          if (groupHomeSide === null) {
-            groupHomeSide = rowRun[0].seatIdx <= 3 ? "A" : "B";
+          if (circleHomeSide === null) {
+            circleHomeSide = getSeatRowSide(nextTables[rowRun[0].tableIdx], rowRun[0].seatIdx);
           }
         }
         continue;
@@ -927,8 +1279,8 @@ function assignGuestsSmart(
       // it straddled both sides, use it now that the side-aware row run also failed.
       if (singleTableRun) {
         placeGuestsAtSeats(nextTables, singleTableRun, guestIds);
-        if (isNamedGroup && groupHomeRow === null) {
-          groupHomeRow = Math.floor(singleTableRun[0].tableIdx / TABLES_PER_ROW);
+        if (isNamedCircle && circleHomeRow === null) {
+          circleHomeRow = nextTables[singleTableRun[0].tableIdx].gridPosition.row;
         }
         continue;
       }
@@ -937,10 +1289,9 @@ function assignGuestsSmart(
       let remainingSeats = effectiveCandidates.flatMap((tableIdx) =>
         getOpenSeatIndexesForTable(nextTables[tableIdx]).map((seatIdx) => ({ tableIdx, seatIdx }))
       );
-      if (isNamedGroup && groupHomeSide !== null) {
-        const side = groupHomeSide;
-        remainingSeats = remainingSeats.filter((s) =>
-          side === "A" ? s.seatIdx <= 3 : s.seatIdx >= 4
+      if (isNamedCircle && circleHomeSide !== null) {
+        remainingSeats = remainingSeats.filter(
+          (s) => getSeatRowSide(nextTables[s.tableIdx], s.seatIdx) === circleHomeSide
         );
       }
 
@@ -948,16 +1299,19 @@ function assignGuestsSmart(
 
       const partialGuests = guestIds.slice(0, remainingSeats.length);
       placeGuestsAtSeats(nextTables, remainingSeats.slice(0, partialGuests.length), partialGuests);
-      if (isNamedGroup && partialGuests.length > 0) {
-        if (groupHomeRow === null) {
-          groupHomeRow = Math.floor(remainingSeats[0].tableIdx / TABLES_PER_ROW);
+      if (isNamedCircle && partialGuests.length > 0) {
+        if (circleHomeRow === null) {
+          circleHomeRow = nextTables[remainingSeats[0].tableIdx].gridPosition.row;
         }
-        if (groupHomeSide === null) {
+        if (circleHomeSide === null) {
           const placedTableIdxSet = new Set(
             remainingSeats.slice(0, partialGuests.length).map((s) => s.tableIdx)
           );
           if (placedTableIdxSet.size > 1) {
-            groupHomeSide = remainingSeats[0].seatIdx <= 3 ? "A" : "B";
+            circleHomeSide = getSeatRowSide(
+              nextTables[remainingSeats[0].tableIdx],
+              remainingSeats[0].seatIdx
+            );
           }
         }
       }
@@ -974,16 +1328,16 @@ function assignGuestsSmart(
   // For manual drag-to-table drops, bypass cohesion guard rails so any placement
   // that fits is accepted; otherwise enforce cohesion constraints to prevent splits.
   if (!allowPartialPlacementBypass) {
-    if (introducesNewHouseholdSplit(state.tables, nextTables, guestProfiles)) {
+    if (introducesNewPartySplit(state.tables, nextTables, guestProfiles)) {
       return state;
     }
-    if (introducesNewHouseholdAdjacencyViolation(state.tables, nextTables, guestProfiles)) {
+    if (introducesNewPartyAdjacencyViolation(state.tables, nextTables, guestProfiles)) {
       return state;
     }
-    if (introducesNewGroupRowIsolation(state.tables, nextTables, guestProfiles)) {
+    if (introducesNewCircleRowIsolation(state.tables, nextTables, guestProfiles)) {
       return state;
     }
-    if (introducesNewGroupSideSplit(state.tables, nextTables, guestProfiles)) {
+    if (introducesNewCircleSideSplit(state.tables, nextTables, guestProfiles)) {
       return state;
     }
   }
@@ -993,6 +1347,7 @@ function assignGuestsSmart(
   }
 
   return {
+    board: state.board,
     tables: nextTables,
     unassigned: state.unassigned.filter((id) => !successfullyPlaced.has(id)),
     lockedGuestIds: state.lockedGuestIds ?? [],
@@ -1001,6 +1356,116 @@ function assignGuestsSmart(
 
 export function seatingReducer(state: SeatingState, action: SeatingAction): SeatingState {
   switch (action.type) {
+    case "UPDATE_BOARD_CONFIG": {
+      const nextBoard = updateBoardState(state.board, action.updates, action.newTableDefaults);
+      const allTablesFit = state.tables.every((table) =>
+        isGridPositionWithinBoard(table.gridPosition, nextBoard)
+      );
+      if (!allTablesFit) {
+        return state;
+      }
+
+      return {
+        ...state,
+        board: nextBoard,
+      };
+    }
+
+    case "CREATE_TABLE": {
+      const gridPosition =
+        action.gridPosition ?? findFirstOpenGridPosition(state.board, state.tables);
+      if (!gridPosition || !isGridPositionWithinBoard(gridPosition, state.board)) {
+        return state;
+      }
+      if (hasGridConflict(state.tables, gridPosition)) {
+        return state;
+      }
+
+      const nextTableNumber =
+        state.tables.reduce(
+          (maxTableNumber, table) => Math.max(maxTableNumber, table.tableNumber),
+          0
+        ) + 1;
+      const nextTable = createTableState(nextTableNumber, state.board, {
+        name: action.name,
+        shape: action.shape,
+        gridPosition,
+        seatConfig: action.seatConfig,
+      });
+
+      return {
+        ...state,
+        tables: sortTablesByGridPosition([...state.tables, nextTable]),
+      };
+    }
+
+    case "UPDATE_TABLE_CONFIG": {
+      const tableIndex = state.tables.findIndex(
+        (table) => table.tableNumber === action.tableNumber
+      );
+      if (tableIndex === -1) {
+        return state;
+      }
+
+      const currentTable = state.tables[tableIndex];
+      const nextShape = action.updates.shape ?? currentTable.shape;
+      const nextSeatConfig =
+        action.updates.seatConfig ??
+        (action.updates.shape
+          ? createSeatConfigFromDefaults(state.board, nextShape)
+          : currentTable.seatConfig);
+      const nextGridPosition = action.updates.gridPosition ?? currentTable.gridPosition;
+
+      if (!isGridPositionWithinBoard(nextGridPosition, state.board)) {
+        return state;
+      }
+      if (hasGridConflict(state.tables, nextGridPosition, currentTable.tableNumber)) {
+        return state;
+      }
+
+      const resizedTable = applyTableSeatConfig(
+        {
+          ...currentTable,
+          name: action.updates.name ?? currentTable.name,
+          shape: nextShape,
+          gridPosition: nextGridPosition,
+        },
+        nextSeatConfig
+      );
+      const nextTables = sortTablesByGridPosition(
+        state.tables.map((table, index) => (index === tableIndex ? resizedTable.table : table))
+      );
+
+      return {
+        ...state,
+        tables: nextTables,
+        unassigned: [...new Set([...state.unassigned, ...resizedTable.displacedGuestIds])],
+        lockedGuestIds: (state.lockedGuestIds ?? []).filter(
+          (guestId) => !resizedTable.displacedGuestIds.includes(guestId)
+        ),
+      };
+    }
+
+    case "DELETE_TABLE": {
+      const table = state.tables.find((entry) => entry.tableNumber === action.tableNumber);
+      if (!table) {
+        return state;
+      }
+
+      const displacedGuestIds = table.guestIds.filter(
+        (guestId): guestId is string => guestId !== null
+      );
+
+      return {
+        ...state,
+        tables: state.tables.filter((entry) => entry.tableNumber !== action.tableNumber),
+        unassigned: [...new Set([...state.unassigned, ...displacedGuestIds])],
+        lockedGuestIds: (state.lockedGuestIds ?? []).filter(
+          (guestId) => !displacedGuestIds.includes(guestId)
+        ),
+      };
+    }
+
     case "SET_GUEST_ANCHORED": {
       const currentlyAnchored = (state.lockedGuestIds ?? []).includes(action.guestId);
       if (action.anchored === currentlyAnchored) {
@@ -1045,24 +1510,20 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       const table = state.tables[tableIdx];
       if (!table) return state;
 
-      if (assignmentMode === "group-overflow") {
+      if (assignmentMode === "circle-overflow") {
         const overflowState = assignGuestsWithOverflow(state, tableIdx, guestIds, seatIndex);
-        if (introducesNewHouseholdSplit(state.tables, overflowState.tables, guestProfiles)) {
+        if (introducesNewPartySplit(state.tables, overflowState.tables, guestProfiles)) {
           return state;
         }
         if (
-          introducesNewHouseholdAdjacencyViolation(
-            state.tables,
-            overflowState.tables,
-            guestProfiles
-          )
+          introducesNewPartyAdjacencyViolation(state.tables, overflowState.tables, guestProfiles)
         ) {
           return state;
         }
-        if (introducesNewGroupRowIsolation(state.tables, overflowState.tables, guestProfiles)) {
+        if (introducesNewCircleRowIsolation(state.tables, overflowState.tables, guestProfiles)) {
           return state;
         }
-        if (introducesNewGroupSideSplit(state.tables, overflowState.tables, guestProfiles)) {
+        if (introducesNewCircleSideSplit(state.tables, overflowState.tables, guestProfiles)) {
           return state;
         }
         return overflowState;
@@ -1080,7 +1541,7 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
           targetSeatGuestId !== null &&
           targetSeatGuestId !== incomingGuestId &&
           seatIndex >= 0 &&
-          seatIndex < TABLE_CAPACITY
+          seatIndex < table.guestIds.length
         ) {
           const lockedSet = new Set(state.lockedGuestIds ?? []);
           if (lockedSet.has(incomingGuestId) || lockedSet.has(targetSeatGuestId)) {
@@ -1096,21 +1557,22 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
           nextTables[incomingSeat.tableIdx].guestIds[incomingSeat.seatIdx] = targetSeatGuestId;
 
           if (!isManualSeatOverride) {
-            if (introducesNewHouseholdSplit(state.tables, nextTables, guestProfiles)) {
+            if (introducesNewPartySplit(state.tables, nextTables, guestProfiles)) {
               return state;
             }
-            if (introducesNewHouseholdAdjacencyViolation(state.tables, nextTables, guestProfiles)) {
+            if (introducesNewPartyAdjacencyViolation(state.tables, nextTables, guestProfiles)) {
               return state;
             }
-            if (introducesNewGroupRowIsolation(state.tables, nextTables, guestProfiles)) {
+            if (introducesNewCircleRowIsolation(state.tables, nextTables, guestProfiles)) {
               return state;
             }
-            if (introducesNewGroupSideSplit(state.tables, nextTables, guestProfiles)) {
+            if (introducesNewCircleSideSplit(state.tables, nextTables, guestProfiles)) {
               return state;
             }
           }
 
           return {
+            board: state.board,
             tables: nextTables,
             unassigned: state.unassigned.filter((guestId) => guestId !== incomingGuestId),
             lockedGuestIds: state.lockedGuestIds ?? [],
@@ -1122,14 +1584,10 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
         const dragGuestId = orderedGuestIds[0];
         const partyId = guestProfiles[dragGuestId]?.partyId;
         if (partyId) {
-          const seatedHouseholdGuestIds = getSeatedHouseholdGuestIds(
-            state.tables,
-            partyId,
-            guestProfiles
-          );
-          if (seatedHouseholdGuestIds.length > 1 && seatedHouseholdGuestIds.includes(dragGuestId)) {
+          const seatedPartyGuestIds = getSeatedPartyGuestIds(state.tables, partyId, guestProfiles);
+          if (seatedPartyGuestIds.length > 1 && seatedPartyGuestIds.includes(dragGuestId)) {
             // Preserve household integrity when manually moving one seated household member.
-            orderedGuestIds = seatedHouseholdGuestIds;
+            orderedGuestIds = seatedPartyGuestIds;
           }
         }
       }
@@ -1152,20 +1610,21 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
         index === tableIdx ? { ...currentTable, guestIds: updatedSeatSlots } : currentTable
       );
       if (!isManualSeatOverride) {
-        if (introducesNewHouseholdSplit(state.tables, newTables, guestProfiles)) return state;
-        if (introducesNewHouseholdAdjacencyViolation(state.tables, newTables, guestProfiles)) {
+        if (introducesNewPartySplit(state.tables, newTables, guestProfiles)) return state;
+        if (introducesNewPartyAdjacencyViolation(state.tables, newTables, guestProfiles)) {
           return state;
         }
-        if (introducesNewGroupRowIsolation(state.tables, newTables, guestProfiles)) {
+        if (introducesNewCircleRowIsolation(state.tables, newTables, guestProfiles)) {
           return state;
         }
-        if (introducesNewGroupSideSplit(state.tables, newTables, guestProfiles)) {
+        if (introducesNewCircleSideSplit(state.tables, newTables, guestProfiles)) {
           return state;
         }
       }
 
       const newUnassigned = state.unassigned.filter((guestId) => !incomingSet.has(guestId));
       return {
+        board: state.board,
         tables: newTables,
         unassigned: newUnassigned,
         lockedGuestIds: state.lockedGuestIds ?? [],
@@ -1180,7 +1639,12 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       }));
       const newUnassigned = [...new Set([...state.unassigned, ...action.guestIds])];
       const newLocked = (state.lockedGuestIds ?? []).filter((id) => !removedSet.has(id));
-      return { tables: newTables, unassigned: newUnassigned, lockedGuestIds: newLocked };
+      return {
+        ...state,
+        tables: newTables,
+        unassigned: newUnassigned,
+        lockedGuestIds: newLocked,
+      };
     }
 
     case "CLEAR_TABLE": {
@@ -1193,12 +1657,17 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
 
       const newTables = state.tables.map((entry) =>
         entry.tableNumber === action.tableNumber
-          ? { ...entry, guestIds: createEmptySeatSlots() }
+          ? { ...entry, guestIds: createEmptySeatSlots(entry.guestIds.length) }
           : entry
       );
       const newUnassigned = [...new Set([...state.unassigned, ...clearedGuestIds])];
       const newLocked = (state.lockedGuestIds ?? []).filter((id) => !clearedGuestIds.includes(id));
-      return { tables: newTables, unassigned: newUnassigned, lockedGuestIds: newLocked };
+      return {
+        ...state,
+        tables: newTables,
+        unassigned: newUnassigned,
+        lockedGuestIds: newLocked,
+      };
     }
 
     case "TOGGLE_SEAT_DISABLED": {
@@ -1305,7 +1774,7 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
 
       const needsAutoseat: string[] = [];
 
-      for (let seatIdx = 0; seatIdx < TABLE_CAPACITY; seatIdx += 1) {
+      for (let seatIdx = 0; seatIdx < activeTable.guestIds.length; seatIdx += 1) {
         const guestId = activeTable.guestIds[seatIdx];
         if (!guestId || lockedSet.has(guestId)) continue;
 
@@ -1317,6 +1786,15 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
           needsAutoseat.push(guestId);
         }
       }
+
+      nextTables[activeIndex].disabledSeats = normalizeDisabledSeatsForGuestIds(
+        nextTables[activeIndex].disabledSeats,
+        nextActiveGuestIds
+      );
+      nextTables[overIndex].disabledSeats = normalizeDisabledSeatsForGuestIds(
+        nextTables[overIndex].disabledSeats,
+        nextOverGuestIds
+      );
 
       const intermediateState: SeatingState = { ...state, tables: nextTables };
 
@@ -1346,27 +1824,143 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       const activeTable = state.tables[activeIndex];
       const overTable = state.tables[overIndex];
 
-      const nextTables = state.tables.map((table, index) => {
-        if (index === activeIndex) {
-          return {
-            ...table,
-            guestIds: [...overTable.guestIds],
-            disabledSeats: overTable.disabledSeats ? [...overTable.disabledSeats] : [],
-          };
-        }
+      const lockedSet = new Set(state.lockedGuestIds ?? []);
+      const nextTables = state.tables.map((table) => ({
+        ...table,
+        guestIds: [...table.guestIds],
+      }));
+      const nextActiveGuestIds = nextTables[activeIndex].guestIds;
+      const nextOverGuestIds = nextTables[overIndex].guestIds;
+      // Swap semantics keeps each table's content and seat-disable map together.
+      const disabledActiveSeats = new Set(overTable.disabledSeats ?? []);
+      const disabledOverSeats = new Set(activeTable.disabledSeats ?? []);
 
-        if (index === overIndex) {
-          return {
-            ...table,
-            guestIds: [...activeTable.guestIds],
-            disabledSeats: activeTable.disabledSeats ? [...activeTable.disabledSeats] : [],
-          };
-        }
+      const transferableFromActive: string[] = [];
+      const transferableFromActiveIndexes: number[] = [];
+      for (let seatIdx = 0; seatIdx < activeTable.guestIds.length; seatIdx += 1) {
+        const guestId = activeTable.guestIds[seatIdx];
+        if (!guestId || lockedSet.has(guestId)) continue;
+        nextActiveGuestIds[seatIdx] = null;
+        transferableFromActive.push(guestId);
+        transferableFromActiveIndexes.push(seatIdx);
+      }
 
-        return table;
-      });
+      const transferableFromOver: string[] = [];
+      const transferableFromOverIndexes: number[] = [];
+      for (let seatIdx = 0; seatIdx < overTable.guestIds.length; seatIdx += 1) {
+        const guestId = overTable.guestIds[seatIdx];
+        if (!guestId || lockedSet.has(guestId)) continue;
+        nextOverGuestIds[seatIdx] = null;
+        transferableFromOver.push(guestId);
+        transferableFromOverIndexes.push(seatIdx);
+      }
 
-      return { ...state, tables: nextTables };
+      const activeToOverPlacement = placeGuestsByPreferredIndex(
+        transferableFromActive,
+        transferableFromActiveIndexes,
+        nextOverGuestIds,
+        disabledOverSeats
+      );
+      const overToActivePlacement = placeGuestsByPreferredIndex(
+        transferableFromOver,
+        transferableFromOverIndexes,
+        nextActiveGuestIds,
+        disabledActiveSeats
+      );
+
+      nextTables[activeIndex].disabledSeats = normalizeDisabledSeatsForGuestIds(
+        overTable.disabledSeats,
+        nextActiveGuestIds
+      );
+      nextTables[overIndex].disabledSeats = normalizeDisabledSeatsForGuestIds(
+        activeTable.disabledSeats,
+        nextOverGuestIds
+      );
+
+      let nextState: SeatingState = { ...state, tables: nextTables };
+
+      if (activeToOverPlacement.overflowGuestIds.length > 0) {
+        nextState = action.guestProfiles
+          ? assignGuestsSmart(
+              nextState,
+              activeToOverPlacement.overflowGuestIds,
+              action.guestProfiles,
+              {
+                targetTableNumber: action.overTableNumber,
+                targetScope: "target-and-adjacent",
+              }
+            )
+          : assignGuestsWithOverflow(nextState, overIndex, activeToOverPlacement.overflowGuestIds);
+      }
+
+      if (overToActivePlacement.overflowGuestIds.length > 0) {
+        nextState = action.guestProfiles
+          ? assignGuestsSmart(
+              nextState,
+              overToActivePlacement.overflowGuestIds,
+              action.guestProfiles,
+              {
+                targetTableNumber: action.activeTableNumber,
+                targetScope: "target-and-adjacent",
+              }
+            )
+          : assignGuestsWithOverflow(
+              nextState,
+              activeIndex,
+              overToActivePlacement.overflowGuestIds
+            );
+      }
+
+      return nextState;
+    }
+
+    case "MOVE_TABLE_POSITION": {
+      const activeIndex = state.tables.findIndex(
+        (table) => table.tableNumber === action.activeTableNumber
+      );
+      if (activeIndex === -1) return state;
+
+      if (!isGridPositionWithinBoard(action.targetGridPosition, state.board)) {
+        return state;
+      }
+
+      const activeTable = state.tables[activeIndex];
+      if (
+        getGridPositionKey(activeTable.gridPosition) ===
+        getGridPositionKey(action.targetGridPosition)
+      ) {
+        return state;
+      }
+
+      const targetIndex = state.tables.findIndex(
+        (table) =>
+          table.tableNumber !== action.activeTableNumber &&
+          getGridPositionKey(table.gridPosition) === getGridPositionKey(action.targetGridPosition)
+      );
+
+      const nextTables = state.tables.map((table) => ({ ...table }));
+
+      if (targetIndex === -1) {
+        nextTables[activeIndex] = {
+          ...nextTables[activeIndex],
+          gridPosition: action.targetGridPosition,
+        };
+      } else {
+        const activePosition = nextTables[activeIndex].gridPosition;
+        nextTables[activeIndex] = {
+          ...nextTables[activeIndex],
+          gridPosition: action.targetGridPosition,
+        };
+        nextTables[targetIndex] = {
+          ...nextTables[targetIndex],
+          gridPosition: activePosition,
+        };
+      }
+
+      return {
+        ...state,
+        tables: sortTablesByGridPosition(nextTables),
+      };
     }
 
     default:

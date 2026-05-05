@@ -1,4 +1,9 @@
-import { GUEST_DATA_SOURCE_KEY, GUEST_DATA_STORAGE_KEY, STORAGE_KEY, TABLE_COUNT } from "../types";
+import {
+  GUEST_DATA_SOURCE_KEY,
+  GUEST_DATA_STORAGE_KEY,
+  STORAGE_KEY,
+  getTableSeatCount,
+} from "../types";
 import type {
   GuestInputRow,
   PersistedGuestData,
@@ -48,16 +53,16 @@ export function isGuestInputRow(value: unknown): value is GuestInputRow {
   const candidate = value as {
     id?: unknown;
     host?: unknown;
-    household?: unknown;
-    group?: unknown;
+    party?: unknown;
+    circle?: unknown;
     fullName?: unknown;
   };
 
   return (
     typeof candidate.id === "string" &&
     typeof candidate.host === "string" &&
-    typeof candidate.household === "string" &&
-    typeof candidate.group === "string" &&
+    typeof candidate.party === "string" &&
+    typeof candidate.circle === "string" &&
     typeof candidate.fullName === "string"
   );
 }
@@ -70,23 +75,21 @@ export function isGuestInputRowLike(
   const candidate = value as {
     id?: unknown;
     host?: unknown;
-    household?: unknown;
-    group?: unknown;
+    party?: unknown;
+    circle?: unknown;
     fullName?: unknown;
   };
 
   return (
     (candidate.id === undefined || typeof candidate.id === "string") &&
     typeof candidate.host === "string" &&
-    typeof candidate.household === "string" &&
-    typeof candidate.group === "string" &&
+    typeof candidate.party === "string" &&
+    typeof candidate.circle === "string" &&
     typeof candidate.fullName === "string"
   );
 }
 
 export function isCompatibleState(state: SeatingState, allGuestIds: string[]): boolean {
-  if (state.tables.length !== TABLE_COUNT) return false;
-
   const savedIds = [
     ...state.unassigned,
     ...state.tables.flatMap((table) =>
@@ -107,13 +110,17 @@ export function reconcileStateToGuestIds(
   state: SeatingState,
   allGuestIds: string[]
 ): SeatingState | null {
-  if (state.tables.length !== TABLE_COUNT) return null;
-
   const allowedGuestIds = new Set(allGuestIds);
   const seenGuestIds = new Set<string>();
 
   const tables = state.tables.map((table) => {
-    const guestIds = table.guestIds.map((guestId) => {
+    const expectedSeatCount = getTableSeatCount(table.seatConfig);
+    const normalizedGuestIds = [
+      ...table.guestIds.slice(0, expectedSeatCount),
+      ...Array<string | null>(Math.max(0, expectedSeatCount - table.guestIds.length)).fill(null),
+    ];
+
+    const guestIds = normalizedGuestIds.map((guestId) => {
       if (guestId === null) return null;
       if (!allowedGuestIds.has(guestId) || seenGuestIds.has(guestId)) return null;
 
@@ -132,7 +139,7 @@ export function reconcileStateToGuestIds(
             guestIds[seatIndex] === null &&
             source.indexOf(seatIndex) === index
         )
-      : table.disabledSeats;
+      : [];
 
     return {
       ...table,
