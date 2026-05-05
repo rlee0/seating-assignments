@@ -1,12 +1,12 @@
 import { Crown, House, Layers3, Search, UserPlus, Users } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { cn, normalizeForSearch } from "../lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import GroupCard from "./GroupCard";
-import HouseholdCard from "./HouseholdCard";
+import CircleCard from "./CircleCard";
 import { Input } from "@/components/ui/input";
-import { cn, normalizeForSearch } from "../lib/utils";
+import PartyCard from "./PartyCard";
 import { useDroppable } from "@dnd-kit/core";
 import { useSearch } from "../store/SearchContext";
 import { useSeating } from "../store/SeatingContext";
@@ -14,16 +14,16 @@ import { useSeating } from "../store/SeatingContext";
 const sidebarSortCollator = new Intl.Collator(undefined, { sensitivity: "base" });
 
 function comparePartiesForSidebar(
-  a: { host: string; group: string; household: string },
-  b: { host: string; group: string; household: string }
+  a: { host: string; circle: string; party: string },
+  b: { host: string; circle: string; party: string }
 ): number {
   const byHost = sidebarSortCollator.compare(a.host, b.host);
   if (byHost !== 0) return byHost;
 
-  const byGroup = sidebarSortCollator.compare(a.group || "No Group", b.group || "No Group");
-  if (byGroup !== 0) return byGroup;
+  const byCircle = sidebarSortCollator.compare(a.circle || "No Circle", b.circle || "No Circle");
+  if (byCircle !== 0) return byCircle;
 
-  return sidebarSortCollator.compare(a.household, b.household);
+  return sidebarSortCollator.compare(a.party, b.party);
 }
 
 export default function Sidebar({
@@ -39,22 +39,22 @@ export default function Sidebar({
   const {
     searchQuery,
     setSearchQuery,
-    setGroupHighlightOn,
-    isHouseholdHighlightOn,
-    setHouseholdHighlightOn,
+    setCircleHighlightOn,
+    isPartyHighlightOn,
+    setPartyHighlightOn,
     isHostHighlightOn,
     setHostHighlightOn,
-    householdPulseNonce,
+    partyPulseNonce,
   } = useSearch();
   const unassignedSet = useMemo(() => new Set(state.unassigned), [state.unassigned]);
   const normalizedQuery = useMemo(() => normalizeForSearch(searchQuery.trim()), [searchQuery]);
 
   const normalizedPartyNames = useMemo(() => {
-    const map = new Map<string, { household: string; group: string }>();
+    const map = new Map<string, { party: string; circle: string }>();
     for (const [id, party] of parties) {
       map.set(id, {
-        household: normalizeForSearch(party.household),
-        group: normalizeForSearch(party.group || "No Group"),
+        party: normalizeForSearch(party.party),
+        circle: normalizeForSearch(party.circle || "No Circle"),
       });
     }
     return map;
@@ -70,8 +70,8 @@ export default function Sidebar({
 
   const { setNodeRef, isOver } = useDroppable({ id: "unassigned" });
   const dropzoneRef = useRef<HTMLDivElement | null>(null);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [collapsedHouseholds, setCollapsedHouseholds] = useState<Set<string>>(new Set());
+  const [collapsedCircles, setCollapsedCircles] = useState<Set<string>>(new Set());
+  const [collapsedParties, setCollapsedParties] = useState<Set<string>>(new Set());
 
   const setDropzoneRef = useCallback(
     (node: HTMLDivElement | null) => {
@@ -99,11 +99,7 @@ export default function Sidebar({
     };
   }, []);
 
-  const activeHighlightMode = isHouseholdHighlightOn
-    ? "household"
-    : isHostHighlightOn
-      ? "host"
-      : "group";
+  const activeHighlightMode = isPartyHighlightOn ? "party" : isHostHighlightOn ? "host" : "circle";
   const highlightToggleItemClass =
     "rounded-none border-l border-input bg-background text-muted-foreground first:rounded-l-md first:border-l-0 last:rounded-r-md data-[state=on]:bg-primary/12 data-[state=on]:text-primary";
   const emptyStateMessage =
@@ -121,8 +117,8 @@ export default function Sidebar({
         if (!normalizedQuery) return true;
 
         const names = normalizedPartyNames.get(party.id);
-        if (names?.household.includes(normalizedQuery)) return true;
-        if (names?.group.includes(normalizedQuery)) return true;
+        if (names?.party.includes(normalizedQuery)) return true;
+        if (names?.circle.includes(normalizedQuery)) return true;
 
         return unassignedGuestIds.some((id) => {
           const normalizedName = normalizedGuestNames.get(id);
@@ -137,40 +133,40 @@ export default function Sidebar({
     [partiesWithUnassigned]
   );
 
-  const { groupedParties, groupedGuestIds } = useMemo(() => {
-    const groupedParties = new Map<string, typeof partiesWithUnassigned>();
-    const groupedGuestIds = new Map<string, string[]>();
+  const { circledParties, circledGuestIds } = useMemo(() => {
+    const circledParties = new Map<string, typeof partiesWithUnassigned>();
+    const circledGuestIds = new Map<string, string[]>();
 
     for (const party of sortedPartiesWithUnassigned) {
-      const groupName = party.group || "No Group";
-      const groupParties = groupedParties.get(groupName) ?? [];
-      groupParties.push(party);
-      groupedParties.set(groupName, groupParties);
+      const circleName = party.circle || "No Circle";
+      const circleParties = circledParties.get(circleName) ?? [];
+      circleParties.push(party);
+      circledParties.set(circleName, circleParties);
 
-      const existingGuestIds = groupedGuestIds.get(groupName) ?? [];
+      const existingGuestIds = circledGuestIds.get(circleName) ?? [];
       const unassignedGuestIds = party.guestIds.filter((id) => unassignedSet.has(id));
-      groupedGuestIds.set(groupName, [...existingGuestIds, ...unassignedGuestIds]);
+      circledGuestIds.set(circleName, [...existingGuestIds, ...unassignedGuestIds]);
     }
 
-    return { groupedParties, groupedGuestIds };
+    return { circledParties, circledGuestIds };
   }, [sortedPartiesWithUnassigned, unassignedSet]);
 
-  const sortedGroups = useMemo(() => [...groupedParties.keys()], [groupedParties]);
+  const sortedCircles = useMemo(() => [...circledParties.keys()], [circledParties]);
 
-  const toggleGroupExpanded = useCallback((groupName: string) => {
-    setCollapsedGroups((current) => {
+  const toggleCircleExpanded = useCallback((circleName: string) => {
+    setCollapsedCircles((current) => {
       const next = new Set(current);
-      if (next.has(groupName)) {
-        next.delete(groupName);
+      if (next.has(circleName)) {
+        next.delete(circleName);
       } else {
-        next.add(groupName);
+        next.add(circleName);
       }
       return next;
     });
   }, []);
 
-  const toggleHouseholdExpanded = useCallback((partyId: string) => {
-    setCollapsedHouseholds((current) => {
+  const togglePartyExpanded = useCallback((partyId: string) => {
+    setCollapsedParties((current) => {
       const next = new Set(current);
       if (next.has(partyId)) {
         next.delete(partyId);
@@ -206,10 +202,10 @@ export default function Sidebar({
               type="search"
               className="h-8 pl-8 text-xs"
               data-app-search="true"
-              placeholder="Search guests, households, groups"
+              placeholder="Search guests, parties, circles"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              aria-label="Search unassigned guests, households, and groups"
+              aria-label="Search unassigned guests, parties, and circles"
             />
           </div>
         </div>
@@ -218,13 +214,13 @@ export default function Sidebar({
           size="sm"
           value={activeHighlightMode}
           onValueChange={(value) => {
-            if (value === "group") {
-              setGroupHighlightOn(true);
+            if (value === "circle") {
+              setCircleHighlightOn(true);
               return;
             }
 
-            if (value === "household") {
-              setHouseholdHighlightOn(true);
+            if (value === "party") {
+              setPartyHighlightOn(true);
               return;
             }
 
@@ -235,22 +231,22 @@ export default function Sidebar({
           className="mt-2 w-fit justify-start gap-0 rounded-md border border-input"
           aria-label="Highlight views">
           <ToggleGroupItem
-            value="group"
+            value="circle"
             className={highlightToggleItemClass}
-            title="Highlight guests in the same group">
+            title="Highlight guests in the same circle">
             <Layers3 className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>Group</span>
+            <span>Circle</span>
           </ToggleGroupItem>
           <ToggleGroupItem
-            key={`household-toggle-${householdPulseNonce}`}
-            value="household"
+            key={`party-toggle-${partyPulseNonce}`}
+            value="party"
             className={cn(
               highlightToggleItemClass,
-              householdPulseNonce > 0 && "animate-[pulse_280ms_ease-out_2]"
+              partyPulseNonce > 0 && "animate-[pulse_280ms_ease-out_2]"
             )}
-            title="Highlight guests in the same household">
+            title="Highlight guests in the same party">
             <House className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>Household</span>
+            <span>Party</span>
           </ToggleGroupItem>
           <ToggleGroupItem
             value="host"
@@ -261,6 +257,7 @@ export default function Sidebar({
           </ToggleGroupItem>
         </ToggleGroup>
       </div>
+
       <div className="flex shrink-0 items-center justify-between border-b border-sidebar-border px-3 py-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <Users className="h-3.5 w-3.5" aria-hidden="true" />
@@ -283,25 +280,25 @@ export default function Sidebar({
             {emptyStateMessage}
           </div>
         ) : (
-          sortedGroups.map((groupName) => (
-            <div key={groupName} className="mb-4 grid gap-1 last:mb-0">
-              <GroupCard
-                groupName={groupName}
-                guestIds={groupedGuestIds.get(groupName) ?? []}
-                isExpanded={!collapsedGroups.has(groupName)}
-                onToggleExpanded={() => toggleGroupExpanded(groupName)}
+          sortedCircles.map((circleName) => (
+            <div key={circleName} className="mb-4 grid gap-1 last:mb-0">
+              <CircleCard
+                circleName={circleName}
+                guestIds={circledGuestIds.get(circleName) ?? []}
+                isExpanded={!collapsedCircles.has(circleName)}
+                onToggleExpanded={() => toggleCircleExpanded(circleName)}
               />
-              {!collapsedGroups.has(groupName) ? (
+              {!collapsedCircles.has(circleName) ? (
                 <div className="relative ml-0 grid gap-1.5 pl-5 pt-1 pb-1 before:absolute before:bottom-1 before:left-2 before:top-1 before:w-px before:bg-border">
-                  {groupedParties.get(groupName)?.map((party) => (
-                    <HouseholdCard
+                  {circledParties.get(circleName)?.map((party) => (
+                    <PartyCard
                       key={party.id}
                       party={party}
                       unassignedSet={unassignedSet}
                       onEditGuest={onEditGuest}
                       onDeleteGuest={onDeleteGuest}
-                      isExpanded={!collapsedHouseholds.has(party.id)}
-                      onToggleExpanded={() => toggleHouseholdExpanded(party.id)}
+                      isExpanded={!collapsedParties.has(party.id)}
+                      onToggleExpanded={() => togglePartyExpanded(party.id)}
                     />
                   ))}
                 </div>
