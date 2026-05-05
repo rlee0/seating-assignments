@@ -76,13 +76,13 @@ vi.mock("@dnd-kit/sortable", async () => {
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
 function makeRows(
-  specs: Array<{ name: string; household?: string; group?: string; host?: string }>
+  specs: Array<{ name: string; party?: string; circle?: string; host?: string }>
 ): GuestInputRow[] {
   return specs.map((spec, index) => ({
     id: `g${index}`,
     fullName: spec.name,
-    household: spec.household ?? `Household ${index + 1}`,
-    group: spec.group ?? "",
+    party: spec.party ?? `Party ${index + 1}`,
+    circle: spec.circle ?? "",
     host: spec.host ?? "Ryan",
   }));
 }
@@ -93,18 +93,18 @@ function makeProfiles(rows: GuestInputRow[]): Record<string, GuestProfile> {
   rows.forEach((row) => {
     profiles[row.id] = {
       partyId: "",
-      group: row.group,
+      circle: row.circle,
       host: row.host,
-      household: row.household,
+      party: row.party,
     };
   });
 
-  const householdToPartyId = new Map<string, string>();
+  const partyNameToPartyId = new Map<string, string>();
   rows.forEach((row) => {
-    if (!householdToPartyId.has(row.household)) {
-      householdToPartyId.set(row.household, `p${householdToPartyId.size}`);
+    if (!partyNameToPartyId.has(row.party)) {
+      partyNameToPartyId.set(row.party, `p${partyNameToPartyId.size}`);
     }
-    profiles[row.id].partyId = householdToPartyId.get(row.household)!;
+    profiles[row.id].partyId = partyNameToPartyId.get(row.party)!;
   });
 
   return profiles;
@@ -163,6 +163,12 @@ function sidebarContainsGuest(container: HTMLElement, guestName: string): boolea
   const sidebar = container.querySelector<HTMLElement>("[data-sidebar]");
   if (!sidebar) return false;
   return sidebar.textContent?.includes(guestName) ?? false;
+}
+
+function getTableNameAtCell(container: HTMLElement, row: number, column: number): string | null {
+  const cell = container.querySelector<HTMLElement>(`[data-board-cell-id='cell-${row}-${column}']`);
+  if (!cell) return null;
+  return cell.querySelector<HTMLElement>("[data-table-name]")?.textContent?.trim() ?? null;
 }
 
 function triggerDragStart(params: { id: string; data: unknown }): void {
@@ -586,17 +592,17 @@ describe("Flow 6 — assigned guest → table (autoseat in adjacent)", () => {
   });
 });
 
-describe("Flow 7 — household → table (autoseat all members)", () => {
+describe("Flow 7 — party → table (autoseat all members)", () => {
   beforeEach(() => {
     ensureLocalStorage().clear();
     latestDndProps = null;
   });
 
-  it("seats all household members together in adjacent table when target full", () => {
+  it("seats all party members together in adjacent table when target full", () => {
     const blockerRows = Array.from({ length: 8 }, (_, i) => ({ name: `Blocker ${i + 1}` }));
     const rows = makeRows([
-      { name: "Hannah", household: "House X" },
-      { name: "Henry", household: "House X" },
+      { name: "Hannah", party: "House X" },
+      { name: "Henry", party: "House X" },
       ...blockerRows,
     ]);
     const profiles = makeProfiles(rows);
@@ -629,9 +635,9 @@ describe("File import", () => {
   it("imports export-structured csv via drag and drop", async () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
     const csv = [
-      "Full Name,Host,Household,Group,Table,Seat",
-      "Alice,Ryan,Household 1,Family,1,1",
-      "Bob,Ryan,Household 2,Friends,,",
+      "Full Name,Host,Party,Circle,Table,Seat",
+      "Alice,Ryan,Party 1,Family,1,1",
+      "Bob,Ryan,Party 2,Friends,,",
     ].join("\n");
     const file = new File([csv], "seating-export.csv", { type: "text/csv" });
 
@@ -656,14 +662,14 @@ describe("File import", () => {
     alertSpy.mockRestore();
   });
 
-  it("imports export-structured csv when group is blank", async () => {
+  it("imports export-structured csv when circle is blank", async () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
     const csv = [
-      "Full Name,Host,Household,Group,Table,Seat",
-      "Alice,Ryan,Household 1,,1,1",
-      "Bob,Ryan,Household 2,,,",
+      "Full Name,Host,Party,Circle,Table,Seat",
+      "Alice,Ryan,Party 1,,1,1",
+      "Bob,Ryan,Party 2,,,",
     ].join("\n");
-    const file = new File([csv], "seating-export-blank-group.csv", { type: "text/csv" });
+    const file = new File([csv], "seating-export-blank-circle.csv", { type: "text/csv" });
 
     const { container } = render(<App />);
     const dndRoot = container.querySelector<HTMLElement>("[data-testid='dnd-context'] > div");
@@ -688,9 +694,9 @@ describe("File import", () => {
   it("imports shuffled csv columns and ignores extra fields", async () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
     const csv = [
-      "group,host,household,full name,notes,seat,table",
-      "Family,Ryan,Household 1,Alice,VIP,1,1",
-      "Friends,Ryan,Household 2,Bob,Wheelchair,not-a-seat,1",
+      "circle,host,party,full name,notes,seat,table",
+      "Family,Ryan,Party 1,Alice,VIP,1,1",
+      "Friends,Ryan,Party 2,Bob,Wheelchair,not-a-seat,1",
     ].join("\n");
     const file = new File([csv], "shuffled.csv", { type: "text/csv" });
 
@@ -716,9 +722,9 @@ describe("File import", () => {
   it("imports csv with only required guest headers", async () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
     const csv = [
-      "Host,Household,Group,Full Name",
-      "Ryan,Household 1,Family,Alice",
-      "Ryan,Household 2,Friends,Bob",
+      "Host,Party,Circle,Full Name",
+      "Ryan,Party 1,Family,Alice",
+      "Ryan,Party 2,Friends,Bob",
     ].join("\n");
     const file = new File([csv], "required-only.csv", { type: "text/csv" });
 
@@ -744,11 +750,11 @@ describe("File import", () => {
   it("ignores rows without full name", async () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
     const csv = [
-      "Full Name,Host,Household,Group,Table,Seat",
-      "Alice,Ryan,Household 1,Family,1,1",
-      ",Ryan,Household 2,Friends,1,2",
-      "   ,Ryan,Household 3,Friends,,",
-      "Bob,Ryan,Household 4,Friends,,",
+      "Full Name,Host,Party,Circle,Table,Seat",
+      "Alice,Ryan,Party 1,Family,1,1",
+      ",Ryan,Party 2,Friends,1,2",
+      "   ,Ryan,Party 3,Friends,,",
+      "Bob,Ryan,Party 4,Friends,,",
     ].join("\n");
     const file = new File([csv], "missing-name.csv", { type: "text/csv" });
 
@@ -774,9 +780,7 @@ describe("File import", () => {
 
   it("rejects duplicate headers ignoring case", async () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
-    const csv = ["Full Name,Host,host,Household,Group", "Alice,Ryan,Ryan,Household 1,Family"].join(
-      "\n"
-    );
+    const csv = ["Full Name,Host,host,Party,Circle", "Alice,Ryan,Ryan,Party 1,Family"].join("\n");
     const file = new File([csv], "duplicate-header.csv", { type: "text/csv" });
 
     const { container } = render(<App />);
@@ -809,9 +813,9 @@ describe("File import", () => {
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
     const csv = [
-      "Full Name,Household,Email/Phone Number,Status,Host,Group,Table,Seat",
-      "Alice,Household 1,alice@example.com,Attending,Ryan,Family,1,1",
-      "Bob,Household 2,bob@example.com,Attending,Ryan,Friends,,",
+      "Full Name,Party,Email/Phone Number,Status,Host,Circle,Table,Seat",
+      "Alice,Party 1,alice@example.com,Attending,Ryan,Family,1,1",
+      "Bob,Party 2,bob@example.com,Attending,Ryan,Friends,,",
     ].join("\n");
     const file = new File([csv], "rich-export.csv", { type: "text/csv" });
 
@@ -845,9 +849,9 @@ describe("File import", () => {
 
     const exportedText = await exportedBlob!.text();
     const lines = exportedText.split("\n");
-    expect(lines[0]).toBe("Full Name,Host,Household,Group,Table,Seat");
-    expect(lines[1]).toBe("Alice,Ryan,Household 1,Family,1,1");
-    expect(lines[2]).toBe("Bob,Ryan,Household 2,Friends,,");
+    expect(lines[0]).toBe("Full Name,Host,Party,Circle,Table,Seat");
+    expect(lines[1]).toBe("Alice,Ryan,Party 1,Family,1,1");
+    expect(lines[2]).toBe("Bob,Ryan,Party 2,Friends,,");
 
     secondRender.unmount();
     alertSpy.mockRestore();
@@ -857,18 +861,18 @@ describe("File import", () => {
   });
 });
 
-describe("Flow 8 — group → table (autoseat all members)", () => {
+describe("Flow 8 — circle → table (autoseat all members)", () => {
   beforeEach(() => {
     ensureLocalStorage().clear();
     latestDndProps = null;
   });
 
-  it("seats all group members in adjacent tables when target full", () => {
+  it("seats all circle members in adjacent tables when target full", () => {
     const blockerRows = Array.from({ length: 8 }, (_, i) => ({ name: `Blocker ${i + 1}` }));
     const rows = makeRows([
-      { name: "Gina", group: "Friends", household: "H1" },
-      { name: "Greg", group: "Friends", household: "H2" },
-      { name: "Gus", group: "Friends", household: "H3" },
+      { name: "Gina", circle: "Friends", party: "P1" },
+      { name: "Greg", circle: "Friends", party: "P2" },
+      { name: "Gus", circle: "Friends", party: "P3" },
       ...blockerRows,
     ]);
     const profiles = makeProfiles(rows);
@@ -880,8 +884,8 @@ describe("Flow 8 — group → table (autoseat all members)", () => {
     const { container } = render(<App />);
 
     triggerDragEnd({
-      id: "group-Friends",
-      data: { kind: "group", groupName: "Friends", origin: "sidebar" },
+      id: "circle-Friends",
+      data: { kind: "circle", circleName: "Friends", origin: "sidebar" },
       overId: "table-1",
     });
 
@@ -894,13 +898,13 @@ describe("Flow 8 — group → table (autoseat all members)", () => {
     expect(sidebarContainsGuest(container, "Gus")).toBe(false);
   });
 
-  it("does not unseat already seated group members when target table is full", () => {
+  it("does not unseat already seated circle members when target table is full", () => {
     const blockerRows = Array.from({ length: 8 }, (_, i) => ({ name: `Blocker ${i + 1}` }));
     const rows = makeRows([
-      { name: "Gina", group: "Friends", household: "H1" },
-      { name: "Greg", group: "Friends", household: "H2" },
+      { name: "Gina", circle: "Friends", party: "P1" },
+      { name: "Greg", circle: "Friends", party: "P2" },
       ...blockerRows,
-      { name: "Anchor", group: "Friends", household: "H3" },
+      { name: "Anchor", circle: "Friends", party: "P3" },
     ]);
     const profiles = makeProfiles(rows);
 
@@ -912,8 +916,8 @@ describe("Flow 8 — group → table (autoseat all members)", () => {
     const { container } = render(<App />);
 
     triggerDragEnd({
-      id: "group-Friends",
-      data: { kind: "group", groupName: "Friends", origin: "sidebar" },
+      id: "circle-Friends",
+      data: { kind: "circle", circleName: "Friends", origin: "sidebar" },
       overId: "table-1",
     });
 
@@ -921,13 +925,13 @@ describe("Flow 8 — group → table (autoseat all members)", () => {
   });
 });
 
-describe("Flow 9 — table → table (swap)", () => {
+describe("Flow 9 — table drag updates table positions", () => {
   beforeEach(() => {
     ensureLocalStorage().clear();
     latestDndProps = null;
   });
 
-  it("swaps table occupants seat-for-seat", () => {
+  it("swaps table positions while preserving seated guests per table", () => {
     const rows = makeRows([
       { name: "Alice" },
       { name: "Bob" },
@@ -950,19 +954,21 @@ describe("Flow 9 — table → table (swap)", () => {
       overId: "table-2",
     });
 
-    // Table 1 guests moved to table 2 at same seat indexes.
-    expect(getSeatGuestName(container, 2, 0)).toBe("Alice");
-    expect(getSeatGuestName(container, 2, 1)).toBe("Bob");
-    // Table 2 previous guest moved back to table 1.
-    expect(getSeatGuestName(container, 1, 0)).toBe("Blocker");
-    // Table 3 undisturbed.
+    // Table identity keeps guest ownership.
+    expect(getSeatGuestName(container, 1, 0)).toBe("Alice");
+    expect(getSeatGuestName(container, 1, 1)).toBe("Bob");
+    expect(getSeatGuestName(container, 2, 0)).toBe("Blocker");
+    // Grid positions are swapped.
+    expect(getTableNameAtCell(container, 0, 0)).toBe("Table 2");
+    expect(getTableNameAtCell(container, 0, 1)).toBe("Table 1");
+    // Table 3 remains unchanged.
     expect(tableContainsGuest(container, 3, "Cara")).toBe(true);
     expect(sidebarContainsGuest(container, "Alice")).toBe(false);
     expect(sidebarContainsGuest(container, "Bob")).toBe(false);
     expect(sidebarContainsGuest(container, "Blocker")).toBe(false);
   });
 
-  it("swaps even when destination table is full", () => {
+  it("swaps positions even when destination table is full", () => {
     const blockerRows = Array.from({ length: 8 }, (_, i) => ({ name: `Blocker ${i + 1}` }));
     const rows = makeRows([{ name: "Alice" }, { name: "Bob" }, ...blockerRows]);
 
@@ -980,15 +986,17 @@ describe("Flow 9 — table → table (swap)", () => {
       overId: "table-2",
     });
 
-    expect(getSeatGuestName(container, 2, 0)).toBe("Alice");
-    expect(getSeatGuestName(container, 2, 1)).toBe("Bob");
-    expect(getSeatGuestName(container, 4, 0)).toBe("Blocker 1");
-    expect(getSeatGuestName(container, 4, 7)).toBe("Blocker 8");
+    expect(getSeatGuestName(container, 4, 0)).toBe("Alice");
+    expect(getSeatGuestName(container, 4, 1)).toBe("Bob");
+    expect(getSeatGuestName(container, 2, 0)).toBe("Blocker 1");
+    expect(getSeatGuestName(container, 2, 7)).toBe("Blocker 8");
+    expect(getTableNameAtCell(container, 0, 1)).toBe("Table 4");
+    expect(getTableNameAtCell(container, 0, 3)).toBe("Table 2");
     expect(sidebarContainsGuest(container, "Alice")).toBe(false);
     expect(sidebarContainsGuest(container, "Bob")).toBe(false);
   });
 
-  it("swaps disabled seat maps with the table contents", () => {
+  it("keeps disabled seat maps with their table identity during position swap", () => {
     const rows = makeRows([{ name: "Alice" }, { name: "Blocker" }]);
 
     let state = createInitialState(["g0", "g1"]);
@@ -1012,15 +1020,38 @@ describe("Flow 9 — table → table (swap)", () => {
       overId: "table-2",
     });
 
-    expect(getSeatGuestName(container, 2, 0)).toBe("Alice");
-    expect(getSeatGuestName(container, 4, 1)).toBe("Blocker");
+    expect(getSeatGuestName(container, 4, 0)).toBe("Alice");
+    expect(getSeatGuestName(container, 2, 1)).toBe("Blocker");
 
     const table2 = getTableCard(container, 2);
     const table4 = getTableCard(container, 4);
-    const table2Seat3 = table2.querySelector<HTMLElement>('[data-seat-id="seat-2-3"]');
-    const table4Seat0 = table4.querySelector<HTMLElement>('[data-seat-id="seat-4-0"]');
-    expect(table2Seat3?.dataset.disabled).toBe("true");
-    expect(table4Seat0?.dataset.disabled).toBe("true");
+    const table2Seat0 = table2.querySelector<HTMLElement>('[data-seat-id="seat-2-0"]');
+    const table4Seat3 = table4.querySelector<HTMLElement>('[data-seat-id="seat-4-3"]');
+    expect(table2Seat0?.dataset.disabled).toBe("true");
+    expect(table4Seat3?.dataset.disabled).toBe("true");
+  });
+
+  it("moves table into an empty cell", () => {
+    const rows = makeRows([{ name: "Alice" }]);
+    let state = createInitialState(["g0"]);
+    state = assignSingle(state, 1, "g0", 0);
+    state = {
+      ...state,
+      tables: state.tables.filter((table) => table.tableNumber !== 25),
+    };
+    seedApp(rows, state);
+
+    const { container } = render(<App />);
+
+    triggerDragEnd({
+      id: "sortable-table-1",
+      data: { kind: "table", tableNumber: 1, name: "Table 1", origin: "table" },
+      overId: "cell-4-4",
+    });
+
+    expect(getTableNameAtCell(container, 4, 4)).toBe("Table 1");
+    expect(getTableNameAtCell(container, 0, 0)).toBeNull();
+    expect(getSeatGuestName(container, 1, 0)).toBe("Alice");
   });
 });
 
@@ -1054,35 +1085,35 @@ describe("Flow 10 — table → unassigned (clear all)", () => {
 
 // ─── Group cohesion rules (reducer-level) ─────────────────────────────────────
 
-describe("Flow 11 — group home-row cohesion", () => {
+describe("Flow 11 — circle home-row cohesion", () => {
   // Helpers that build state purely through the reducer, no React render needed.
 
-  function makeGroupProfiles(
-    specs: Array<{ guestId: string; partyId: string; group: string }>
+  function makeCircleProfiles(
+    specs: Array<{ guestId: string; partyId: string; circle: string }>
   ): Record<string, GuestProfile> {
     return Object.fromEntries(
-      specs.map(({ guestId, partyId, group }) => [
+      specs.map(({ guestId, partyId, circle }) => [
         guestId,
-        { partyId, group, host: "h", household: partyId },
+        { partyId, circle, host: "h", party: partyId },
       ])
     );
   }
 
-  it("seats all households of a group in the same row", () => {
-    // 3 households in group "Alpha", one guest each.
+  it("seats all parties of a circle in the same row", () => {
+    // 3 parties in circle "Alpha", one guest each.
     // Table 1 (row 0, tableIdx 0) is completely blocked.
     // Tables 2-5 (row 0) and tables 6-10 (row 1) are empty.
-    // All 3 Alpha households should land in row 0 (tables 2-5), not row 1.
+    // All 3 Alpha parties should land in row 0 (tables 2-5), not row 1.
     const blockerProfiles: Record<string, GuestProfile> = Object.fromEntries(
       Array.from({ length: 8 }, (_, i) => [
         `b${i}`,
-        { partyId: `pb${i}`, group: "", host: "h", household: `HB${i}` },
+        { partyId: `pb${i}`, circle: "", host: "h", party: `HB${i}` },
       ])
     );
-    const alphaProfiles = makeGroupProfiles([
-      { guestId: "g0", partyId: "p0", group: "Alpha" },
-      { guestId: "g1", partyId: "p1", group: "Alpha" },
-      { guestId: "g2", partyId: "p2", group: "Alpha" },
+    const alphaProfiles = makeCircleProfiles([
+      { guestId: "g0", partyId: "p0", circle: "Alpha" },
+      { guestId: "g1", partyId: "p1", circle: "Alpha" },
+      { guestId: "g2", partyId: "p2", circle: "Alpha" },
     ]);
     const profiles = { ...blockerProfiles, ...alphaProfiles };
 
@@ -1127,22 +1158,22 @@ describe("Flow 11 — group home-row cohesion", () => {
     expect(t2).toBeLessThanOrEqual(5);
   });
 
-  it("leaves a household unassigned when its group's home row is full (orphan rule)", () => {
+  it("leaves a party unassigned when its circle's home row is full (orphan rule)", () => {
     // Row 0 = tables 1-5 (tableIdx 0-4), 40 total seats.
     // Fill 39 of those seats with blockers.
-    // Group "Alpha" has 2 households (1 guest each).
+    // Circle "Alpha" has 2 parties (1 guest each).
     // g0 fills the last seat in row 0 → groupHomeRow = 0.
     // g1 cannot fit in row 0 → stays unassigned.
     const blockerCount = 39;
     const blockerProfiles: Record<string, GuestProfile> = Object.fromEntries(
       Array.from({ length: blockerCount }, (_, i) => [
         `b${i}`,
-        { partyId: `pb${i}`, group: "", host: "h", household: `HB${i}` },
+        { partyId: `pb${i}`, circle: "", host: "h", party: `HB${i}` },
       ])
     );
-    const alphaProfiles = makeGroupProfiles([
-      { guestId: "g0", partyId: "p0", group: "Alpha" },
-      { guestId: "g1", partyId: "p1", group: "Alpha" },
+    const alphaProfiles = makeCircleProfiles([
+      { guestId: "g0", partyId: "p0", circle: "Alpha" },
+      { guestId: "g1", partyId: "p1", circle: "Alpha" },
     ]);
     const profiles = { ...blockerProfiles, ...alphaProfiles };
 
@@ -1179,9 +1210,9 @@ describe("Flow 11 — group home-row cohesion", () => {
   });
 });
 
-describe("Flow 12 — group cross-table side cohesion (guard rail)", () => {
-  // Tests the introducesNewGroupSideSplit guard: placing a group member at a
-  // second table on the opposite side from existing group members is blocked.
+describe("Flow 12 — circle cross-table side cohesion (guard rail)", () => {
+  // Tests the introducesNewCircleSideSplit guard: placing a circle member at a
+  // second table on the opposite side from existing circle members is blocked.
 
   function betaProfiles(guestCount: number): Record<string, GuestProfile> {
     return Object.fromEntries(
@@ -1189,24 +1220,24 @@ describe("Flow 12 — group cross-table side cohesion (guard rail)", () => {
         `g${i}`,
         {
           partyId: i === 0 ? "pA" : "pB",
-          group: "Beta",
+          circle: "Beta",
           host: "h",
-          household: i === 0 ? "HA" : "HB",
+          party: i === 0 ? "HA" : "HB",
         },
       ])
     );
   }
 
-  it("blocks overflow to the opposite side when group has a pure-side anchor", () => {
+  it("blocks overflow to the opposite side when circle has a pure-side anchor", () => {
     // g0 (Beta) is anchored at table 1 slot 0 — pure side A.
     // Table 2 only has side B open (slots 0-3 blocked by non-Beta guests).
     // Auto-assigning g1 (Beta) with target=table2 / scope=target-only should
     // leave g1 unassigned because placing it on side B would create a
-    // pure-A/pure-B cross-table split for the Beta group.
+    // pure-A/pure-B cross-table split for the Beta circle.
     const blockers: Record<string, GuestProfile> = Object.fromEntries(
       Array.from({ length: 4 }, (_, i) => [
         `b${i}`,
-        { partyId: `pb${i}`, group: "", host: "h", household: `HB${i}` },
+        { partyId: `pb${i}`, circle: "", host: "h", party: `HB${i}` },
       ])
     );
     const profiles = { ...betaProfiles(2), ...blockers };
@@ -1229,13 +1260,13 @@ describe("Flow 12 — group cross-table side cohesion (guard rail)", () => {
     expect(result.unassigned).toContain("g1");
   });
 
-  it("allows overflow to the same side as the group anchor", () => {
+  it("allows overflow to the same side as the circle anchor", () => {
     // Same setup but only 3 blockers on table 2 side A, leaving slot 0 open.
     // g1 can take table 2 slot 0 (side A) — same side as g0 at table 1 slot 0.
     const blockers: Record<string, GuestProfile> = Object.fromEntries(
       Array.from({ length: 3 }, (_, i) => [
         `b${i}`,
-        { partyId: `pb${i}`, group: "", host: "h", household: `HB${i}` },
+        { partyId: `pb${i}`, circle: "", host: "h", party: `HB${i}` },
       ])
     );
     const profiles = { ...betaProfiles(2), ...blockers };
@@ -1322,17 +1353,17 @@ describe("drag lifecycle", () => {
 });
 
 describe("manual drag partial placement (allowPartialPlacementBypass)", () => {
-  it("places a household partially when allowPartialPlacementBypass=true, despite household split constraints", () => {
-    // Create a household with 2 members (g0, g1).
+  it("places a party partially when allowPartialPlacementBypass=true, despite party split constraints", () => {
+    // Create a party with 2 members (g0, g1).
     // Fill tables so there's only 1 seat left in row 0.
-    // A normal drop would block the household split; with the flag, it should place g0 and leave g1 unassigned.
+    // A normal drop would block the party split; with the flag, it should place g0 and leave g1 unassigned.
     const profiles: Record<string, GuestProfile> = {
-      g0: { partyId: "p0", group: "", host: "h", household: "Alpha" },
-      g1: { partyId: "p0", group: "", host: "h", household: "Alpha" },
+      g0: { partyId: "p0", circle: "", host: "h", party: "Alpha" },
+      g1: { partyId: "p0", circle: "", host: "h", party: "Alpha" },
       ...Object.fromEntries(
         Array.from({ length: 39 }, (_, i) => [
           `b${i}`,
-          { partyId: `pb${i}`, group: "", host: "h", household: `B${i}` },
+          { partyId: `pb${i}`, circle: "", host: "h", party: `B${i}` },
         ])
       ),
     };
@@ -1352,7 +1383,7 @@ describe("manual drag partial placement (allowPartialPlacementBypass)", () => {
       bIdx += 1;
     }
 
-    // Without the flag, this would leave both unassigned due to household split.
+    // Without the flag, this would leave both unassigned due to party split.
     // With the flag, g0 should be placed and g1 should remain unassigned.
     const result = seatingReducer(state, {
       type: "AUTO_ASSIGN_GUESTS",
@@ -1367,18 +1398,18 @@ describe("manual drag partial placement (allowPartialPlacementBypass)", () => {
     expect(result.unassigned).toContain("g1");
   });
 
-  it("places a group partially when allowPartialPlacementBypass=true, despite group side split constraints", () => {
-    // Create a group with 2 households on different sides.
+  it("places a circle partially when allowPartialPlacementBypass=true, despite circle side split constraints", () => {
+    // Create a circle with 2 parties on different sides.
     // Set up tables so only one side is available at a target table.
     // Without the flag, this would block the placement.
     // With the flag, it should place g0 and leave g1 unassigned.
     const profiles: Record<string, GuestProfile> = {
-      g0: { partyId: "p0", group: "Beta", host: "h", household: "HA" },
-      g1: { partyId: "p1", group: "Beta", host: "h", household: "HB" },
-      b0: { partyId: "pb0", group: "", host: "h", household: "Blocker0" },
-      b1: { partyId: "pb1", group: "", host: "h", household: "Blocker1" },
-      b2: { partyId: "pb2", group: "", host: "h", household: "Blocker2" },
-      b3: { partyId: "pb3", group: "", host: "h", household: "Blocker3" },
+      g0: { partyId: "p0", circle: "Beta", host: "h", party: "HA" },
+      g1: { partyId: "p1", circle: "Beta", host: "h", party: "HB" },
+      b0: { partyId: "pb0", circle: "", host: "h", party: "Blocker0" },
+      b1: { partyId: "pb1", circle: "", host: "h", party: "Blocker1" },
+      b2: { partyId: "pb2", circle: "", host: "h", party: "Blocker2" },
+      b3: { partyId: "pb3", circle: "", host: "h", party: "Blocker3" },
     };
 
     let state = createInitialState(["g0", "g1", "b0", "b1", "b2", "b3"]);
@@ -1423,8 +1454,8 @@ describe("guest hovercards", () => {
 
   it("restarts the full delay when moving between seated guests", () => {
     const rows = makeRows([
-      { name: "Alice", household: "Alpha Household", group: "Ceremony", host: "Ryan" },
-      { name: "Bob", household: "Beta Household", group: "Reception", host: "Ryan" },
+      { name: "Alice", party: "Alpha Party", circle: "Ceremony", host: "Ryan" },
+      { name: "Bob", party: "Beta Party", circle: "Reception", host: "Ryan" },
     ]);
     let state = createInitialState(["g0", "g1"]);
     state = assignSingle(state, 1, "g0", 0);
@@ -1447,28 +1478,28 @@ describe("guest hovercards", () => {
     act(() => {
       vi.advanceTimersByTime(1200);
     });
-    expect(screen.queryByText("Alpha Household")).not.toBeNull();
+    expect(screen.queryByText("Alpha Party")).not.toBeNull();
 
     fireEvent.pointerLeave(aliceChip!);
     fireEvent.pointerEnter(bobChip!);
 
-    expect(screen.queryByText("Alpha Household")).toBeNull();
-    expect(screen.queryByText("Beta Household")).toBeNull();
+    expect(screen.queryByText("Alpha Party")).toBeNull();
+    expect(screen.queryByText("Beta Party")).toBeNull();
 
     act(() => {
       vi.advanceTimersByTime(1199);
     });
-    expect(screen.queryByText("Beta Household")).toBeNull();
+    expect(screen.queryByText("Beta Party")).toBeNull();
 
     act(() => {
       vi.advanceTimersByTime(1);
     });
-    expect(screen.queryByText("Beta Household")).not.toBeNull();
+    expect(screen.queryByText("Beta Party")).not.toBeNull();
   });
 
   it("does not open hovercard on click", () => {
     const rows = makeRows([
-      { name: "Alice", household: "Alpha Household", group: "Ceremony", host: "Ryan" },
+      { name: "Alice", party: "Alpha Party", circle: "Ceremony", host: "Ryan" },
     ]);
     let state = createInitialState(["g0"]);
     state = assignSingle(state, 1, "g0", 0);
@@ -1487,12 +1518,12 @@ describe("guest hovercards", () => {
     fireEvent.click(aliceChip!);
 
     // Hovercard content should NOT appear
-    expect(screen.queryByText("Alpha Household")).toBeNull();
+    expect(screen.queryByText("Alpha Party")).toBeNull();
   });
 
   it("does not open hovercard on focus", () => {
     const rows = makeRows([
-      { name: "Alice", household: "Alpha Household", group: "Ceremony", host: "Ryan" },
+      { name: "Alice", party: "Alpha Party", circle: "Ceremony", host: "Ryan" },
     ]);
     let state = createInitialState(["g0"]);
     state = assignSingle(state, 1, "g0", 0);
@@ -1510,12 +1541,12 @@ describe("guest hovercards", () => {
     fireEvent.focus(aliceChip!);
 
     // Hovercard content should NOT appear (no delay needed)
-    expect(screen.queryByText("Alpha Household")).toBeNull();
+    expect(screen.queryByText("Alpha Party")).toBeNull();
   });
 
   it("still opens hovercard on pointer hover with delay", () => {
     const rows = makeRows([
-      { name: "Alice", household: "Alpha Household", group: "Ceremony", host: "Ryan" },
+      { name: "Alice", party: "Alpha Party", circle: "Ceremony", host: "Ryan" },
     ]);
     let state = createInitialState(["g0"]);
     state = assignSingle(state, 1, "g0", 0);
@@ -1531,13 +1562,13 @@ describe("guest hovercards", () => {
 
     // Pointer enter should trigger the delay
     fireEvent.pointerEnter(aliceChip!);
-    expect(screen.queryByText("Alpha Household")).toBeNull();
+    expect(screen.queryByText("Alpha Party")).toBeNull();
 
     act(() => {
       vi.advanceTimersByTime(1200);
     });
 
     // After the delay, hovercard should appear
-    expect(screen.queryByText("Alpha Household")).not.toBeNull();
+    expect(screen.queryByText("Alpha Party")).not.toBeNull();
   });
 });

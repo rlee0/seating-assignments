@@ -41,6 +41,7 @@ describe("reconcileStateToGuestIds", () => {
     tables[0].disabledSeats = [5, 7];
 
     const state: SeatingState = {
+      board: baseState.board,
       tables,
       unassigned: [],
       lockedGuestIds: [],
@@ -64,14 +65,14 @@ describe("loadPersistedGuestData", () => {
       JSON.stringify([
         {
           fullName: "Alice",
-          household: "Alpha",
-          group: "Ceremony",
+          party: "Alpha",
+          circle: "Ceremony",
           host: "Ryan",
         },
         {
           fullName: "Bob",
-          household: "Beta",
-          group: "Reception",
+          party: "Beta",
+          circle: "Reception",
           host: "Ryan",
         },
       ])

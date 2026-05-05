@@ -60,13 +60,13 @@ vi.mock("@dnd-kit/sortable", async () => {
 });
 
 function makeRows(
-  specs: Array<{ name: string; household?: string; group?: string; host?: string }>
+  specs: Array<{ name: string; party?: string; circle?: string; host?: string }>
 ): GuestInputRow[] {
   return specs.map((spec, index) => ({
     id: `g${index}`,
     fullName: spec.name,
-    household: spec.household ?? `Household ${index + 1}`,
-    group: spec.group ?? "",
+    party: spec.party ?? `Party ${index + 1}`,
+    circle: spec.circle ?? "",
     host: spec.host ?? "Ryan",
   }));
 }
@@ -74,9 +74,9 @@ function makeRows(
 function makeGuestProfile(row: GuestInputRow): GuestProfile {
   return {
     partyId: "p0",
-    group: row.group,
+    circle: row.circle,
     host: row.host,
-    household: row.household,
+    party: row.party,
   };
 }
 
@@ -139,10 +139,10 @@ describe("guest CRUD flows", () => {
     fireEvent.change(within(dialog).getByLabelText(/^host$/i), {
       target: { value: "Ryan" },
     });
-    fireEvent.change(within(dialog).getByLabelText(/^household$/i), {
+    fireEvent.change(within(dialog).getByLabelText(/^party$/i), {
       target: { value: "Lee Family" },
     });
-    fireEvent.change(within(dialog).getByLabelText(/^group$/i), {
+    fireEvent.change(within(dialog).getByLabelText(/^circle$/i), {
       target: { value: "Friends" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: /^add guest$/i }));
@@ -159,7 +159,7 @@ describe("guest CRUD flows", () => {
   });
 
   it("edits an unassigned guest from the sidebar context menu", async () => {
-    seedApp(makeRows([{ name: "Alice", household: "Alpha", group: "Ceremony" }]));
+    seedApp(makeRows([{ name: "Alice", party: "Alpha", circle: "Ceremony" }]));
     render(<App />);
 
     const aliceChip = document.querySelector<HTMLElement>(
@@ -171,8 +171,8 @@ describe("guest CRUD flows", () => {
     const dialog = screen.getByRole("dialog", { name: /edit guest/i });
     fireEvent.change(within(dialog).getByLabelText(/full name/i), { target: { value: "Alicia" } });
     fireEvent.change(within(dialog).getByLabelText(/^host$/i), { target: { value: "Taylor" } });
-    fireEvent.change(within(dialog).getByLabelText(/^household$/i), { target: { value: "Beta" } });
-    fireEvent.change(within(dialog).getByLabelText(/^group$/i), { target: { value: "Family" } });
+    fireEvent.change(within(dialog).getByLabelText(/^party$/i), { target: { value: "Beta" } });
+    fireEvent.change(within(dialog).getByLabelText(/^circle$/i), { target: { value: "Family" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /save changes/i }));
 
     await screen.findByText("Alicia");
@@ -185,7 +185,7 @@ describe("guest CRUD flows", () => {
   });
 
   it("deletes a seated guest from the seat context menu", async () => {
-    const rows = makeRows([{ name: "Alice", household: "Alpha", group: "Ceremony" }]);
+    const rows = makeRows([{ name: "Alice", party: "Alpha", circle: "Ceremony" }]);
     let state = createInitialState([rows[0].id]);
     state = seatingReducer(state, {
       type: "ASSIGN_GUESTS",
@@ -216,11 +216,11 @@ describe("guest CRUD flows", () => {
     });
   });
 
-  it("shows all existing groups when opening group suggestions in edit mode", async () => {
+  it("shows all existing circles when opening circle suggestions in edit mode", async () => {
     seedApp(
       makeRows([
-        { name: "Alice", household: "Alpha", group: "Ceremony" },
-        { name: "Bob", household: "Beta", group: "Friends" },
+        { name: "Alice", party: "Alpha", circle: "Ceremony" },
+        { name: "Bob", party: "Beta", circle: "Friends" },
       ])
     );
     render(<App />);
@@ -233,18 +233,18 @@ describe("guest CRUD flows", () => {
     fireEvent.click(await screen.findByText(/edit guest/i));
 
     const dialog = screen.getByRole("dialog", { name: /edit guest/i });
-    fireEvent.click(within(dialog).getByRole("button", { name: /toggle group suggestions/i }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /toggle circle suggestions/i }));
 
     const listbox = await screen.findByRole("listbox", { name: "Suggestions" });
     expect(within(listbox).getByRole("option", { name: "Ceremony" })).not.toBeNull();
     expect(within(listbox).getByRole("option", { name: "Friends" })).not.toBeNull();
   });
 
-  it("keeps household suggestions open when clicking the household input", async () => {
+  it("keeps party suggestions open when clicking the party input", async () => {
     seedApp(
       makeRows([
-        { name: "Alice", household: "Alpha", group: "Ceremony" },
-        { name: "Bob", household: "Beta", group: "Friends" },
+        { name: "Alice", party: "Alpha", circle: "Ceremony" },
+        { name: "Bob", party: "Beta", circle: "Friends" },
       ])
     );
     render(<App />);
@@ -257,7 +257,7 @@ describe("guest CRUD flows", () => {
     fireEvent.click(await screen.findByText(/edit guest/i));
 
     const dialog = screen.getByRole("dialog", { name: /edit guest/i });
-    fireEvent.click(within(dialog).getByLabelText(/^household$/i));
+    fireEvent.click(within(dialog).getByLabelText(/^party$/i));
 
     expect(await screen.findByText("Alpha")).not.toBeNull();
     expect(screen.getByText("Beta")).not.toBeNull();

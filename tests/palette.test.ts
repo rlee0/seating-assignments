@@ -9,39 +9,39 @@ import {
 
 describe("dynamic palette generation", () => {
   it("builds deterministic palettes from the same domain counts", () => {
-    const left = createHighlightPalettes({ group: 12, household: 32, host: 6 });
-    const right = createHighlightPalettes({ group: 12, household: 32, host: 6 });
+    const left = createHighlightPalettes({ circle: 12, party: 32, host: 6 });
+    const right = createHighlightPalettes({ circle: 12, party: 32, host: 6 });
 
     expect(left).toEqual(right);
   });
 
   it("uses tonal overflow tiers when domain count exceeds distinct hue capacity", () => {
-    const palettes = createHighlightPalettes({ group: 45, household: 20, host: 8 });
+    const palettes = createHighlightPalettes({ circle: 45, party: 20, host: 8 });
 
-    expect(palettes.group.slots).toHaveLength(45);
-    expect(palettes.group.distinctHueCount).toBe(20);
-    expect(palettes.group.slots.some((slot) => slot.tier > 0)).toBe(true);
+    expect(palettes.circle.slots).toHaveLength(45);
+    expect(palettes.circle.distinctHueCount).toBe(20);
+    expect(palettes.circle.slots.some((slot) => slot.tier > 0)).toBe(true);
   });
 
   it("assigns token slots deterministically regardless of token input order", () => {
-    const palettes = createHighlightPalettes({ group: 8, household: 8, host: 8 });
-    const tokens = ["group:Alpha", "group:Beta", "group:Gamma", "group:Delta"];
+    const palettes = createHighlightPalettes({ circle: 8, party: 8, host: 8 });
+    const tokens = ["circle:Alpha", "circle:Beta", "circle:Gamma", "circle:Delta"];
 
-    const forward = assignTokenSlots(tokens, palettes.group);
-    const reversed = assignTokenSlots([...tokens].reverse(), palettes.group);
+    const forward = assignTokenSlots(tokens, palettes.circle);
+    const reversed = assignTokenSlots([...tokens].reverse(), palettes.circle);
 
     expect(forward).toEqual(reversed);
   });
 
   it("returns domain-aware highlight colors with tier variation", () => {
-    const palettes = createHighlightPalettes({ group: 30, household: 10, host: 5 });
+    const palettes = createHighlightPalettes({ circle: 30, party: 10, host: 5 });
     const assignments = assignTokenSlots(
-      [...Array.from({ length: 30 }, (_, index) => `group:G${index}`)],
-      palettes.group
+      [...Array.from({ length: 30 }, (_, index) => `circle:G${index}`)],
+      palettes.circle
     );
 
-    const baseSlot = assignments.get("group:G0");
-    const overflowSlot = assignments.get("group:G25");
+    const baseSlot = assignments.get("circle:G0");
+    const overflowSlot = assignments.get("circle:G25");
 
     expect(baseSlot).toBeTruthy();
     expect(overflowSlot).toBeTruthy();
@@ -55,8 +55,8 @@ describe("dynamic palette generation", () => {
   });
 
   it("parses known token domains and falls back to default", () => {
-    expect(getDomainFromToken("group:Friends")).toBe("group");
-    expect(getDomainFromToken("household:p1")).toBe("household");
+    expect(getDomainFromToken("circle:Friends")).toBe("circle");
+    expect(getDomainFromToken("party:p1")).toBe("party");
     expect(getDomainFromToken("host:Ryan")).toBe("host");
     expect(getDomainFromToken("unknown:value")).toBe("default");
     expect(getDomainFromToken("nocolon")).toBe("default");
