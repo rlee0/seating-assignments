@@ -14,6 +14,15 @@ export function parseDropTargetId(id: string | null): DropTarget | null {
     return { type: "autoseat" };
   }
 
+  if (id.startsWith("cell-")) {
+    const [, rowToken, columnToken] = id.split("-");
+    const row = parseInt(rowToken, 10);
+    const column = parseInt(columnToken, 10);
+    if (!isNaN(row) && !isNaN(column)) {
+      return { type: "cell", row, column };
+    }
+  }
+
   if (id.startsWith("seat-")) {
     const [, tableToken, seatToken] = id.split("-");
     const tableNumber = parseInt(tableToken, 10);
@@ -60,11 +69,11 @@ export function parseDragIntent(data: unknown): DragIntent | null {
   }
 
   if (d.kind === "party" && typeof d.partyId === "string") {
-    return { kind: "household", partyId: d.partyId };
+    return { kind: "party", partyId: d.partyId };
   }
 
-  if (d.kind === "group" && typeof d.groupName === "string") {
-    return { kind: "group", groupName: d.groupName };
+  if (d.kind === "circle" && typeof d.circleName === "string") {
+    return { kind: "circle", circleName: d.circleName };
   }
 
   if (d.kind === "table" && typeof d.tableNumber === "number" && typeof d.name === "string") {
@@ -99,6 +108,13 @@ export function resolveDropTarget(
       if (seatId) {
         const seat = parseDropTargetId(seatId);
         if (seat) return seat;
+      }
+
+      const boardCellId =
+        el.closest<HTMLElement>("[data-board-cell-id]")?.dataset.boardCellId ?? null;
+      if (boardCellId) {
+        const cell = parseDropTargetId(boardCellId);
+        if (cell) return cell;
       }
 
       // If the pointer is over the sidebar, treat as unassigned drop.

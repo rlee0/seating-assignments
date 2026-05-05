@@ -1,5 +1,5 @@
 /** What is being dragged and from where. */
-export type DragKind = "guest" | "household" | "group" | "table";
+export type DragKind = "guest" | "party" | "circle" | "table";
 
 export type DragIntent =
   | {
@@ -11,13 +11,14 @@ export type DragIntent =
       tableNumber?: number;
       seatIndex?: number;
     }
-  | { kind: "household"; partyId: string }
-  | { kind: "group"; groupName: string }
+  | { kind: "party"; partyId: string }
+  | { kind: "circle"; circleName: string }
   | { kind: "table"; tableNumber: number; name: string };
 
 /** Where the dragged item was dropped. */
 export type DropTarget =
   | { type: "seat"; tableNumber: number; seatIndex: number }
   | { type: "table"; tableNumber: number }
+  | { type: "cell"; row: number; column: number }
   | { type: "unassigned" }
   | { type: "autoseat" };

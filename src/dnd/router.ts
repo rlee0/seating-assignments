@@ -16,7 +16,7 @@ function getSeatedGuestIds(tableNumber: number, tables: TableState[]): string[] 
   return table.guestIds.filter((id): id is string => id !== null);
 }
 
-function getHouseholdGuestIds(
+function getPartyGuestIds(
   partyId: string,
   parties: Map<string, Party>,
   includeAssigned: boolean,
@@ -27,16 +27,16 @@ function getHouseholdGuestIds(
   return includeAssigned ? party.guestIds : party.guestIds.filter((id) => unassignedSet.has(id));
 }
 
-function getGroupGuestIds(
-  groupName: string,
+function getCircleGuestIds(
+  circleName: string,
   parties: Map<string, Party>,
   includeAssigned: boolean,
   unassignedSet: Set<string>
 ): string[] {
   const ids: string[] = [];
   for (const party of parties.values()) {
-    const partyGroup = party.group || "No Group";
-    if (partyGroup !== groupName) continue;
+    const partyCircle = party.circle || "No Circle";
+    if (partyCircle !== circleName) continue;
     if (includeAssigned) {
       ids.push(...party.guestIds);
     } else {
@@ -75,13 +75,21 @@ export function routeDrop(
     }
 
     if (target.type === "table" || target.type === "seat") {
-      // seat target is treated as a table-level drop for table drags
-      const overTableNumber = target.type === "table" ? target.tableNumber : target.tableNumber;
-      if (overTableNumber === intent.tableNumber) return null;
+      const overTableNumber = target.tableNumber;
+      const overTable = state.tables.find((table) => table.tableNumber === overTableNumber);
+      if (!overTable) return null;
       return {
-        type: "SWAP_TABLES",
+        type: "MOVE_TABLE_POSITION",
         activeTableNumber: intent.tableNumber,
-        overTableNumber,
+        targetGridPosition: overTable.gridPosition,
+      };
+    }
+
+    if (target.type === "cell") {
+      return {
+        type: "MOVE_TABLE_POSITION",
+        activeTableNumber: intent.tableNumber,
+        targetGridPosition: { row: target.row, column: target.column },
       };
     }
 
@@ -132,13 +140,13 @@ export function routeDrop(
     return null;
   }
 
-  // ── Household drag ────────────────────────────────────────────────────────────
-  if (intent.kind === "household") {
-    if (target.type === "seat") return null; // households cannot drop on individual seats
+  // ── Party drag ────────────────────────────────────────────────────────────────────────────
+  if (intent.kind === "party") {
+    if (target.type === "seat") return null; // parties cannot drop on individual seats
 
     // When targeting a table, include already-assigned members so they move together.
     const includeAssigned = target.type === "table";
-    const guestIds = getHouseholdGuestIds(intent.partyId, parties, includeAssigned, unassignedSet);
+    const guestIds = getPartyGuestIds(intent.partyId, parties, includeAssigned, unassignedSet);
     if (guestIds.length === 0) return null;
 
     if (target.type === "unassigned") {
@@ -164,12 +172,12 @@ export function routeDrop(
     return null;
   }
 
-  // ── Group drag ────────────────────────────────────────────────────────────────
-  if (intent.kind === "group") {
+  // ── Circle drag ────────────────────────────────────────────────────────────────────────────
+  if (intent.kind === "circle") {
     if (target.type === "seat") return null;
 
     const includeAssigned = target.type === "table";
-    const guestIds = getGroupGuestIds(intent.groupName, parties, includeAssigned, unassignedSet);
+    const guestIds = getCircleGuestIds(intent.circleName, parties, includeAssigned, unassignedSet);
     if (guestIds.length === 0) return null;
 
     if (target.type === "unassigned") {

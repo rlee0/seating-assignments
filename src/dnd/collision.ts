@@ -22,7 +22,7 @@ function getDragOrigin(data: unknown): string | null {
  *   then fall back to table-level or sidebar targets. Seated-guest drags give sidebar
  *   targets extra priority to make "unassign" intent feel natural.
  *
- * - Household/group drags: pointer-within on non-seat containers only.
+ * - Party/circle drags: pointer-within on non-seat containers only.
  */
 export const dndCollisionDetection: CollisionDetection = (args) => {
   const data = args.active.data.current;
@@ -32,21 +32,45 @@ export const dndCollisionDetection: CollisionDetection = (args) => {
   const seatContainers: typeof args.droppableContainers = [];
   const tableContainers: typeof args.droppableContainers = [];
   const sortableTableContainers: typeof args.droppableContainers = [];
+  const cellContainers: typeof args.droppableContainers = [];
   const sidebarContainers: typeof args.droppableContainers = [];
   const autoSeatContainers: typeof args.droppableContainers = [];
 
   for (const c of args.droppableContainers) {
     const id = String(c.id);
-    if (id.startsWith("seat-")) { seatContainers.push(c); continue; }
-    if (id.startsWith("sortable-table-")) { sortableTableContainers.push(c); continue; }
-    if (id.startsWith("table-")) { tableContainers.push(c); continue; }
-    if (id === "unassigned" || id === "unassigned-panel") { sidebarContainers.push(c); continue; }
-    if (id === "auto-seat") { autoSeatContainers.push(c); }
+    if (id.startsWith("seat-")) {
+      seatContainers.push(c);
+      continue;
+    }
+    if (id.startsWith("cell-")) {
+      cellContainers.push(c);
+      continue;
+    }
+    if (id.startsWith("sortable-table-")) {
+      sortableTableContainers.push(c);
+      continue;
+    }
+    if (id.startsWith("table-")) {
+      tableContainers.push(c);
+      continue;
+    }
+    if (id === "unassigned" || id === "unassigned-panel") {
+      sidebarContainers.push(c);
+      continue;
+    }
+    if (id === "auto-seat") {
+      autoSeatContainers.push(c);
+    }
   }
 
   // ── Table drags ────────────────────────────────────────────────────────────
   if (kind === "table") {
-    const tableDragContainers = [...sortableTableContainers, ...autoSeatContainers, ...sidebarContainers];
+    const tableDragContainers = [
+      ...sortableTableContainers,
+      ...cellContainers,
+      ...autoSeatContainers,
+      ...sidebarContainers,
+    ];
     const sidebarHits = pointerWithin({ ...args, droppableContainers: sidebarContainers });
     if (sidebarHits.length > 0) return sidebarHits;
     return closestCenter({ ...args, droppableContainers: tableDragContainers });
@@ -72,7 +96,7 @@ export const dndCollisionDetection: CollisionDetection = (args) => {
     return [];
   }
 
-  // ── Household/group drags ──────────────────────────────────────────────────
+  // ── Party/circle drags ──────────────────────────────────────────────────
   const nonSeatNonSortable = [...tableContainers, ...sidebarContainers, ...autoSeatContainers];
   return pointerWithin({ ...args, droppableContainers: nonSeatNonSortable });
 };
