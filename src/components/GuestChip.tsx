@@ -57,18 +57,18 @@ function getHighlightColor(
 }
 
 function getHighlightTokenForGuest(
-  guest: { host: string; partyId: string; group: string },
+  guest: { host: string; partyId: string; circle: string },
   options: {
     isHostHighlightOn: boolean;
-    isHouseholdHighlightOn: boolean;
-    isGroupHighlightOn: boolean;
+    isPartyHighlightOn: boolean;
+    isCircleHighlightOn: boolean;
   }
 ): string | null {
-  const { isHostHighlightOn, isHouseholdHighlightOn, isGroupHighlightOn } = options;
+  const { isHostHighlightOn, isPartyHighlightOn, isCircleHighlightOn } = options;
 
   if (isHostHighlightOn) return `host:${guest.host || "Unknown"}`;
-  if (isHouseholdHighlightOn) return `household:${guest.partyId}`;
-  if (isGroupHighlightOn) return `group:${guest.group || "No Group"}`;
+  if (isPartyHighlightOn) return `party:${guest.partyId}`;
+  if (isCircleHighlightOn) return `circle:${guest.circle || "No Circle"}`;
 
   return null;
 }
@@ -107,17 +107,17 @@ export default function GuestChip({
     selectedGuestId,
     selectGuest,
     clearSelectedGuest,
-    relatedHouseholdGuestIds,
-    relatedGroupGuestIds,
+    relatedPartyGuestIds,
+    relatedCircleGuestIds,
     slotAssignments,
   } = useSeating();
   const {
     searchQuery,
     normalizedQuery,
-    isGroupHighlightOn,
-    isHouseholdHighlightOn,
+    isCircleHighlightOn,
+    isPartyHighlightOn,
     isHostHighlightOn,
-    activateHouseholdFocusFromGuestSelection,
+    activatePartyFocusFromGuestSelection,
     restoreHighlightModeAfterGuestDeselection,
   } = useSearch();
   const guest = guests.get(guestId);
@@ -152,10 +152,10 @@ export default function GuestChip({
   const guestName = guest?.fullName ?? fallbackName ?? "";
   const normalizedGuestName = useMemo(() => normalizeForSearch(guestName), [guestName]);
 
-  const householdName = guest
-    ? parties.get(guest.partyId)?.household?.trim() || "Unknown household"
+  const partyName = guest
+    ? parties.get(guest.partyId)?.party?.trim() || "Unknown party"
     : "";
-  const groupName = guest ? guest.group.trim() || "No group" : "";
+  const circleName = guest ? guest.circle.trim() || "No circle" : "";
   const hostName = guest ? guest.host.trim() || "Unknown host" : "";
   const lockedStatusLabel = isAnchored ? "Locked" : "Not locked";
   const shouldShowHovercard = context === "table" && !isDragging;
@@ -255,23 +255,23 @@ export default function GuestChip({
     if (!guest) return null;
     return getHighlightTokenForGuest(guest, {
       isHostHighlightOn,
-      isHouseholdHighlightOn,
-      isGroupHighlightOn,
+      isPartyHighlightOn,
+      isCircleHighlightOn,
     });
-  }, [guest, isHostHighlightOn, isHouseholdHighlightOn, isGroupHighlightOn]);
+  }, [guest, isHostHighlightOn, isPartyHighlightOn, isCircleHighlightOn]);
 
   const selectedHighlightToken = useMemo(() => {
     if (!selectedGuest) return null;
     return getHighlightTokenForGuest(selectedGuest, {
       isHostHighlightOn,
-      isHouseholdHighlightOn,
-      isGroupHighlightOn,
+      isPartyHighlightOn,
+      isCircleHighlightOn,
     });
-  }, [selectedGuest, isHostHighlightOn, isHouseholdHighlightOn, isGroupHighlightOn]);
+  }, [selectedGuest, isHostHighlightOn, isPartyHighlightOn, isCircleHighlightOn]);
 
   const isSelected = selectedGuestId === guestId;
-  const isRelatedHousehold = relatedHouseholdGuestIds.has(guestId);
-  const isRelatedGroup = relatedGroupGuestIds.has(guestId);
+  const isRelatedParty = relatedPartyGuestIds.has(guestId);
+  const isRelatedCircle = relatedCircleGuestIds.has(guestId);
 
   const highlightColors = useMemo(
     () => (highlightToken ? getHighlightColor(highlightToken, slotAssignments) : null),
@@ -308,16 +308,16 @@ export default function GuestChip({
   let visualState:
     | "selected"
     | "relatedBoth"
-    | "relatedHousehold"
-    | "relatedGroup"
+    | "relatedParty"
+    | "relatedCircle"
     | "dimmed"
     | "highlighted"
     | "searchMatch"
     | "default" = "default";
   if (!suppressStateStyles) {
-    if (isSelected || isRelatedHousehold) {
+    if (isSelected || isRelatedParty) {
       visualState = "selected";
-    } else if (selectedGuestId && !isRelatedGroup) {
+    } else if (selectedGuestId && !isRelatedCircle) {
       visualState = "dimmed";
     }
   }
@@ -338,7 +338,7 @@ export default function GuestChip({
       clearSelectedGuest();
     } else {
       selectGuest(guestId);
-      activateHouseholdFocusFromGuestSelection();
+      activatePartyFocusFromGuestSelection();
     }
   }
 
@@ -430,16 +430,16 @@ export default function GuestChip({
           <div className="grid grid-cols-[72px_1fr] items-start gap-x-2 gap-y-0.5">
             <dt className="flex items-center gap-1.5 text-muted-foreground">
               <House className="h-3 w-3" aria-hidden="true" />
-              <span>Household</span>
+              <span>Party</span>
             </dt>
-            <dd className="min-w-0 font-medium text-foreground">{householdName}</dd>
+            <dd className="min-w-0 font-medium text-foreground">{partyName}</dd>
           </div>
           <div className="grid grid-cols-[72px_1fr] items-start gap-x-2 gap-y-0.5">
             <dt className="flex items-center gap-1.5 text-muted-foreground">
               <Layers3 className="h-3 w-3" aria-hidden="true" />
-              <span>Group</span>
+              <span>Circle</span>
             </dt>
-            <dd className="min-w-0 font-medium text-foreground">{groupName}</dd>
+            <dd className="min-w-0 font-medium text-foreground">{circleName}</dd>
           </div>
           <div className="grid grid-cols-[72px_1fr] items-start gap-x-2 gap-y-0.5">
             <dt className="flex items-center gap-1.5 text-muted-foreground">

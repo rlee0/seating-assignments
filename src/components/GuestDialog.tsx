@@ -18,8 +18,8 @@ import { Label } from "@/components/ui/label";
 export interface GuestFormValues {
   fullName: string;
   host: string;
-  household: string;
-  group: string;
+  party: string;
+  circle: string;
 }
 
 interface Props {
@@ -27,8 +27,8 @@ interface Props {
   mode: "create" | "edit";
   initialValues: GuestFormValues;
   hostOptions: string[];
-  householdOptions: string[];
-  groupOptions: string[];
+  partyOptions: string[];
+  circleOptions: string[];
   onClose: () => void;
   onSubmit: (values: GuestFormValues) => void;
 }
@@ -38,8 +38,8 @@ export default function GuestDialog({
   mode,
   initialValues,
   hostOptions,
-  householdOptions,
-  groupOptions,
+  partyOptions,
+  circleOptions,
   onClose,
   onSubmit,
 }: Props) {
@@ -57,8 +57,8 @@ export default function GuestDialog({
   const TitleIcon = mode === "create" ? UserPlus : User;
   const description =
     mode === "create"
-      ? "Full name is required. Host, household, and group can be selected from existing values or entered as new ones."
-      : "Update the guest details. Host, household, and group can be selected from existing values or entered as new ones.";
+      ? "Full name is required. Host, party, and circle can be selected from existing values or entered as new ones."
+      : "Update the guest details. Host, party, and circle can be selected from existing values or entered as new ones.";
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
@@ -79,8 +79,8 @@ export default function GuestDialog({
             const nextValues = {
               fullName: values.fullName.trim(),
               host: values.host.trim(),
-              household: values.household.trim(),
-              group: values.group.trim(),
+              party: values.party.trim(),
+              circle: values.circle.trim(),
             };
 
             if (!nextValues.fullName) {
@@ -123,19 +123,19 @@ export default function GuestDialog({
           />
 
           <CreatableComboboxField
-            label="Household"
-            value={values.household}
-            options={householdOptions}
-            placeholder="Select existing or type a new household"
-            onChange={(nextValue) => setValues((current) => ({ ...current, household: nextValue }))}
+            label="Party"
+            value={values.party}
+            options={partyOptions}
+            placeholder="Select existing or type a new party"
+            onChange={(nextValue) => setValues((current) => ({ ...current, party: nextValue }))}
           />
 
           <CreatableComboboxField
-            label="Group"
-            value={values.group}
-            options={groupOptions}
-            placeholder="Select existing or type a new group"
-            onChange={(nextValue) => setValues((current) => ({ ...current, group: nextValue }))}
+            label="Circle"
+            value={values.circle}
+            options={circleOptions}
+            placeholder="Select existing or type a new circle"
+            onChange={(nextValue) => setValues((current) => ({ ...current, circle: nextValue }))}
           />
 
           <DialogFooter>
