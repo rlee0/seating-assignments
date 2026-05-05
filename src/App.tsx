@@ -9,7 +9,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { AlertTriangle, Download, Moon, RotateCcw, Sun, Upload } from "lucide-react";
+import { AlertTriangle, Download, Moon, Plus, RotateCcw, Sun, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SeatingProvider, useSeating } from "./store/SeatingContext";
 import { SearchProvider, useSearch } from "./store/SearchContext";
@@ -29,6 +29,10 @@ import Sidebar from "./components/Sidebar";
 import TableBoard from "./components/TableBoard";
 import GuestDialog, { type GuestFormValues } from "./components/GuestDialog";
 import ConfirmDialog from "./components/ConfirmDialog";
+import TableDialog, { type TableFormValues } from "./components/TableDialog";
+import BoardSettingsDialog, {
+  type BoardSettingsFormValues,
+} from "./components/BoardSettingsDialog";
 import {
   createGuestRowId,
   getGuestSourceSignature,
@@ -52,10 +56,15 @@ import {
 import { cn } from "./lib/utils";
 import {
   EXPORT_FORMAT_VERSION,
+  MAX_ROUND_TABLE_CAPACITY,
+  MIN_ROUND_TABLE_CAPACITY,
   TABLE_CAPACITY,
   TABLE_COUNT,
+  getTableSeatCount,
+  type BoardState,
   type GuestInputRow,
   type PersistedSeatingData,
+  type RectangularSeatCounts,
   type TableState,
 } from "./types";
 import { createInitialState, seatingReducer } from "./store/reducer";
@@ -89,26 +98,219 @@ function getInitialGuestData(): {
   };
 }
 
-function isTableStateForImport(value: unknown): value is TableState {
-  if (!value || typeof value !== "object") return false;
+function isSeatValue(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function parseRectangularSeatCounts(value: unknown): RectangularSeatCounts | null {
+  if (!value || typeof value !== "object") return null;
 
   const candidate = value as {
-    tableNumber?: unknown;
-    name?: unknown;
-    guestIds?: unknown;
+    top?: unknown;
+    right?: unknown;
+    bottom?: unknown;
+    left?: unknown;
   };
 
-  return (
-    typeof candidate.tableNumber === "number" &&
-    typeof candidate.name === "string" &&
-    Array.isArray(candidate.guestIds) &&
-    candidate.guestIds.length === TABLE_CAPACITY &&
-    candidate.guestIds.every((guestId) => guestId === null || typeof guestId === "string")
+  if (
+    !Number.isInteger(candidate.top) ||
+    !Number.isInteger(candidate.right) ||
+    !Number.isInteger(candidate.bottom) ||
+    !Number.isInteger(candidate.left)
+  ) {
+    return null;
+  }
+
+  const top = candidate.top as number;
+  const right = candidate.right as number;
+  const bottom = candidate.bottom as number;
+  const left = candidate.left as number;
+
+  if (top < 0 || right < 0 || bottom < 0 || left < 0) {
+    return null;
+  }
+
+  if (top + right + bottom + left <= 0) {
+    return null;
+  }
+
+  return { top, right, bottom, left };
+}
+
+function normalizeBoardStateForImport(value: unknown): BoardState | null {
+  if (!value || typeof value !== "object") return null;
+
+  const candidate = value as {
+    rows?: unknown;
+    columns?: unknown;
+    newTableDefaults?: {
+      labelPrefix?: unknown;
+      shape?: unknown;
+      roundSeatCount?: unknown;
+      rectangularSideCounts?: unknown;
+    };
+  };
+
+  if (!Number.isInteger(candidate.rows) || !Number.isInteger(candidate.columns)) {
+    return null;
+  }
+
+  const rows = candidate.rows as number;
+  const columns = candidate.columns as number;
+
+  if (rows <= 0 || columns <= 0) {
+    return null;
+  }
+
+  const defaults = candidate.newTableDefaults;
+  if (!defaults || typeof defaults !== "object") return null;
+
+  if (typeof defaults.labelPrefix !== "string") return null;
+  if (defaults.shape !== "round" && defaults.shape !== "rectangular") return null;
+  if (!Number.isInteger(defaults.roundSeatCount)) return null;
+
+  const rectangularSideCounts = parseRectangularSeatCounts(defaults.rectangularSideCounts);
+  if (!rectangularSideCounts) return null;
+
+  const roundSeatCount = defaults.roundSeatCount as number;
+  const normalizedRoundSeatCount = Math.min(
+    MAX_ROUND_TABLE_CAPACITY,
+    Math.max(MIN_ROUND_TABLE_CAPACITY, roundSeatCount)
   );
+
+  return {
+    rows,
+    columns,
+    newTableDefaults: {
+      labelPrefix: defaults.labelPrefix,
+      shape: defaults.shape,
+      roundSeatCount: normalizedRoundSeatCount,
+      rectangularSideCounts,
+    },
+  };
+}
+
+function normalizeTableStateForImport(
+  value: unknown,
+  tableIndex: number,
+  board: BoardState
+): TableState | null {
+  if (!value || typeof value !== "object") return null;
+
+  const candidate = value as {
+    id?: unknown;
+    tableNumber?: unknown;
+    name?: unknown;
+    shape?: unknown;
+    seatConfig?: {
+      shape?: unknown;
+      seatCount?: unknown;
+      sideCounts?: unknown;
+    };
+    guestIds?: unknown;
+    disabledSeats?: unknown;
+    gridPosition?: { row?: unknown; column?: unknown };
+  };
+
+  if (!Number.isInteger(candidate.tableNumber) || (candidate.tableNumber as number) <= 0) {
+    return null;
+  }
+
+  const tableNumber = candidate.tableNumber as number;
+
+  if (typeof candidate.name !== "string") {
+    return null;
+  }
+
+  if (!Array.isArray(candidate.guestIds) || !candidate.guestIds.every(isSeatValue)) {
+    return null;
+  }
+
+  const shape =
+    candidate.shape === "round" || candidate.shape === "rectangular" ? candidate.shape : null;
+  if (!shape) {
+    return null;
+  }
+
+  const seatConfig =
+    shape === "round"
+      ? (() => {
+          const importedSeatCount =
+            candidate.seatConfig?.shape === "round" &&
+            Number.isInteger(candidate.seatConfig.seatCount)
+              ? (candidate.seatConfig.seatCount as number)
+              : candidate.guestIds.length;
+          const seatCount = Math.min(
+            MAX_ROUND_TABLE_CAPACITY,
+            Math.max(MIN_ROUND_TABLE_CAPACITY, importedSeatCount)
+          );
+          return { shape: "round" as const, seatCount };
+        })()
+      : (() => {
+          const sideCounts =
+            candidate.seatConfig?.shape === "rectangular"
+              ? parseRectangularSeatCounts(candidate.seatConfig.sideCounts)
+              : null;
+          if (!sideCounts) return null;
+          return { shape: "rectangular" as const, sideCounts };
+        })();
+
+  if (!seatConfig) {
+    return null;
+  }
+
+  const expectedSeatCount = getTableSeatCount(seatConfig);
+  const guestIds = [
+    ...candidate.guestIds.slice(0, expectedSeatCount),
+    ...Array<string | null>(Math.max(0, expectedSeatCount - candidate.guestIds.length)).fill(null),
+  ];
+
+  const fallbackRow = Math.floor(tableIndex / board.columns);
+  const fallbackColumn = tableIndex % board.columns;
+  const importedRow = candidate.gridPosition?.row;
+  const importedColumn = candidate.gridPosition?.column;
+  const row =
+    Number.isInteger(importedRow) &&
+    (importedRow as number) >= 0 &&
+    (importedRow as number) < board.rows
+      ? (importedRow as number)
+      : Math.min(Math.max(fallbackRow, 0), board.rows - 1);
+  const column =
+    Number.isInteger(importedColumn) &&
+    (importedColumn as number) >= 0 &&
+    (importedColumn as number) < board.columns
+      ? (importedColumn as number)
+      : Math.min(Math.max(fallbackColumn, 0), board.columns - 1);
+
+  const disabledSeats = Array.isArray(candidate.disabledSeats)
+    ? candidate.disabledSeats.filter(
+        (seatIndex, index, source): seatIndex is number =>
+          Number.isInteger(seatIndex) &&
+          seatIndex >= 0 &&
+          seatIndex < guestIds.length &&
+          guestIds[seatIndex] === null &&
+          source.indexOf(seatIndex) === index
+      )
+    : [];
+
+  return {
+    id:
+      typeof candidate.id === "string" && candidate.id.length > 0
+        ? candidate.id
+        : `table-${tableNumber}`,
+    tableNumber,
+    name: candidate.name.trim().length > 0 ? candidate.name : `Table ${tableNumber}`,
+    shape,
+    gridPosition: { row, column },
+    seatConfig,
+    guestIds,
+    disabledSeats,
+  };
 }
 
 function parseImportPayload(value: unknown): {
   guests: GuestInputRow[];
+  board: BoardState;
   tables: TableState[];
 } | null {
   if (!value || typeof value !== "object") return null;
@@ -116,6 +318,7 @@ function parseImportPayload(value: unknown): {
   const candidate = value as {
     version?: unknown;
     guests?: unknown;
+    board?: unknown;
     tables?: unknown;
   };
 
@@ -128,20 +331,23 @@ function parseImportPayload(value: unknown): {
     return null;
   }
 
-  if (
-    !Array.isArray(candidate.tables) ||
-    candidate.tables.length !== TABLE_COUNT ||
-    !candidate.tables.every((table) => isTableStateForImport(table))
-  ) {
+  const board = normalizeBoardStateForImport(candidate.board);
+  if (!board || !Array.isArray(candidate.tables)) {
+    return null;
+  }
+
+  const tables = candidate.tables.map((table, tableIndex) =>
+    normalizeTableStateForImport(table, tableIndex, board)
+  );
+
+  if (tables.some((table) => table === null)) {
     return null;
   }
 
   return {
     guests: normalizeGuestInputRows(candidate.guests),
-    tables: candidate.tables.map((table) => ({
-      ...table,
-      guestIds: [...table.guestIds],
-    })),
+    board,
+    tables: tables as TableState[],
   };
 }
 
@@ -218,7 +424,7 @@ function parseCsvLines(text: string): string[][] | null {
   return records;
 }
 
-const CSV_EXPORT_HEADERS = ["Full Name", "Host", "Household", "Group", "Table", "Seat"] as const;
+const CSV_EXPORT_HEADERS = ["Full Name", "Host", "Party", "Circle", "Table", "Seat"] as const;
 
 function normalizeCsvHeader(value: string): string {
   return value.trim().toLowerCase();
@@ -226,13 +432,14 @@ function normalizeCsvHeader(value: string): string {
 
 function parseCsvImportPayload(text: string): {
   guests: GuestInputRow[];
+  board: BoardState;
   tables: TableState[];
 } | null {
   const rows = parseCsvLines(text);
   if (!rows || rows.length === 0) return null;
 
   const [header, ...records] = rows;
-  const requiredGuestHeaders = ["Full Name", "Host", "Household", "Group"] as const;
+  const requiredGuestHeaders = ["Full Name", "Host", "Party", "Circle"] as const;
   const normalizedHeaderIndexes = new Map<string, number>();
 
   for (let index = 0; index < header.length; index += 1) {
@@ -251,16 +458,16 @@ function parseCsvImportPayload(text: string): {
 
   const fullNameIndex = lookupIndex("Full Name");
   const hostIndex = lookupIndex("Host");
-  const householdIndex = lookupIndex("Household");
-  const groupIndex = lookupIndex("Group");
+  const partyIndex = lookupIndex("Party");
+  const circleIndex = lookupIndex("Circle");
   const tableColumnIndex = lookupIndex("Table");
   const seatColumnIndex = lookupIndex("Seat");
 
   if (
     fullNameIndex === null ||
     hostIndex === null ||
-    householdIndex === null ||
-    groupIndex === null ||
+    partyIndex === null ||
+    circleIndex === null ||
     !requiredGuestHeaders.every((label) => lookupIndex(label) !== null)
   ) {
     return null;
@@ -275,8 +482,8 @@ function parseCsvImportPayload(text: string): {
 
     const fullName = record[fullNameIndex] ?? "";
     const host = record[hostIndex] ?? "";
-    const household = record[householdIndex] ?? "";
-    const group = record[groupIndex] ?? "";
+    const party = partyIndex === null ? "" : (record[partyIndex] ?? "");
+    const circle = circleIndex === null ? "" : (record[circleIndex] ?? "");
     const tableValue = tableColumnIndex === null ? "" : (record[tableColumnIndex] ?? "");
     const seatValue = seatColumnIndex === null ? "" : (record[seatColumnIndex] ?? "");
 
@@ -291,8 +498,8 @@ function parseCsvImportPayload(text: string): {
       id: guestId,
       fullName,
       host,
-      household,
-      group,
+      party,
+      circle,
     });
     const hasTableValue = tableValue.trim().length > 0;
     const hasSeatValue = seatValue.trim().length > 0;
@@ -334,6 +541,7 @@ function parseCsvImportPayload(text: string): {
 
   return {
     guests,
+    board: nextState.board,
     tables: nextState.tables,
   };
 }
@@ -363,8 +571,8 @@ function buildCsvContent(guests: GuestInputRow[], seating: PersistedSeatingData)
     return [
       row.fullName,
       row.host,
-      row.household,
-      row.group,
+      row.party,
+      row.circle,
       seat ? String(seat.tableNumber) : "",
       seat ? String(seat.seatIndex) : "",
     ]
@@ -454,18 +662,18 @@ function resolveDragOverlaySourceElement(intent: DragIntent): HTMLElement | null
     return findGuestChipById(intent.guestId, (chip) => !!chip.closest("[data-sidebar]"));
   }
 
-  if (intent.kind === "household") {
-    const cards = document.querySelectorAll<HTMLElement>("[data-household-card][data-party-id]");
+  if (intent.kind === "party") {
+    const cards = document.querySelectorAll<HTMLElement>("[data-party-card][data-party-id]");
     for (const card of cards) {
       if (card.dataset.partyId === intent.partyId) return card;
     }
     return null;
   }
 
-  if (intent.kind === "group") {
-    const cards = document.querySelectorAll<HTMLElement>("[data-group-card][data-group-name]");
+  if (intent.kind === "circle") {
+    const cards = document.querySelectorAll<HTMLElement>("[data-circle-card][data-circle-name]");
     for (const card of cards) {
-      if (card.dataset.groupName === intent.groupName) return card;
+      if (card.dataset.circleName === intent.circleName) return card;
     }
     return null;
   }
@@ -666,19 +874,24 @@ function SeatingApp({
     { mode: "create" } | { mode: "edit"; guestId: string } | null
   >(null);
   const [pendingDeleteGuestId, setPendingDeleteGuestId] = useState<string | null>(null);
+  const [tableDialogState, setTableDialogState] = useState<
+    { mode: "create" } | { mode: "edit"; tableNumber: number } | null
+  >(null);
+  const [pendingDeleteTableNumber, setPendingDeleteTableNumber] = useState<number | null>(null);
+  const [boardSettingsOpen, setBoardSettingsOpen] = useState(false);
   const optionCollator = useMemo(() => new Intl.Collator(undefined, { sensitivity: "base" }), []);
-  const householdOptions = useMemo(
+  const partyOptions = useMemo(
     () =>
       [...parties.values()]
-        .map((party) => party.household.trim())
+        .map((party) => party.party.trim())
         .filter((value, index, source) => value.length > 0 && source.indexOf(value) === index)
         .sort((left, right) => optionCollator.compare(left, right)),
     [optionCollator, parties]
   );
-  const groupOptions = useMemo(
+  const circleOptions = useMemo(
     () =>
       [
-        ...new Set(guestRows.map((row) => row.group.trim()).filter((value) => value.length > 0)),
+        ...new Set(guestRows.map((row) => row.circle.trim()).filter((value) => value.length > 0)),
       ].sort((left, right) => optionCollator.compare(left, right)),
     [guestRows, optionCollator]
   );
@@ -689,12 +902,12 @@ function SeatingApp({
       ].sort((left, right) => optionCollator.compare(left, right)),
     [guestRows, optionCollator]
   );
-  const householdHostByName = useMemo(() => {
+  const partyHostByName = useMemo(() => {
     const map = new Map<string, string>();
     for (const party of parties.values()) {
-      const household = party.household.trim();
-      if (!household) continue;
-      map.set(household.toLocaleLowerCase(), party.host);
+      const partyName = party.party.trim();
+      if (!partyName) continue;
+      map.set(partyName.toLocaleLowerCase(), party.host);
     }
     return map;
   }, [parties]);
@@ -712,20 +925,20 @@ function SeatingApp({
         ? {
             fullName: editingGuestRow.fullName,
             host: editingGuestRow.host,
-            household: editingGuestRow.household,
-            group: editingGuestRow.group,
+            party: editingGuestRow.party,
+            circle: editingGuestRow.circle,
           }
-        : { fullName: "", host: "", household: "", group: "" },
+        : { fullName: "", host: "", party: "", circle: "" },
     [editingGuestRow]
   );
 
   const resolveGuestHost = useCallback(
-    (household: string, fallbackHost: string) => {
-      const normalizedHousehold = household.trim().toLocaleLowerCase();
-      if (!normalizedHousehold) return fallbackHost;
-      return householdHostByName.get(normalizedHousehold) ?? fallbackHost;
+    (party: string, fallbackHost: string) => {
+      const normalizedParty = party.trim().toLocaleLowerCase();
+      if (!normalizedParty) return fallbackHost;
+      return partyHostByName.get(normalizedParty) ?? fallbackHost;
     },
-    [householdHostByName]
+    [partyHostByName]
   );
   const handleAddGuest = useCallback(() => {
     setGuestDialogState({ mode: "create" });
@@ -756,9 +969,9 @@ function SeatingApp({
               ? {
                   ...row,
                   fullName: values.fullName,
-                  household: values.household,
-                  group: values.group,
-                  host: values.host || resolveGuestHost(values.household, row.host),
+                  party: values.party,
+                  circle: values.circle,
+                  host: values.host || resolveGuestHost(values.party, row.host),
                 }
               : row
           )
@@ -769,9 +982,9 @@ function SeatingApp({
           {
             id: createGuestRowId(guestRows),
             fullName: values.fullName,
-            household: values.household,
-            group: values.group,
-            host: values.host || resolveGuestHost(values.household, ""),
+            party: values.party,
+            circle: values.circle,
+            host: values.host || resolveGuestHost(values.party, ""),
           },
         ]);
       }
@@ -789,6 +1002,99 @@ function SeatingApp({
     }
     setPendingDeleteGuestId(null);
   }, [deselectGuest, guestRows, onGuestRowsChange, pendingDeleteGuestId, selectedGuestId]);
+
+  // ── Table management handlers ─────────────────────────────────────────────
+  const handleAddTable = useCallback(() => {
+    setTableDialogState({ mode: "create" });
+  }, []);
+  const handleEditTable = useCallback((tableNumber: number) => {
+    setTableDialogState({ mode: "edit", tableNumber });
+  }, []);
+  const handleDeleteTable = useCallback((tableNumber: number) => {
+    setPendingDeleteTableNumber(tableNumber);
+  }, []);
+  const handleConfirmDeleteTable = useCallback(() => {
+    if (pendingDeleteTableNumber === null) return;
+    dispatch({ type: "DELETE_TABLE", tableNumber: pendingDeleteTableNumber });
+    setPendingDeleteTableNumber(null);
+  }, [dispatch, pendingDeleteTableNumber]);
+  const editingTable = useMemo(() => {
+    if (tableDialogState?.mode !== "edit") return null;
+    return state.tables.find((t) => t.tableNumber === tableDialogState.tableNumber) ?? null;
+  }, [tableDialogState, state.tables]);
+  const tableDialogInitialValues = useMemo<TableFormValues>(() => {
+    if (editingTable) {
+      const sideCounts: RectangularSeatCounts =
+        editingTable.seatConfig.shape === "rectangular"
+          ? editingTable.seatConfig.sideCounts
+          : state.board.newTableDefaults.rectangularSideCounts;
+      return {
+        name: editingTable.name,
+        shape: editingTable.shape,
+        roundSeatCount:
+          editingTable.seatConfig.shape === "round"
+            ? editingTable.seatConfig.seatCount
+            : state.board.newTableDefaults.roundSeatCount,
+        sideCounts,
+      };
+    }
+    return {
+      name: "",
+      shape: state.board.newTableDefaults.shape,
+      roundSeatCount: state.board.newTableDefaults.roundSeatCount,
+      sideCounts: { ...state.board.newTableDefaults.rectangularSideCounts },
+    };
+  }, [editingTable, state.board]);
+  const handleSubmitTable = useCallback(
+    (values: TableFormValues) => {
+      const seatConfig =
+        values.shape === "round"
+          ? { shape: "round" as const, seatCount: values.roundSeatCount }
+          : { shape: "rectangular" as const, sideCounts: values.sideCounts };
+      if (tableDialogState?.mode === "edit") {
+        dispatch({
+          type: "UPDATE_TABLE_CONFIG",
+          tableNumber: tableDialogState.tableNumber,
+          updates: { name: values.name, shape: values.shape, seatConfig },
+        });
+      } else {
+        dispatch({
+          type: "CREATE_TABLE",
+          name: values.name || undefined,
+          shape: values.shape,
+          seatConfig,
+        });
+      }
+      setTableDialogState(null);
+    },
+    [dispatch, tableDialogState]
+  );
+  const handleBoardSettings = useCallback(() => {
+    setBoardSettingsOpen(true);
+  }, []);
+  const handleSubmitBoardSettings = useCallback(
+    (values: BoardSettingsFormValues) => {
+      dispatch({
+        type: "UPDATE_BOARD_CONFIG",
+        updates: { rows: values.rows, columns: values.columns },
+        newTableDefaults: {
+          labelPrefix: values.labelPrefix,
+          shape: values.defaultShape,
+          roundSeatCount: values.defaultRoundSeatCount,
+          rectangularSideCounts: values.defaultSideCounts,
+        },
+      });
+      setBoardSettingsOpen(false);
+    },
+    [dispatch]
+  );
+  const pendingDeleteTable = useMemo(
+    () =>
+      pendingDeleteTableNumber !== null
+        ? (state.tables.find((t) => t.tableNumber === pendingDeleteTableNumber) ?? null)
+        : null,
+    [pendingDeleteTableNumber, state.tables]
+  );
 
   // ── Pointer tracking for seat-level probe ────────────────────────────────────
   useEffect(() => {
@@ -1159,7 +1465,7 @@ function SeatingApp({
             // For other auto-assign actions, mention the additional constraints.
             const constraintHint = action.allowPartialPlacementBypass
               ? "Try a different table or row."
-              : "Try a different table, or check group row and side constraints.";
+              : "Try a different table, or check circle row and side constraints.";
             setAutoAssignWarning(`${nameStr} couldn't be seated. ${constraintHint}`);
           } else {
             setAutoAssignWarning(null);
@@ -1192,7 +1498,7 @@ function SeatingApp({
         if (!parsed) {
           window.alert(
             importKind === "json"
-              ? "Import failed. Use v2 JSON with version, guests, and tables."
+              ? "Import failed. Use v3 JSON with version, guests, board, and tables."
               : "Import failed. Use a CSV structured like the exported guest file."
           );
           return;
@@ -1200,7 +1506,7 @@ function SeatingApp({
 
         const { allGuestIds: importedGuestIds } = parseGuestsFromRows(parsed.guests);
         const reconciledState = reconcileStateToGuestIds(
-          { tables: parsed.tables, unassigned: [], lockedGuestIds: [] },
+          { board: parsed.board, tables: parsed.tables, unassigned: [], lockedGuestIds: [] },
           importedGuestIds
         );
 
@@ -1260,16 +1566,19 @@ function SeatingApp({
     fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
   }, []);
 
-  const handleFileDrop = useCallback(async (event: ReactDragEvent<HTMLDivElement>) => {
-    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
-    event.preventDefault();
-    fileDragDepthRef.current = 0;
+  const handleFileDrop = useCallback(
+    async (event: ReactDragEvent<HTMLDivElement>) => {
+      if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+      event.preventDefault();
+      fileDragDepthRef.current = 0;
 
-    const file = getFirstImportFile(event.dataTransfer.files);
-    if (!file) return;
+      const file = getFirstImportFile(event.dataTransfer.files);
+      if (!file) return;
 
-    await importFromFile(file);
-  }, [importFromFile]);
+      await importFromFile(file);
+    },
+    [importFromFile]
+  );
 
   function handleReset() {
     if (window.confirm("Reset all seating assignments? This will clear all table placements.")) {
@@ -1321,6 +1630,10 @@ function SeatingApp({
             Seating Assignments
           </h1>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            <Button type="button" size="sm" onClick={handleAddTable}>
+              <Plus size={14} aria-hidden="true" />
+              <span className="max-sm:hidden">Add Table</span>
+            </Button>
             <Button type="button" variant="outline" size="sm" onClick={onThemeToggle}>
               {theme === "dark" ? (
                 <Sun size={14} aria-hidden="true" />
@@ -1425,6 +1738,9 @@ function SeatingApp({
               guestSwapPreview={guestSwapPreview}
               onEditGuest={handleEditGuest}
               onDeleteGuest={handleDeleteGuest}
+              onEditTable={handleEditTable}
+              onDeleteTable={handleDeleteTable}
+              onBoardSettings={handleBoardSettings}
             />
           </div>
         </div>
@@ -1434,8 +1750,8 @@ function SeatingApp({
           mode={guestDialogState?.mode ?? "create"}
           initialValues={guestDialogInitialValues}
           hostOptions={hostOptions}
-          householdOptions={householdOptions}
-          groupOptions={groupOptions}
+          partyOptions={partyOptions}
+          circleOptions={circleOptions}
           onClose={() => setGuestDialogState(null)}
           onSubmit={handleSubmitGuest}
         />
@@ -1445,12 +1761,40 @@ function SeatingApp({
           title="Delete Guest"
           description={
             deleteGuestRow
-              ? `${deleteGuestRow.fullName} will be removed from any assigned seat and from the unassigned list. Empty households or groups will disappear automatically when no members remain.`
+              ? `${deleteGuestRow.fullName} will be removed from any assigned seat and from the unassigned list. Empty parties or circles will disappear automatically when no members remain.`
               : "This guest will be removed from seating and the guest list."
           }
           confirmLabel="Delete Guest"
           onClose={() => setPendingDeleteGuestId(null)}
           onConfirm={handleConfirmDeleteGuest}
+        />
+
+        <TableDialog
+          open={tableDialogState !== null}
+          mode={tableDialogState?.mode ?? "create"}
+          initialValues={tableDialogInitialValues}
+          onClose={() => setTableDialogState(null)}
+          onSubmit={handleSubmitTable}
+        />
+
+        <ConfirmDialog
+          open={pendingDeleteTableNumber !== null}
+          title="Delete Table"
+          description={
+            pendingDeleteTable
+              ? `"${pendingDeleteTable.name}" will be removed. Any seated guests will move to the unassigned list.`
+              : "This table will be removed and its guests will be unassigned."
+          }
+          confirmLabel="Delete Table"
+          onClose={() => setPendingDeleteTableNumber(null)}
+          onConfirm={handleConfirmDeleteTable}
+        />
+
+        <BoardSettingsDialog
+          open={boardSettingsOpen}
+          currentBoard={state.board}
+          onClose={() => setBoardSettingsOpen(false)}
+          onSubmit={handleSubmitBoardSettings}
         />
 
         <div className="fixed bottom-0 left-0 right-0 z-100 hidden h-13 border-t border-border bg-card max-sm:flex">
