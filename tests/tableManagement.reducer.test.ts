@@ -25,15 +25,66 @@ describe("table management reducer", () => {
     expect(state.unassigned).toEqual(["g1", "g2"]);
   });
 
-  it("blocks shrinking the board when existing tables would fall out of bounds", () => {
+  it("repacks tables and deletes overflow when shrinking the board", () => {
     const state = createInitialState([]);
 
+    // Resize from 5×5 (25 tables) to 2×2 (4 tables)
+    // Only the first 4 tables should remain, the other 21 should be deleted
     const nextState = seatingReducer(state, {
       type: "UPDATE_BOARD_CONFIG",
-      updates: { columns: 4 },
+      updates: { rows: 2, columns: 2 },
     });
 
-    expect(nextState).toBe(state);
+    expect(nextState.board.rows).toBe(2);
+    expect(nextState.board.columns).toBe(2);
+    expect(nextState.tables).toHaveLength(4);
+    // Verify the remaining tables are the first 4 (in row-major order)
+    expect(nextState.tables[0]).toMatchObject({
+      tableNumber: 1,
+      gridPosition: { row: 0, column: 0 },
+    });
+    expect(nextState.tables[1]).toMatchObject({
+      tableNumber: 2,
+      gridPosition: { row: 0, column: 1 },
+    });
+    expect(nextState.tables[2]).toMatchObject({
+      tableNumber: 3,
+      gridPosition: { row: 1, column: 0 },
+    });
+    expect(nextState.tables[3]).toMatchObject({
+      tableNumber: 4,
+      gridPosition: { row: 1, column: 1 },
+    });
+  });
+
+  it("recovers seated guests from deleted overflow tables to unassigned", () => {
+    const state = createInitialState(["g1", "g2", "g3", "g4"]);
+
+    // Seat some guests at tables that will be deleted
+    let seatedState = seatingReducer(state, {
+      type: "ASSIGN_GUESTS",
+      tableNumber: 5,
+      seatIndex: 0,
+      guestIds: ["g1", "g2"],
+      assignmentMode: "single-table",
+      guestProfiles: {
+        g1: { partyId: "p1", circle: "", host: "", party: "Party 1" },
+        g2: { partyId: "p1", circle: "", host: "", party: "Party 1" },
+        g3: { partyId: "p2", circle: "", host: "", party: "Party 2" },
+        g4: { partyId: "p2", circle: "", host: "", party: "Party 2" },
+      },
+    });
+
+    // Resize from 5×5 to 2×2
+    // Table 5 should be deleted and g1, g2 should be returned to unassigned
+    const nextState = seatingReducer(seatedState, {
+      type: "UPDATE_BOARD_CONFIG",
+      updates: { rows: 2, columns: 2 },
+    });
+
+    expect(nextState.tables).toHaveLength(4);
+    expect(nextState.unassigned).toContain("g1");
+    expect(nextState.unassigned).toContain("g2");
   });
 
   it("deletes a table and recreates one in the first open grid cell", () => {
@@ -67,33 +118,60 @@ describe("table management reducer", () => {
         table.tableNumber === 1
           ? {
               ...table,
-              guestIds: ["g1", "g2", "g3", null, null, null, null, null],
+              guestIds: ["g1", "g2", "g3", "g4", "g5", "g6", null, null, null, null],
             }
           : table
       ),
-      lockedGuestIds: ["g3"],
+      lockedGuestIds: ["g5"],
     };
 
     const nextState = seatingReducer(seededState, {
       type: "UPDATE_TABLE_CONFIG",
       tableNumber: 1,
       updates: {
-        shape: "rectangular",
-        seatConfig: {
-          shape: "rectangular",
-          sideCounts: { top: 1, right: 0, bottom: 1, left: 0 },
-        },
+        presetId: "round-36",
       },
     });
 
     const updatedTable = nextState.tables.find((table) => table.tableNumber === 1);
 
     expect(updatedTable).toBeDefined();
-    expect(updatedTable?.shape).toBe("rectangular");
-    expect(updatedTable?.guestIds).toEqual(["g1", "g2"]);
-    expect(getTableSeatCount(updatedTable!.seatConfig)).toBe(2);
-    expect(nextState.unassigned).toContain("g3");
-    expect(nextState.lockedGuestIds).not.toContain("g3");
+    expect(updatedTable?.presetId).toBe("round-36");
+    expect(updatedTable?.shape).toBe("round");
+    expect(updatedTable?.guestIds).toEqual(["g1", "g2", "g3", "g4"]);
+    expect(getTableSeatCount(updatedTable!.seatConfig)).toBe(4);
+    expect(nextState.unassigned).toEqual(expect.arrayContaining(["g5", "g6"]));
+    expect(nextState.lockedGuestIds).not.toContain("g5");
+  });
+
+  it("applies updated king preset capacities as rectangular seat counts", () => {
+    const state = createInitialState([]);
+
+    const king6State = seatingReducer(state, {
+      type: "UPDATE_TABLE_CONFIG",
+      tableNumber: 1,
+      updates: {
+        presetId: "king-6",
+      },
+    });
+    const king6Table = king6State.tables.find((table) => table.tableNumber === 1);
+
+    expect(king6Table?.presetId).toBe("king-6");
+    expect(king6Table?.shape).toBe("rectangular");
+    expect(getTableSeatCount(king6Table!.seatConfig)).toBe(12);
+
+    const king8State = seatingReducer(king6State, {
+      type: "UPDATE_TABLE_CONFIG",
+      tableNumber: 1,
+      updates: {
+        presetId: "king-8",
+      },
+    });
+    const king8Table = king8State.tables.find((table) => table.tableNumber === 1);
+
+    expect(king8Table?.presetId).toBe("king-8");
+    expect(king8Table?.shape).toBe("rectangular");
+    expect(getTableSeatCount(king8Table!.seatConfig)).toBe(16);
   });
 
   it("deleting a populated table unassigns its guests and unlocks them", () => {

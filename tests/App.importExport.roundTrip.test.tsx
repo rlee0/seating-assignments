@@ -123,7 +123,7 @@ describe("import and persistence normalization", () => {
         newTableDefaults: {
           labelPrefix: "Table",
           shape: "round",
-          roundSeatCount: 8,
+          roundSeatCount: 10,
           rectangularSideCounts: { top: 3, right: 1, bottom: 3, left: 1 },
         },
       },
@@ -155,6 +155,7 @@ describe("import and persistence normalization", () => {
         state: {
           tables: Array<{
             tableNumber: number;
+            presetId: string;
             gridPosition: { row: number; column: number };
             guestIds: Array<string | null>;
             disabledSeats?: number[];
@@ -167,9 +168,56 @@ describe("import and persistence normalization", () => {
       expect(importedTable?.gridPosition).toEqual({ row: 0, column: 0 });
       expect(importedTable?.guestIds).toHaveLength(4);
       expect(importedTable?.disabledSeats ?? []).toEqual([]);
+      expect(importedTable?.presetId).toBe("round-36");
     });
 
     expect(alertSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-preset table payloads during JSON import", async () => {
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+
+    localStorage.setItem(GUEST_DATA_SOURCE_KEY, getGuestSourceSignature());
+    localStorage.setItem(GUEST_DATA_STORAGE_KEY, JSON.stringify([]));
+
+    render(<App />);
+
+    const payload = {
+      version: EXPORT_FORMAT_VERSION,
+      guests: makeRows(["Alex"]),
+      board: {
+        rows: 5,
+        columns: 5,
+        newTableDefaults: {
+          labelPrefix: "Table",
+          shape: "round",
+          roundSeatCount: 10,
+          rectangularSideCounts: { top: 3, right: 1, bottom: 3, left: 1 },
+        },
+      },
+      tables: [
+        {
+          id: "table-1",
+          tableNumber: 1,
+          name: "Table 1",
+          shape: "round",
+          gridPosition: { row: 0, column: 0 },
+          seatConfig: { shape: "round", seatCount: 5 },
+          guestIds: [null, null, null, null, null],
+          disabledSeats: [],
+        },
+      ],
+    };
+
+    const input = screen.getByLabelText(/import seating json or csv file/i);
+    const file = new File([JSON.stringify(payload)], "seating.json", { type: "application/json" });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalled();
+    });
+
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
   it("loads and preserves custom board plus mixed-shape tables on reload", async () => {
@@ -186,8 +234,9 @@ describe("import and persistence normalization", () => {
             columns: 3,
             newTableDefaults: {
               labelPrefix: "Table",
+              presetId: "round-60",
               shape: "round",
-              roundSeatCount: 8,
+              roundSeatCount: 10,
               rectangularSideCounts: { top: 3, right: 1, bottom: 3, left: 1 },
             },
           },
@@ -196,6 +245,7 @@ describe("import and persistence normalization", () => {
               id: "table-1",
               tableNumber: 1,
               name: "Table 1",
+              presetId: "round-48",
               shape: "round",
               gridPosition: { row: 0, column: 0 },
               seatConfig: { shape: "round", seatCount: 6 },
@@ -206,13 +256,14 @@ describe("import and persistence normalization", () => {
               id: "table-2",
               tableNumber: 2,
               name: "Table 2",
+              presetId: "rect-6",
               shape: "rectangular",
               gridPosition: { row: 0, column: 1 },
               seatConfig: {
                 shape: "rectangular",
-                sideCounts: { top: 1, right: 1, bottom: 1, left: 1 },
+                sideCounts: { top: 3, right: 1, bottom: 3, left: 1 },
               },
-              guestIds: ["g1", "g2", null, null],
+              guestIds: ["g1", "g2", null, null, null, null, null, null],
               disabledSeats: [],
             },
           ],
@@ -234,14 +285,17 @@ describe("import and persistence normalization", () => {
       expect(stored).not.toBeNull();
       const persisted = JSON.parse(stored as string) as {
         state: {
-          board: { rows: number; columns: number };
-          tables: Array<{ shape: string }>;
+          board: { rows: number; columns: number; newTableDefaults: { presetId: string } };
+          tables: Array<{ shape: string; presetId: string }>;
         };
       };
       expect(persisted.state.board.rows).toBe(3);
       expect(persisted.state.board.columns).toBe(3);
+      expect(persisted.state.board.newTableDefaults.presetId).toBe("round-60");
       expect(persisted.state.tables.some((table) => table.shape === "round")).toBe(true);
       expect(persisted.state.tables.some((table) => table.shape === "rectangular")).toBe(true);
+      expect(persisted.state.tables.some((table) => table.presetId === "round-48")).toBe(true);
+      expect(persisted.state.tables.some((table) => table.presetId === "rect-6")).toBe(true);
     });
   });
 });

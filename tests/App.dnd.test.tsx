@@ -377,6 +377,86 @@ describe("Flow 1 — unassigned guest → unassigned seat", () => {
     expect(getSeatGuestName(container, 1, 1)).toBe("Bob");
     expect(sidebarContainsGuest(container, "Alice")).toBe(false);
   });
+
+  it("keeps seat drop targets working with empty-seat intensity metadata", () => {
+    const rows = makeRows([{ name: "Alice" }]);
+    seedApp(rows);
+
+    const { container } = render(<App />);
+    const targetSeat = getTableCard(container, 1).querySelector<HTMLElement>(
+      "[data-seat-id='seat-1-0']"
+    );
+    expect(targetSeat).not.toBeNull();
+    expect(targetSeat?.getAttribute("data-empty-seat-intensity")).toBe("faded");
+
+    triggerDragEnd({
+      id: "guest-g0",
+      data: { kind: "guest", guestId: "g0", origin: "sidebar" },
+      overId: "seat-1-0",
+    });
+
+    expect(getSeatGuestName(container, 1, 0)).toBe("Alice");
+  });
+
+  it("marks near-full empty seats as accented for round and rectangular layouts", () => {
+    const rows = makeRows([
+      { name: "Ava" },
+      { name: "Ben" },
+      { name: "Cara" },
+      { name: "Drew" },
+      { name: "Eli" },
+      { name: "Finn" },
+      { name: "Gia" },
+      { name: "Hugo" },
+      { name: "Ivy" },
+      { name: "Jude" },
+      { name: "Kira" },
+      { name: "Liam" },
+    ]);
+
+    let state = createInitialState(rows.map((row) => row.id));
+    state = seatingReducer(state, {
+      type: "UPDATE_TABLE_CONFIG",
+      tableNumber: 1,
+      updates: {
+        presetId: "rect-6",
+      },
+    });
+    state = seatingReducer(state, {
+      type: "UPDATE_TABLE_CONFIG",
+      tableNumber: 2,
+      updates: {
+        presetId: "round-48",
+      },
+    });
+
+    state = assignSingle(state, 1, "g0", 0);
+    state = assignSingle(state, 1, "g1", 1);
+    state = assignSingle(state, 1, "g2", 2);
+    state = assignSingle(state, 1, "g3", 3);
+    state = assignSingle(state, 1, "g4", 4);
+    state = assignSingle(state, 1, "g5", 5);
+    state = assignSingle(state, 1, "g6", 6);
+    state = assignSingle(state, 2, "g7", 0);
+    state = assignSingle(state, 2, "g8", 1);
+    state = assignSingle(state, 2, "g9", 2);
+    state = assignSingle(state, 2, "g10", 3);
+    state = assignSingle(state, 2, "g11", 4);
+
+    seedApp(rows, state);
+
+    const { container } = render(<App />);
+
+    const nearFullRectEmptySeat = container.querySelector<HTMLElement>(
+      "[data-table-number='1'] [data-seat-slot][data-guest-id=''][data-empty-seat-intensity='accented']"
+    );
+    const nearFullRoundEmptySeat = container.querySelector<HTMLElement>(
+      "[data-table-number='2'] [data-seat-slot][data-guest-id=''][data-empty-seat-intensity='accented']"
+    );
+
+    expect(nearFullRectEmptySeat).not.toBeNull();
+    expect(nearFullRoundEmptySeat).not.toBeNull();
+  });
 });
 
 describe("Flow 2 — unassigned guest → assigned seat (fails)", () => {
@@ -411,19 +491,19 @@ describe("Flow 3 — unassigned guest → table (autoseat)", () => {
   });
 
   it("auto-seats in adjacent table when target is full", () => {
-    const blockerRows = Array.from({ length: 8 }, (_, i) => ({ name: `Blocker ${i + 1}` }));
+    const blockerRows = Array.from({ length: 10 }, (_, i) => ({ name: `Blocker ${i + 1}` }));
     const rows = makeRows([...blockerRows, { name: "Cara" }]);
     const profiles = makeProfiles(rows);
 
     let state = createInitialState(rows.map((_, i) => `g${i}`));
-    for (let i = 0; i < 8; i++) state = assignSingle(state, 1, `g${i}`, i, profiles);
+    for (let i = 0; i < 10; i++) state = assignSingle(state, 1, `g${i}`, i, profiles);
     seedApp(rows, state);
 
     const { container } = render(<App />);
 
     triggerDragEnd({
-      id: "guest-g8",
-      data: { kind: "guest", guestId: "g8", origin: "sidebar" },
+      id: "guest-g10",
+      data: { kind: "guest", guestId: "g10", origin: "sidebar" },
       overId: "table-1",
     });
 
@@ -600,7 +680,7 @@ describe("Flow 7 — party → table (autoseat all members)", () => {
   });
 
   it("seats all party members together in adjacent table when target full", () => {
-    const blockerRows = Array.from({ length: 8 }, (_, i) => ({ name: `Blocker ${i + 1}` }));
+    const blockerRows = Array.from({ length: 10 }, (_, i) => ({ name: `Blocker ${i + 1}` }));
     const rows = makeRows([
       { name: "Hannah", party: "House X" },
       { name: "Henry", party: "House X" },
@@ -609,7 +689,7 @@ describe("Flow 7 — party → table (autoseat all members)", () => {
     const profiles = makeProfiles(rows);
 
     let state = createInitialState(rows.map((_, i) => `g${i}`));
-    for (let i = 2; i < 10; i++) state = assignSingle(state, 1, `g${i}`, i - 2, profiles);
+    for (let i = 2; i < 12; i++) state = assignSingle(state, 1, `g${i}`, i - 2, profiles);
     seedApp(rows, state);
 
     const { container } = render(<App />);
@@ -869,7 +949,7 @@ describe("Flow 8 — circle → table (autoseat all members)", () => {
   });
 
   it("seats all circle members in adjacent tables when target full", () => {
-    const blockerRows = Array.from({ length: 8 }, (_, i) => ({ name: `Blocker ${i + 1}` }));
+    const blockerRows = Array.from({ length: 10 }, (_, i) => ({ name: `Blocker ${i + 1}` }));
     const rows = makeRows([
       { name: "Gina", circle: "Friends", party: "P1" },
       { name: "Greg", circle: "Friends", party: "P2" },
@@ -879,7 +959,7 @@ describe("Flow 8 — circle → table (autoseat all members)", () => {
     const profiles = makeProfiles(rows);
 
     let state = createInitialState(rows.map((_, i) => `g${i}`));
-    for (let i = 3; i < 11; i++) state = assignSingle(state, 1, `g${i}`, i - 3, profiles);
+    for (let i = 3; i < 13; i++) state = assignSingle(state, 1, `g${i}`, i - 3, profiles);
     seedApp(rows, state);
 
     const { container } = render(<App />);
@@ -1132,7 +1212,7 @@ describe("Flow 11 — circle home-row cohesion", () => {
     // Tables 2-5 (row 0) and tables 6-10 (row 1) are empty.
     // All 3 Alpha parties should land in row 0 (tables 2-5), not row 1.
     const blockerProfiles: Record<string, GuestProfile> = Object.fromEntries(
-      Array.from({ length: 8 }, (_, i) => [
+      Array.from({ length: 10 }, (_, i) => [
         `b${i}`,
         { partyId: `pb${i}`, circle: "", host: "h", party: `HB${i}` },
       ])
@@ -1148,9 +1228,9 @@ describe("Flow 11 — circle home-row cohesion", () => {
       "g0",
       "g1",
       "g2",
-      ...Array.from({ length: 8 }, (_, i) => `b${i}`),
+      ...Array.from({ length: 10 }, (_, i) => `b${i}`),
     ]);
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 10; i += 1) {
       state = assignSingle(state, 1, `b${i}`, i, profiles);
     }
 
@@ -1186,12 +1266,12 @@ describe("Flow 11 — circle home-row cohesion", () => {
   });
 
   it("leaves a party unassigned when its circle's home row is full (orphan rule)", () => {
-    // Row 0 = tables 1-5 (tableIdx 0-4), 40 total seats.
-    // Fill 39 of those seats with blockers.
+    // Row 0 = tables 1-5 (tableIdx 0-4), 50 total seats.
+    // Fill 49 of those seats with blockers.
     // Circle "Alpha" has 2 parties (1 guest each).
     // g0 fills the last seat in row 0 → groupHomeRow = 0.
     // g1 cannot fit in row 0 → stays unassigned.
-    const blockerCount = 39;
+    const blockerCount = 49;
     const blockerProfiles: Record<string, GuestProfile> = Object.fromEntries(
       Array.from({ length: blockerCount }, (_, i) => [
         `b${i}`,
@@ -1210,19 +1290,19 @@ describe("Flow 11 — circle home-row cohesion", () => {
       ...Array.from({ length: blockerCount }, (_, i) => `b${i}`),
     ]);
 
-    // Fill tables 1-4 completely (32 seats), then 7 seats of table 5.
+    // Fill tables 1-4 completely (40 seats), then 9 seats of table 5.
     let bIdx = 0;
     for (let t = 1; t <= 4; t += 1) {
-      for (let s = 0; s < 8; s += 1) {
+      for (let s = 0; s < 10; s += 1) {
         state = assignSingle(state, t, `b${bIdx}`, s, profiles);
         bIdx += 1;
       }
     }
-    for (let s = 0; s < 7; s += 1) {
+    for (let s = 0; s < 9; s += 1) {
       state = assignSingle(state, 5, `b${bIdx}`, s, profiles);
       bIdx += 1;
     }
-    // Table 5 seat 7 is the only open seat in row 0.
+    // Table 5 seat 9 is the only open seat in row 0.
 
     const result = seatingReducer(state, {
       type: "AUTO_ASSIGN_GUESTS",
@@ -1257,21 +1337,21 @@ describe("Flow 12 — circle cross-table side cohesion (guard rail)", () => {
 
   it("blocks overflow to the opposite side when circle has a pure-side anchor", () => {
     // g0 (Beta) is anchored at table 1 slot 0 — pure side A.
-    // Table 2 only has side B open (slots 0-3 blocked by non-Beta guests).
+    // Table 2 only has side B open (slots 0-4 blocked by non-Beta guests).
     // Auto-assigning g1 (Beta) with target=table2 / scope=target-only should
     // leave g1 unassigned because placing it on side B would create a
     // pure-A/pure-B cross-table split for the Beta circle.
     const blockers: Record<string, GuestProfile> = Object.fromEntries(
-      Array.from({ length: 4 }, (_, i) => [
+      Array.from({ length: 5 }, (_, i) => [
         `b${i}`,
         { partyId: `pb${i}`, circle: "", host: "h", party: `HB${i}` },
       ])
     );
     const profiles = { ...betaProfiles(2), ...blockers };
 
-    let state = createInitialState(["g0", "g1", "b0", "b1", "b2", "b3"]);
+    let state = createInitialState(["g0", "g1", "b0", "b1", "b2", "b3", "b4"]);
     state = assignSingle(state, 1, "g0", 0, profiles);
-    for (let i = 0; i < 4; i += 1) {
+    for (let i = 0; i < 5; i += 1) {
       state = assignSingle(state, 2, `b${i}`, i, profiles); // blocks table 2 side A [0-3]
     }
 
@@ -1288,22 +1368,22 @@ describe("Flow 12 — circle cross-table side cohesion (guard rail)", () => {
   });
 
   it("allows overflow to the same side as the circle anchor", () => {
-    // Same setup but only 3 blockers on table 2 side A, leaving slot 0 open.
+    // Same setup but only 4 blockers on table 2 side A, leaving slot 0 open.
     // g1 can take table 2 slot 0 (side A) — same side as g0 at table 1 slot 0.
     const blockers: Record<string, GuestProfile> = Object.fromEntries(
-      Array.from({ length: 3 }, (_, i) => [
+      Array.from({ length: 4 }, (_, i) => [
         `b${i}`,
         { partyId: `pb${i}`, circle: "", host: "h", party: `HB${i}` },
       ])
     );
     const profiles = { ...betaProfiles(2), ...blockers };
 
-    let state = createInitialState(["g0", "g1", "b0", "b1", "b2"]);
+    let state = createInitialState(["g0", "g1", "b0", "b1", "b2", "b3"]);
     state = assignSingle(state, 1, "g0", 0, profiles);
-    for (let i = 0; i < 3; i += 1) {
-      state = assignSingle(state, 2, `b${i}`, i + 1, profiles); // blocks slots 1,2,3 on side A
+    for (let i = 0; i < 4; i += 1) {
+      state = assignSingle(state, 2, `b${i}`, i + 1, profiles); // blocks slots 1,2,3,4 on side A
     }
-    // Table 2 now has slot 0 (side A) and slots 4-7 (side B) open.
+    // Table 2 now has slot 0 (side A) and slots 5-9 (side B) open.
 
     const result = seatingReducer(state, {
       type: "AUTO_ASSIGN_GUESTS",
@@ -1318,7 +1398,7 @@ describe("Flow 12 — circle cross-table side cohesion (guard rail)", () => {
     // g1 should be on side A (slot 0), not side B
     const g1Table = result.tables.find((t) => t.guestIds.includes("g1"));
     const g1SeatIdx = g1Table?.guestIds.indexOf("g1") ?? -1;
-    expect(g1SeatIdx).toBeLessThanOrEqual(3); // side A
+    expect(g1SeatIdx).toBeLessThanOrEqual(4); // side A
   });
 });
 
@@ -1388,24 +1468,24 @@ describe("manual drag partial placement (allowPartialPlacementBypass)", () => {
       g0: { partyId: "p0", circle: "", host: "h", party: "Alpha" },
       g1: { partyId: "p0", circle: "", host: "h", party: "Alpha" },
       ...Object.fromEntries(
-        Array.from({ length: 39 }, (_, i) => [
+        Array.from({ length: 49 }, (_, i) => [
           `b${i}`,
           { partyId: `pb${i}`, circle: "", host: "h", party: `B${i}` },
         ])
       ),
     };
 
-    let state = createInitialState(["g0", "g1", ...Array.from({ length: 39 }, (_, i) => `b${i}`)]);
+    let state = createInitialState(["g0", "g1", ...Array.from({ length: 49 }, (_, i) => `b${i}`)]);
 
-    // Fill tables 1-4 completely (32 seats) and 7 seats of table 5, leaving 1 seat in row 0
+    // Fill tables 1-4 completely (40 seats) and 9 seats of table 5, leaving 1 seat in row 0
     let bIdx = 0;
     for (let t = 1; t <= 4; t += 1) {
-      for (let s = 0; s < 8; s += 1) {
+      for (let s = 0; s < 10; s += 1) {
         state = assignSingle(state, t, `b${bIdx}`, s, profiles);
         bIdx += 1;
       }
     }
-    for (let s = 0; s < 7; s += 1) {
+    for (let s = 0; s < 9; s += 1) {
       state = assignSingle(state, 5, `b${bIdx}`, s, profiles);
       bIdx += 1;
     }

@@ -1,6 +1,11 @@
 /* @vitest-environment jsdom */
 
-import { GUEST_DATA_SOURCE_KEY, GUEST_DATA_STORAGE_KEY, STORAGE_KEY } from "../src/types";
+import {
+  GUEST_DATA_SOURCE_KEY,
+  GUEST_DATA_STORAGE_KEY,
+  STORAGE_KEY,
+  TABLE_PRESETS,
+} from "../src/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
@@ -94,7 +99,54 @@ afterEach(() => {
   cleanup();
 });
 
+function selectPreset(dialog: HTMLElement, label: string) {
+  fireEvent.click(within(dialog).getByRole("combobox", { name: /table size/i }));
+  const option = screen
+    .getAllByRole("option")
+    .find((item) => item.textContent?.trim().startsWith(label));
+  expect(option).toBeDefined();
+  fireEvent.click(option!);
+}
+
+function selectBoardPreset(dialog: HTMLElement, label: string) {
+  fireEvent.click(within(dialog).getByRole("combobox", { name: /default table size/i }));
+  const option = screen
+    .getAllByRole("option")
+    .find((item) => item.textContent?.trim().startsWith(label));
+  expect(option).toBeDefined();
+  fireEvent.click(option!);
+}
+
 describe("table management dialog flows", () => {
+  it("sets faded empty-seat metadata for sparse round and rectangular tables", async () => {
+    const { container } = render(<App />);
+
+    const sparseRoundEmptySeat = container.querySelector<HTMLElement>(
+      "[data-table-number='2'] [data-seat-slot][data-guest-id=''][data-empty-seat-intensity='faded']"
+    );
+    expect(sparseRoundEmptySeat).not.toBeNull();
+
+    const table1Card = container.querySelector<HTMLElement>(
+      "[data-table-number='1'] [data-table-card]"
+    );
+    expect(table1Card).not.toBeNull();
+    fireEvent.contextMenu(table1Card!);
+    fireEvent.click(screen.getByRole("menuitem", { name: /^edit table$/i }));
+
+    const dialog = screen.getByRole("dialog", { name: /edit table/i });
+    selectPreset(dialog, "6' Rectangle (30\" wide)");
+    fireEvent.click(within(dialog).getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /edit table/i })).toBeNull();
+    });
+
+    const sparseRectEmptySeat = container.querySelector<HTMLElement>(
+      "[data-table-number='1'] [data-seat-slot][data-guest-id=''][data-empty-seat-intensity='faded']"
+    );
+    expect(sparseRectEmptySeat).not.toBeNull();
+  });
+
   it("hides grid coordinate fields and saves table metadata updates", async () => {
     const { container } = render(<App />);
 
@@ -119,9 +171,10 @@ describe("table management dialog flows", () => {
 
     expect(within(dialog).queryByLabelText(/grid row/i)).toBeNull();
     expect(within(dialog).queryByLabelText(/grid column/i)).toBeNull();
+    expect(within(dialog).getByRole("combobox", { name: /table size/i })).not.toBeNull();
 
     fireEvent.change(within(dialog).getByLabelText(/name/i), { target: { value: "VIP Table" } });
-    fireEvent.change(within(dialog).getByLabelText(/seat count/i), { target: { value: "10" } });
+    selectPreset(dialog, "72\" Round (6')");
     fireEvent.click(within(dialog).getByRole("button", { name: /save changes/i }));
 
     await waitFor(() => {
@@ -130,11 +183,34 @@ describe("table management dialog flows", () => {
 
     expect(screen.getByText("VIP Table")).not.toBeNull();
 
+    fireEvent.contextMenu(table1Card!);
+    fireEvent.click(screen.getByRole("menuitem", { name: /^edit table$/i }));
+    const reopenedDialog = screen.getByRole("dialog", { name: /edit table/i });
+    expect(
+      within(reopenedDialog).getByRole("combobox", { name: /table size/i }).textContent
+    ).toContain("72\" Round (6')");
+    fireEvent.click(within(reopenedDialog).getByRole("button", { name: /cancel/i }));
+
     const addTableButton = screen.getByRole("button", { name: /add table/i });
     fireEvent.click(addTableButton);
     const createDialog = screen.getByRole("dialog", { name: /add table/i });
     expect(within(createDialog).queryByLabelText(/grid row/i)).toBeNull();
     expect(within(createDialog).queryByLabelText(/grid column/i)).toBeNull();
+
+    fireEvent.click(within(createDialog).getByRole("combobox", { name: /table size/i }));
+    expect(screen.getAllByRole("option")).toHaveLength(TABLE_PRESETS.length);
+    TABLE_PRESETS.forEach((preset) => {
+      expect(
+        screen
+          .getAllByRole("option")
+          .some((option) => option.textContent?.trim().startsWith(preset.label))
+      ).toBe(true);
+    });
+    fireEvent.click(
+      screen
+        .getAllByRole("option")
+        .find((option) => option.textContent?.trim().startsWith("8' King (42–48\" wide)"))!
+    );
 
     fireEvent.change(within(createDialog).getByLabelText(/name/i), {
       target: { value: "New Corner Table" },
@@ -158,7 +234,7 @@ describe("table management dialog flows", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: /^edit table$/i }));
 
     const dialog = screen.getByRole("dialog", { name: /edit table/i });
-    fireEvent.click(within(dialog).getByRole("button", { name: /^rectangular$/i }));
+    selectPreset(dialog, "6' Rectangle (30\" wide)");
     fireEvent.click(within(dialog).getByRole("button", { name: /save changes/i }));
 
     await waitFor(() => {
@@ -182,8 +258,9 @@ describe("table management dialog flows", () => {
     expect(roundBody).not.toBeNull();
     expect(rectangularCenterLabel).not.toBeNull();
     expect(roundCenterLabel).not.toBeNull();
-    expect(rectangularBody?.classList.contains("min-h-44")).toBe(true);
-    expect(roundBody?.classList.contains("min-h-44")).toBe(true);
+    expect(rectangularBody?.classList.contains("content-center")).toBe(true);
+    expect(roundBody?.classList.contains("w-full")).toBe(true);
+    expect(roundBody?.classList.contains("h-44")).toBe(true);
 
     const rectangularName = rectangularCenterLabel?.querySelector("[data-table-name]");
     const roundName = roundCenterLabel?.querySelector("[data-table-name]");
@@ -196,6 +273,58 @@ describe("table management dialog flows", () => {
     expect(table2Card).not.toBeNull();
     fireEvent.contextMenu(table2Card!);
     expect(screen.getByRole("menuitem", { name: /^edit table$/i })).not.toBeNull();
+  });
+
+  it("shows updated king preset summaries and renders a 16-seat king table", async () => {
+    const { container } = render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /add table/i }));
+    const addTableDialog = screen.getByRole("dialog", { name: /add table/i });
+    selectPreset(addTableDialog, "8' King (42–48\" wide)");
+    expect(addTableDialog.textContent).toContain(
+      '16 seats max. Head tables or "feasting" style layouts'
+    );
+    fireEvent.click(within(addTableDialog).getByRole("button", { name: /cancel/i }));
+
+    const table1Card = container.querySelector<HTMLElement>(
+      "[data-table-number='1'] [data-table-card]"
+    );
+    expect(table1Card).not.toBeNull();
+    fireEvent.contextMenu(table1Card!);
+    fireEvent.click(screen.getByRole("menuitem", { name: /^edit table$/i }));
+
+    const editDialog = screen.getByRole("dialog", { name: /edit table/i });
+    selectPreset(editDialog, "8' King (42–48\" wide)");
+    expect(editDialog.textContent).toContain(
+      '16 seats max. Head tables or "feasting" style layouts'
+    );
+    fireEvent.click(within(editDialog).getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /edit table/i })).toBeNull();
+    });
+
+    const updatedTableCard = container.querySelector<HTMLElement>(
+      "[data-table-number='1'] [data-table-card]"
+    );
+    expect(updatedTableCard?.querySelectorAll("[data-seat-slot]")).toHaveLength(16);
+
+    const updatedTableLabel = container.querySelector<HTMLElement>(
+      "[data-table-number='1'] [data-table-center-label][data-table-shape='rectangular']"
+    );
+    expect(updatedTableLabel).not.toBeNull();
+    expect(updatedTableLabel?.textContent).toContain("0/16");
+
+    const viewport = container.querySelector<HTMLElement>("[data-board-viewport]");
+    expect(viewport).not.toBeNull();
+    fireEvent.contextMenu(viewport!);
+    fireEvent.click(screen.getByRole("menuitem", { name: /board settings/i }));
+
+    const boardSettingsDialog = screen.getByRole("dialog", { name: /board settings/i });
+    selectBoardPreset(boardSettingsDialog, "8' King (42–48\" wide)");
+    expect(boardSettingsDialog.textContent).toContain(
+      '16 seats max. Head tables or "feasting" style layouts'
+    );
   });
 
   it("supports zoom controls, persists zoom, and scales board content after board resize", async () => {
@@ -247,5 +376,41 @@ describe("table management dialog flows", () => {
     const resizedContent = container.querySelector<HTMLElement>("[data-board-content-size]");
     const resizedMinWidth = Number.parseFloat(resizedContent?.style.minWidth ?? "0");
     expect(resizedMinWidth).toBeGreaterThan(initialMinWidth);
+  });
+
+  it("deletes overflow tables when resizing board to smaller dimensions", async () => {
+    const { container } = render(<App />);
+
+    // Initial state should have 25 tables (5×5 grid)
+    let tableCells = container.querySelectorAll("[data-table-card]");
+    expect(tableCells).toHaveLength(25);
+
+    // Open board settings and resize to 2×2 (4 tables max)
+    const viewport = container.querySelector<HTMLElement>("[data-board-viewport]");
+    expect(viewport).not.toBeNull();
+    fireEvent.contextMenu(viewport!);
+    fireEvent.click(screen.getByRole("menuitem", { name: /board settings/i }));
+
+    const dialog = screen.getByRole("dialog", { name: /board settings/i });
+    fireEvent.change(within(dialog).getByLabelText(/rows/i), { target: { value: "2" } });
+    fireEvent.change(within(dialog).getByLabelText(/columns/i), { target: { value: "2" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /save settings/i }));
+
+    // After resize, dialog should close
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /board settings/i })).toBeNull();
+    });
+
+    // Only 4 tables should remain in the grid
+    tableCells = container.querySelectorAll("[data-table-card]");
+    expect(tableCells).toHaveLength(4);
+
+    // Verify the remaining tables are the first 4 (Table 1, 2, 3, 4) by checking they exist
+    expect(container.querySelector("[data-table-number='1'] [data-table-card]")).not.toBeNull();
+    expect(container.querySelector("[data-table-number='2'] [data-table-card]")).not.toBeNull();
+    expect(container.querySelector("[data-table-number='3'] [data-table-card]")).not.toBeNull();
+    expect(container.querySelector("[data-table-number='4'] [data-table-card]")).not.toBeNull();
+    // And verify that table 5 (first overflow table) is gone
+    expect(container.querySelector("[data-table-number='5'] [data-table-card]")).toBeNull();
   });
 });

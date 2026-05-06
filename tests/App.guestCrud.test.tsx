@@ -134,7 +134,7 @@ describe("guest CRUD flows", () => {
     fireEvent.click(screen.getByRole("button", { name: /add guest/i }));
     const dialog = screen.getByRole("dialog", { name: /add guest/i });
     fireEvent.change(within(dialog).getByLabelText(/full name/i), {
-      target: { value: "Jordan Lee" },
+      target: { value: "Rio Morales" },
     });
     fireEvent.change(within(dialog).getByLabelText(/^host$/i), {
       target: { value: "Ryan" },
@@ -147,12 +147,12 @@ describe("guest CRUD flows", () => {
     });
     fireEvent.click(within(dialog).getByRole("button", { name: /^add guest$/i }));
 
-    await screen.findByText("Jordan Lee");
+    await screen.findByText("Rio Morales");
     expect(screen.getByText("Lee Family")).not.toBeNull();
 
     await waitFor(() => {
       const stored = localStorage.getItem(GUEST_DATA_STORAGE_KEY);
-      expect(stored).toContain("Jordan Lee");
+      expect(stored).toContain("Rio Morales");
       expect(stored).toContain('"host":"Ryan"');
       expect(stored).toContain('"id":"g0"');
     });
