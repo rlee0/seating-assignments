@@ -67,12 +67,16 @@ import {
 } from "./store/localStorage";
 import { cn } from "./lib/utils";
 import {
+  createDefaultBoardState,
   EXPORT_FORMAT_VERSION,
+  getDerivedTableConfigFromPresetId,
+  isTablePresetId,
   MAX_ROUND_TABLE_CAPACITY,
   MIN_ROUND_TABLE_CAPACITY,
   TABLE_CAPACITY,
   TABLE_COUNT,
   getTableSeatCount,
+  resolvePersistedTablePresetId,
   type BoardState,
   type GuestInputRow,
   type PersistedSeatingData,
@@ -162,6 +166,7 @@ function normalizeBoardStateForImport(value: unknown): BoardState | null {
     columns?: unknown;
     newTableDefaults?: {
       labelPrefix?: unknown;
+      presetId?: unknown;
       shape?: unknown;
       roundSeatCount?: unknown;
       rectangularSideCounts?: unknown;
@@ -183,26 +188,51 @@ function normalizeBoardStateForImport(value: unknown): BoardState | null {
   if (!defaults || typeof defaults !== "object") return null;
 
   if (typeof defaults.labelPrefix !== "string") return null;
-  if (defaults.shape !== "round" && defaults.shape !== "rectangular") return null;
-  if (!Number.isInteger(defaults.roundSeatCount)) return null;
+  const derivedDefaults = (() => {
+    if (isTablePresetId(defaults.presetId)) {
+      return getDerivedTableConfigFromPresetId(defaults.presetId);
+    }
 
-  const rectangularSideCounts = parseRectangularSeatCounts(defaults.rectangularSideCounts);
-  if (!rectangularSideCounts) return null;
+    if (defaults.shape !== "round" && defaults.shape !== "rectangular") return null;
+    if (!Number.isInteger(defaults.roundSeatCount)) return null;
 
-  const roundSeatCount = defaults.roundSeatCount as number;
-  const normalizedRoundSeatCount = Math.min(
-    MAX_ROUND_TABLE_CAPACITY,
-    Math.max(MIN_ROUND_TABLE_CAPACITY, roundSeatCount)
-  );
+    const rectangularSideCounts = parseRectangularSeatCounts(defaults.rectangularSideCounts);
+    if (!rectangularSideCounts) return null;
+
+    const roundSeatCount = defaults.roundSeatCount as number;
+    const seatConfig =
+      defaults.shape === "rectangular"
+        ? { shape: "rectangular" as const, sideCounts: rectangularSideCounts }
+        : {
+            shape: "round" as const,
+            seatCount: Math.min(
+              MAX_ROUND_TABLE_CAPACITY,
+              Math.max(MIN_ROUND_TABLE_CAPACITY, roundSeatCount)
+            ),
+          };
+    const presetId = resolvePersistedTablePresetId(defaults.presetId, defaults.shape, seatConfig);
+    if (!presetId) return null;
+
+    return getDerivedTableConfigFromPresetId(presetId);
+  })();
+
+  if (!derivedDefaults) return null;
 
   return {
     rows,
     columns,
     newTableDefaults: {
       labelPrefix: defaults.labelPrefix,
-      shape: defaults.shape,
-      roundSeatCount: normalizedRoundSeatCount,
-      rectangularSideCounts,
+      presetId: derivedDefaults.presetId,
+      shape: derivedDefaults.shape,
+      roundSeatCount:
+        derivedDefaults.seatConfig.shape === "round"
+          ? derivedDefaults.seatConfig.seatCount
+          : createDefaultBoardState().newTableDefaults.roundSeatCount,
+      rectangularSideCounts:
+        derivedDefaults.seatConfig.shape === "rectangular"
+          ? derivedDefaults.seatConfig.sideCounts
+          : createDefaultBoardState().newTableDefaults.rectangularSideCounts,
     },
   };
 }
@@ -216,6 +246,7 @@ function normalizeTableStateForImport(
 
   const candidate = value as {
     id?: unknown;
+    presetId?: unknown;
     tableNumber?: unknown;
     name?: unknown;
     shape?: unknown;
@@ -245,38 +276,55 @@ function normalizeTableStateForImport(
 
   const shape =
     candidate.shape === "round" || candidate.shape === "rectangular" ? candidate.shape : null;
-  if (!shape) {
+  const derivedTableConfig = (() => {
+    if (isTablePresetId(candidate.presetId)) {
+      return getDerivedTableConfigFromPresetId(candidate.presetId);
+    }
+
+    if (!shape) {
+      return null;
+    }
+
+    const seatConfig =
+      shape === "round"
+        ? (() => {
+            const importedSeatCount =
+              candidate.seatConfig?.shape === "round" &&
+              Number.isInteger(candidate.seatConfig.seatCount)
+                ? (candidate.seatConfig.seatCount as number)
+                : candidate.guestIds.length;
+            const seatCount = Math.min(
+              MAX_ROUND_TABLE_CAPACITY,
+              Math.max(MIN_ROUND_TABLE_CAPACITY, importedSeatCount)
+            );
+            return { shape: "round" as const, seatCount };
+          })()
+        : (() => {
+            const sideCounts =
+              candidate.seatConfig?.shape === "rectangular"
+                ? parseRectangularSeatCounts(candidate.seatConfig.sideCounts)
+                : null;
+            if (!sideCounts) return null;
+            return { shape: "rectangular" as const, sideCounts };
+          })();
+
+    if (!seatConfig) {
+      return null;
+    }
+
+    const presetId = resolvePersistedTablePresetId(candidate.presetId, shape, seatConfig);
+    if (!presetId) {
+      return null;
+    }
+
+    return getDerivedTableConfigFromPresetId(presetId);
+  })();
+
+  if (!derivedTableConfig) {
     return null;
   }
 
-  const seatConfig =
-    shape === "round"
-      ? (() => {
-          const importedSeatCount =
-            candidate.seatConfig?.shape === "round" &&
-            Number.isInteger(candidate.seatConfig.seatCount)
-              ? (candidate.seatConfig.seatCount as number)
-              : candidate.guestIds.length;
-          const seatCount = Math.min(
-            MAX_ROUND_TABLE_CAPACITY,
-            Math.max(MIN_ROUND_TABLE_CAPACITY, importedSeatCount)
-          );
-          return { shape: "round" as const, seatCount };
-        })()
-      : (() => {
-          const sideCounts =
-            candidate.seatConfig?.shape === "rectangular"
-              ? parseRectangularSeatCounts(candidate.seatConfig.sideCounts)
-              : null;
-          if (!sideCounts) return null;
-          return { shape: "rectangular" as const, sideCounts };
-        })();
-
-  if (!seatConfig) {
-    return null;
-  }
-
-  const expectedSeatCount = getTableSeatCount(seatConfig);
+  const expectedSeatCount = getTableSeatCount(derivedTableConfig.seatConfig);
   const guestIds = [
     ...candidate.guestIds.slice(0, expectedSeatCount),
     ...Array<string | null>(Math.max(0, expectedSeatCount - candidate.guestIds.length)).fill(null),
@@ -317,9 +365,10 @@ function normalizeTableStateForImport(
         : `table-${tableNumber}`,
     tableNumber,
     name: candidate.name.trim().length > 0 ? candidate.name : `Table ${tableNumber}`,
-    shape,
+    presetId: derivedTableConfig.presetId,
+    shape: derivedTableConfig.shape,
     gridPosition: { row, column },
-    seatConfig,
+    seatConfig: derivedTableConfig.seatConfig,
     guestIds,
     disabledSeats,
   };
@@ -781,6 +830,11 @@ type GuestSwapPreview = {
   targetGuestId: string;
 };
 
+type TableSwapPreview = {
+  draggingTableNumber: number | null;
+  swapTargetTableNumber: number | null;
+};
+
 // ─── SeatingApp ───────────────────────────────────────────────────────────────
 
 function SeatingApp({
@@ -827,6 +881,10 @@ function SeatingApp({
   } | null>(null);
   const [guestSwapPreview, setGuestSwapPreview] = useState<GuestSwapPreview | null>(null);
   const guestSwapPreviewRef = useRef<GuestSwapPreview | null>(null);
+  const [tableSwapPreview, setTableSwapPreview] = useState<TableSwapPreview>({
+    draggingTableNumber: null,
+    swapTargetTableNumber: null,
+  });
   const [dragOverlaySnapshot, setDragOverlaySnapshot] = useState<DragOverlaySnapshot | null>(null);
   /** Tracks the latest pointer position for seat-level probe during drag-end. */
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -839,6 +897,8 @@ function SeatingApp({
   const activeDragKind: DragKind | null = activeDragIntent?.kind ?? null;
   const activeDragGuestId: string | null =
     activeDragIntent?.kind === "guest" ? activeDragIntent.guestId : null;
+  const activeDragTableNumber: number | null =
+    activeDragIntent?.kind === "table" ? activeDragIntent.tableNumber : null;
 
   // ── Other state ─────────────────────────────────────────────────────────────
   const [showWarnings, setShowWarnings] = useState(false);
@@ -1058,45 +1118,29 @@ function SeatingApp({
   }, [tableDialogState, state.tables]);
   const tableDialogInitialValues = useMemo<TableFormValues>(() => {
     if (editingTable) {
-      const sideCounts: RectangularSeatCounts =
-        editingTable.seatConfig.shape === "rectangular"
-          ? editingTable.seatConfig.sideCounts
-          : state.board.newTableDefaults.rectangularSideCounts;
       return {
         name: editingTable.name,
-        shape: editingTable.shape,
-        roundSeatCount:
-          editingTable.seatConfig.shape === "round"
-            ? editingTable.seatConfig.seatCount
-            : state.board.newTableDefaults.roundSeatCount,
-        sideCounts,
+        presetId: editingTable.presetId,
       };
     }
     return {
       name: "",
-      shape: state.board.newTableDefaults.shape,
-      roundSeatCount: state.board.newTableDefaults.roundSeatCount,
-      sideCounts: { ...state.board.newTableDefaults.rectangularSideCounts },
+      presetId: state.board.newTableDefaults.presetId,
     };
   }, [editingTable, state.board]);
   const handleSubmitTable = useCallback(
     (values: TableFormValues) => {
-      const seatConfig =
-        values.shape === "round"
-          ? { shape: "round" as const, seatCount: values.roundSeatCount }
-          : { shape: "rectangular" as const, sideCounts: values.sideCounts };
       if (tableDialogState?.mode === "edit") {
         dispatch({
           type: "UPDATE_TABLE_CONFIG",
           tableNumber: tableDialogState.tableNumber,
-          updates: { name: values.name, shape: values.shape, seatConfig },
+          updates: { name: values.name, presetId: values.presetId },
         });
       } else {
         dispatch({
           type: "CREATE_TABLE",
           name: values.name || undefined,
-          shape: values.shape,
-          seatConfig,
+          presetId: values.presetId,
         });
       }
       setTableDialogState(null);
@@ -1113,9 +1157,7 @@ function SeatingApp({
         updates: { rows: values.rows, columns: values.columns },
         newTableDefaults: {
           labelPrefix: values.labelPrefix,
-          shape: values.defaultShape,
-          roundSeatCount: values.defaultRoundSeatCount,
-          rectangularSideCounts: values.defaultSideCounts,
+          presetId: values.presetId,
         },
       });
       setBoardSettingsOpen(false);
@@ -1351,6 +1393,7 @@ function SeatingApp({
     setAutoSeatPreview(null);
     guestSwapPreviewRef.current = null;
     setGuestSwapPreview(null);
+    setTableSwapPreview({ draggingTableNumber: null, swapTargetTableNumber: null });
     setDragOverlaySnapshot(null);
     pointerRef.current = null;
     previewTargetKeyRef.current = null;
@@ -1388,6 +1431,26 @@ function SeatingApp({
       // useEffect (DOM hit-testing), not by dnd-kit collision events.
       if (intent.kind === "guest") {
         clearAutoSeatPreview();
+        return;
+      }
+
+      // For table drags, detect swap preview
+      if (intent.kind === "table") {
+        const target = resolveDropTarget(over, pointerRef.current);
+        if (target?.type === "table") {
+          // Detect table swap scenario
+          const targetTable = state.tables.find((t) => t.tableNumber === target.tableNumber);
+          if (targetTable) {
+            setTableSwapPreview({
+              draggingTableNumber: intent.tableNumber,
+              swapTargetTableNumber: target.tableNumber,
+            });
+            return;
+          }
+        }
+        // Clear preview if not over a table
+        setTableSwapPreview({ draggingTableNumber: null, swapTargetTableNumber: null });
+        clearAllPreview();
         return;
       }
 
@@ -1439,6 +1502,7 @@ function SeatingApp({
       setAutoSeatPreview(null);
       guestSwapPreviewRef.current = null;
       setGuestSwapPreview(null);
+      setTableSwapPreview({ draggingTableNumber: null, swapTargetTableNumber: null });
       setDragOverlaySnapshot(null);
       const ptr = pointerRef.current;
       pointerRef.current = null;
@@ -1799,8 +1863,10 @@ function SeatingApp({
             <TableBoard
               activeDragKind={activeDragKind}
               activeDragGuestId={activeDragGuestId}
+              activeDragTableNumber={activeDragTableNumber}
               autoSeatPreview={autoSeatPreview}
               guestSwapPreview={guestSwapPreview}
+              tableSwapPreview={tableSwapPreview}
               zoom={boardZoom}
               onEditGuest={handleEditGuest}
               onDeleteGuest={handleDeleteGuest}
