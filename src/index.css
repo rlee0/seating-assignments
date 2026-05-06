@@ -103,8 +103,24 @@
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
 
-  --table-seat-empty-bg: var(--muted);
-  --table-seat-empty-border: color-mix(in oklab, var(--border) 86%, var(--foreground) 14%);
+  --table-seat-empty-bg-faded: color-mix(in oklab, var(--muted) 72%, var(--background) 28%);
+  --table-seat-empty-border-faded: color-mix(
+    in oklab,
+    var(--border) 92%,
+    var(--foreground) 8%
+  );
+  --table-seat-empty-bg-default: var(--muted);
+  --table-seat-empty-border-default: color-mix(
+    in oklab,
+    var(--border) 86%,
+    var(--foreground) 14%
+  );
+  --table-seat-empty-bg-accented: color-mix(in oklab, var(--muted) 82%, var(--accent) 18%);
+  --table-seat-empty-border-accented: color-mix(
+    in oklab,
+    var(--border) 62%,
+    var(--foreground) 38%
+  );
   --table-seat-disabled-bg-a: color-mix(in oklab, var(--muted) 86%, var(--background) 14%);
   --table-seat-disabled-bg-b: color-mix(in oklab, var(--muted) 72%, var(--background) 28%);
   --table-seat-disabled-border: color-mix(in oklab, var(--border) 75%, var(--foreground) 25%);
@@ -204,8 +220,20 @@
   --sidebar-border: oklch(1 0 0 / 12%);
   --sidebar-ring: oklch(0.556 0 0);
 
-  --table-seat-empty-bg: color-mix(in oklab, var(--card) 84%, var(--muted) 16%);
-  --table-seat-empty-border: color-mix(in oklab, var(--border) 84%, var(--foreground) 16%);
+  --table-seat-empty-bg-faded: color-mix(in oklab, var(--card) 88%, var(--muted) 12%);
+  --table-seat-empty-border-faded: color-mix(in oklab, var(--border) 90%, var(--foreground) 10%);
+  --table-seat-empty-bg-default: color-mix(in oklab, var(--card) 84%, var(--muted) 16%);
+  --table-seat-empty-border-default: color-mix(
+    in oklab,
+    var(--border) 84%,
+    var(--foreground) 16%
+  );
+  --table-seat-empty-bg-accented: color-mix(in oklab, var(--card) 78%, var(--primary) 22%);
+  --table-seat-empty-border-accented: color-mix(
+    in oklab,
+    var(--border) 62%,
+    var(--foreground) 38%
+  );
   --table-seat-disabled-bg-a: color-mix(in oklab, var(--muted) 82%, var(--card) 18%);
   --table-seat-disabled-bg-b: color-mix(in oklab, var(--muted) 66%, var(--card) 34%);
   --table-seat-disabled-border: color-mix(in oklab, var(--border) 80%, var(--foreground) 20%);
