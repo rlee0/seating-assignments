@@ -187,7 +187,7 @@ export default function Sidebar({
             <Users className="h-3.5 w-3.5" aria-hidden="true" />
             <span>Guests</span>
           </p>
-          <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={onAddGuest}>
+          <Button type="button" variant="ghost" size="sm" onClick={onAddGuest}>
             <UserPlus className="h-3.5 w-3.5" aria-hidden="true" />
             <span>Add Guest</span>
           </Button>
@@ -200,7 +200,7 @@ export default function Sidebar({
             />
             <Input
               type="search"
-              className="h-8 pl-8 text-xs"
+              className="pl-8"
               data-app-search="true"
               placeholder="Search guests, parties, circles"
               value={searchQuery}

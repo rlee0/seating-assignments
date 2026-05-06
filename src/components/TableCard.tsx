@@ -15,10 +15,11 @@ import {
   Trash2,
   UserMinus,
 } from "lucide-react";
+import type { GuestSwapPreview, TableSwapPreview } from "./TableBoard";
+import { useEffect, useRef, useState } from "react";
 
 import { CSS } from "@dnd-kit/utilities";
 import GuestChip from "./GuestChip";
-import type { GuestSwapPreview } from "./TableBoard";
 import type { TableState } from "../types";
 import { cn } from "../lib/utils";
 import { getTableSeatCount } from "../types";
@@ -30,7 +31,9 @@ interface Props {
   table: TableState;
   activeDragKind: "party" | "guest" | "circle" | "table" | null;
   activeDragGuestId: string | null;
+  activeDragTableNumber: number | null;
   guestSwapPreview: GuestSwapPreview | null;
+  tableSwapPreview: TableSwapPreview;
   onEditGuest: (guestId: string) => void;
   onDeleteGuest: (guestId: string) => void;
   onEditTable: (tableNumber: number) => void;
@@ -39,6 +42,32 @@ interface Props {
   previewSeatKinds?: Array<"added" | "changed" | "deleted" | null>;
   isPreviewMode?: boolean;
   hasTablePreviewChanges?: boolean;
+}
+
+type EmptySeatVacancyBucket = "high-vacancy" | "balanced" | "low-vacancy";
+type EmptySeatIntensity = "faded" | "default" | "accented";
+
+const HIGH_VACANCY_EMPTY_RATIO = 0.55;
+const LOW_VACANCY_EMPTY_RATIO = 0.2;
+
+function resolveEmptySeatVacancyBucket(
+  enabledSeatCount: number,
+  occupiedEnabledSeatCount: number
+): EmptySeatVacancyBucket {
+  if (enabledSeatCount <= 0) return "balanced";
+
+  const emptySeatCount = Math.max(0, enabledSeatCount - occupiedEnabledSeatCount);
+  const emptyRatio = emptySeatCount / enabledSeatCount;
+
+  if (emptyRatio >= HIGH_VACANCY_EMPTY_RATIO) return "high-vacancy";
+  if (emptyRatio <= LOW_VACANCY_EMPTY_RATIO) return "low-vacancy";
+  return "balanced";
+}
+
+function getEmptySeatIntensity(bucket: EmptySeatVacancyBucket): EmptySeatIntensity {
+  if (bucket === "high-vacancy") return "faded";
+  if (bucket === "low-vacancy") return "accented";
+  return "default";
 }
 
 function SeatSlot({
@@ -51,6 +80,7 @@ function SeatSlot({
   guestSwapPreview,
   isPreviewMode,
   previewSeatKind,
+  emptySeatIntensity,
   isDisabled,
   isLocked,
   onToggleDisabled,
@@ -69,6 +99,7 @@ function SeatSlot({
   guestSwapPreview: GuestSwapPreview | null;
   isPreviewMode: boolean;
   previewSeatKind: "added" | "changed" | "deleted" | null;
+  emptySeatIntensity: EmptySeatIntensity;
   isDisabled: boolean;
   isLocked: boolean;
   onToggleDisabled: () => void;
@@ -97,6 +128,14 @@ function SeatSlot({
   });
 
   const isSeatOver = !isDisabled && activeDragKind === "guest" && droppable.isOver;
+  const shouldApplyEmptySeatIntensity =
+    !isDisabled && isVisuallyEmpty && !isSeatOver && previewSeatKind === null;
+  const emptySeatClass =
+    emptySeatIntensity === "faded"
+      ? "border border-dashed border-(--table-seat-empty-border-faded) bg-(--table-seat-empty-bg-faded)"
+      : emptySeatIntensity === "accented"
+        ? "border-2 border-solid border-(--table-seat-empty-border-accented) bg-(--table-seat-empty-bg-accented)"
+        : "border-2 border-dashed border-(--table-seat-empty-border-default) bg-(--table-seat-empty-bg-default)";
   const isSwapTargetPreview =
     !isPreviewMode &&
     activeDragKind === "guest" &&
@@ -134,12 +173,13 @@ function SeatSlot({
       data-seat-slot
       data-guest-id={guestId ?? ""}
       data-disabled={isDisabled || undefined}
+      data-empty-seat-intensity={shouldApplyEmptySeatIntensity ? emptySeatIntensity : undefined}
       className={cn(
         "relative flex h-4.75 w-16 shrink-0 items-center overflow-hidden rounded-md transition-[background-color,border-color,box-shadow] duration-100 box-border",
         isDisabled
           ? "border bg-[repeating-linear-gradient(135deg,var(--table-seat-disabled-bg-a),var(--table-seat-disabled-bg-a)_3px,var(--table-seat-disabled-bg-b)_3px,var(--table-seat-disabled-bg-b)_8px)] border-(--table-seat-disabled-border)"
           : isVisuallyEmpty
-            ? "border-2 border-dashed border-(--table-seat-empty-border) bg-(--table-seat-empty-bg)"
+            ? emptySeatClass
             : "overflow-hidden bg-transparent",
         isSeatOver &&
           (isVisuallyEmpty
@@ -258,7 +298,9 @@ export default function TableCard({
   table,
   activeDragKind,
   activeDragGuestId,
+  activeDragTableNumber,
   guestSwapPreview,
+  tableSwapPreview,
   onEditGuest,
   onDeleteGuest,
   onEditTable,
@@ -283,6 +325,68 @@ export default function TableCard({
     data: { kind: "table", tableNumber: table.tableNumber, name: table.name, origin: "table" },
     animateLayoutChanges: ({ isSorting }) => isSorting,
   });
+
+  // Track grid position for swap animation
+  const previousGridPosRef = useRef(table.gridPosition);
+  const [positionTransform, setPositionTransform] = useState<{ x: number; y: number } | null>(null);
+
+  // Constants for grid cell sizing (must match TableBoard)
+  const BASE_CELL_WIDTH_REM = 26;
+  const BASE_CELL_HEIGHT_REM = 10;
+  const DEFAULT_GRID_GAP_REM = 0.625;
+  const DENSE_GRID_GAP_REM = 0.375;
+  const useDenseGap = state.board.rows > 5 || state.board.columns > 5;
+  const gridGapRem = useDenseGap ? DENSE_GRID_GAP_REM : DEFAULT_GRID_GAP_REM;
+
+  // Calculate pixel offsets for grid position changes
+  useEffect(() => {
+    const prev = previousGridPosRef.current;
+    const curr = table.gridPosition;
+
+    // Only animate if position actually changed and not during drag
+    if (prev.row === curr.row && prev.column === curr.column) {
+      setPositionTransform(null);
+      return;
+    }
+
+    if (isDragging) {
+      previousGridPosRef.current = curr;
+      return;
+    }
+
+    // Calculate pixel offset from previous to current position
+    const rowDiff = curr.row - prev.row;
+    const colDiff = curr.column - prev.column;
+
+    const pxPerRow = BASE_CELL_HEIGHT_REM * 16 + gridGapRem * 16; // 16 = rem to px
+    const pxPerCol = BASE_CELL_WIDTH_REM * 16 + gridGapRem * 16;
+
+    const offsetY = rowDiff * pxPerRow;
+    const offsetX = colDiff * pxPerCol;
+
+    // Set the initial transform to move FROM the old position (visual inversion)
+    setPositionTransform({ x: -offsetX, y: -offsetY });
+    previousGridPosRef.current = curr;
+
+    // Trigger animation by clearing the transform
+    const animationFrame = requestAnimationFrame(() => {
+      setPositionTransform(null);
+    });
+
+    return () => {
+      cancelAnimationFrame(animationFrame);
+    };
+  }, [table.gridPosition, isDragging, state.board.rows, state.board.columns, gridGapRem]);
+
+  // Apply position transform with animation
+  const positionStyle = positionTransform
+    ? {
+        transform: `translate(${positionTransform.x}px, ${positionTransform.y}px)`,
+        transition: "none",
+      }
+    : {
+        transition: "transform 300ms ease-out",
+      };
 
   const containerListeners = {
     ...listeners,
@@ -310,6 +414,16 @@ export default function TableCard({
   const occupancy = seatedGuestIds.length;
   const totalCapacity = getTableSeatCount(table.seatConfig);
   const effectiveCapacity = totalCapacity - disabledSeatsSet.size;
+  const occupiedEnabledSeatCount = seated.reduce(
+    (count, guestId, seatIndex) =>
+      guestId !== null && !disabledSeatsSet.has(seatIndex) ? count + 1 : count,
+    0
+  );
+  const emptySeatVacancyBucket = resolveEmptySeatVacancyBucket(
+    effectiveCapacity,
+    occupiedEnabledSeatCount
+  );
+  const emptySeatIntensity = getEmptySeatIntensity(emptySeatVacancyBucket);
   const hasDisabledEmptySeats = table.guestIds.some(
     (guestId, seatIndex) => guestId === null && disabledSeatsSet.has(seatIndex)
   );
@@ -341,8 +455,14 @@ export default function TableCard({
   const centerTrackRem = Math.max(8, horizontalSpanRem - seatTrackRem * 2 - seatGapRem * 2);
   const middleRowTemplate = `${seatTrackRem}rem ${centerTrackRem}rem ${seatTrackRem}rem`;
 
+  const isSwapTarget =
+    activeDragTableNumber !== null &&
+    tableSwapPreview.swapTargetTableNumber === table.tableNumber &&
+    activeDragKind === "table";
+
   const cardClass = cn(
     "flex min-h-0 cursor-grab flex-col gap-1.5 rounded-lg border border-border bg-card p-2.5 transition-[border-color,background,box-shadow] duration-150 active:cursor-grabbing",
+    "w-full",
     "hover:border-(--card-hover-border) focus-within:border-(--card-hover-border)",
     isOver &&
       activeDragKind !== "table" &&
@@ -353,6 +473,7 @@ export default function TableCard({
       activeDragKind !== "table" &&
       !isGuestDrag &&
       "border-dashed border-muted-foreground bg-(--card-hover-bg)",
+    isSwapTarget && "ring-2 ring-blue-400 ring-opacity-75",
     isDragging && !hasTablePreviewChanges && "cursor-grabbing opacity-0",
     isDragging && hasTablePreviewChanges && "cursor-grabbing opacity-60",
     hasTablePreviewChanges && "border border-(--table-preview-border) bg-(--table-preview-bg)"
@@ -366,8 +487,8 @@ export default function TableCard({
   return (
     <div
       ref={setSortableNodeRef}
-      style={sortableStyle}
-      className="min-w-0"
+      style={{ ...sortableStyle, ...positionStyle }}
+      className="min-w-0 w-full"
       data-table-drag-root
       data-table-number={table.tableNumber}>
       <ContextMenu>
@@ -391,6 +512,7 @@ export default function TableCard({
                   guestSwapPreview={guestSwapPreview}
                   isPreviewMode={isPreviewMode}
                   previewSeatKind={previewSeatKinds?.[seatIndex] ?? null}
+                  emptySeatIntensity={emptySeatIntensity}
                   isDisabled={disabledSeatsSet.has(seatIndex)}
                   isLocked={guestId !== null && lockedSet.has(guestId)}
                   onToggleDisabled={() =>
@@ -437,18 +559,21 @@ export default function TableCard({
 
               if (table.seatConfig.shape === "round") {
                 const seatCount = seated.length;
-                const radiusPercent = seatCount <= 4 ? 34 : seatCount <= 8 ? 39 : 42;
+                const radiusPercent =
+                  seatCount <= 4 ? 30 : seatCount <= 6 ? 34 : seatCount <= 10 ? 38 : 38;
 
                 return (
                   <div
-                    className="relative min-h-44 px-1.5 py-1.5"
+                    className="relative w-full h-44 px-1.5 py-1.5"
                     data-table-card-body
                     data-table-shape="round">
                     {seated.map((guestId, seatIndex) => {
                       const angle =
                         -Math.PI / 2 + (Math.PI * 2 * seatIndex) / Math.max(1, seatCount);
-                      const x = 50 + radiusPercent * Math.cos(angle);
-                      const y = 50 + radiusPercent * Math.sin(angle);
+                      const radiusX = radiusPercent * 0.95;
+                      const radiusY = radiusPercent * 0.9;
+                      const x = 50 + radiusX * Math.cos(angle);
+                      const y = 50 + radiusY * Math.sin(angle);
 
                       return (
                         <div
@@ -468,7 +593,7 @@ export default function TableCard({
                       data-table-center-label
                       data-table-shape="round"
                       className={cn(
-                        "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 border border-border/80 bg-background/88 shadow-[inset_0_1px_0_rgba(255,255,255,0.35)]",
+                        "absolute z-10 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 border border-border/80 bg-background/88 shadow-[inset_0_1px_0_rgba(255,255,255,0.35)]",
                         isLargeRoundTable
                           ? "w-36 rounded-full px-5 py-3.5"
                           : "w-32 rounded-full px-4 py-3"
@@ -481,7 +606,7 @@ export default function TableCard({
 
               return (
                 <div
-                  className="grid min-h-44 grid-rows-[auto_minmax(0,1fr)_auto] gap-2.5 px-1.5 py-1.5"
+                  className="grid h-44 w-full content-center grid-rows-[auto_auto_auto] gap-4 px-1.5 py-1.5"
                   data-table-card-body
                   data-table-shape="rectangular">
                   {/* Top seats */}
@@ -508,7 +633,7 @@ export default function TableCard({
                     <div
                       data-table-center-label
                       data-table-shape="rectangular"
-                      className="mx-auto flex min-h-16 w-full items-center justify-center rounded-xl border border-border/80 bg-background/88 px-4 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.35)]">
+                      className="mx-auto flex min-h-16 w-full items-center justify-center rounded-md border border-border/80 bg-background/88 px-4 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.35)]">
                       {tableLabelContent}
                     </div>
                     {rightCount > 0 && (

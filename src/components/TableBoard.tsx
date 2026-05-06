@@ -32,11 +32,18 @@ export interface GuestSwapPreview {
   targetGuestId: string;
 }
 
+export interface TableSwapPreview {
+  draggingTableNumber: number | null;
+  swapTargetTableNumber: number | null;
+}
+
 interface Props {
   activeDragKind: "party" | "guest" | "circle" | "table" | null;
   activeDragGuestId: string | null;
+  activeDragTableNumber: number | null;
   autoSeatPreview: AutoSeatPreview | null;
   guestSwapPreview: GuestSwapPreview | null;
+  tableSwapPreview: TableSwapPreview;
   zoom: number;
   onEditGuest: (guestId: string) => void;
   onDeleteGuest: (guestId: string) => void;
@@ -45,8 +52,8 @@ interface Props {
   onBoardSettings: () => void;
 }
 
-const BASE_BOARD_CELL_WIDTH_REM = 20;
-const BASE_BOARD_CELL_HEIGHT_REM = 12;
+const BASE_BOARD_CELL_WIDTH_REM = 26;
+const BASE_BOARD_CELL_HEIGHT_REM = 10;
 const DEFAULT_GRID_GAP_REM = 0.625;
 const DENSE_GRID_GAP_REM = 0.375;
 
@@ -58,11 +65,13 @@ function BoardCell({
   row,
   column,
   activeDragKind,
+  compact = false,
   children,
 }: {
   row: number;
   column: number;
   activeDragKind: "party" | "guest" | "circle" | "table" | null;
+  compact?: boolean;
   children?: ReactNode;
 }) {
   const cellId = `cell-${row}-${column}`;
@@ -77,7 +86,8 @@ function BoardCell({
       data-board-cell-id={cellId}
       data-board-cell
       className={cn(
-        "relative min-h-48 rounded-md border border-dashed border-border/70 p-1",
+        "relative flex items-center justify-center min-h-40 rounded-md border border-dashed border-border/70 p-0",
+        compact && "self-start min-h-0",
         isOver && "border-(--table-drop-border) bg-(--table-drop-bg)"
       )}>
       {children}
@@ -101,8 +111,10 @@ function computePreviewSeatKinds(
 export default function TableBoard({
   activeDragKind,
   activeDragGuestId,
+  activeDragTableNumber,
   autoSeatPreview,
   guestSwapPreview,
+  tableSwapPreview,
   zoom,
   onEditGuest,
   onDeleteGuest,
@@ -203,12 +215,15 @@ export default function TableBoard({
                             key={getPositionKey(row, column)}
                             row={row}
                             column={column}
-                            activeDragKind={activeDragKind}>
+                            activeDragKind={activeDragKind}
+                            compact>
                             <TableCard
                               table={table}
                               activeDragKind={activeDragKind}
                               activeDragGuestId={activeDragGuestId}
+                              activeDragTableNumber={activeDragTableNumber}
                               guestSwapPreview={guestSwapPreview}
+                              tableSwapPreview={tableSwapPreview}
                               onEditGuest={onEditGuest}
                               onDeleteGuest={onDeleteGuest}
                               onEditTable={onEditTable}
