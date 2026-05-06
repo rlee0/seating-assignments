@@ -4,11 +4,19 @@ import type {
   Host,
   NewTableDefaults,
   SeatingState,
+  TablePresetId,
   TableSeatConfig,
-  TableState,
   TableShape,
+  TableState,
 } from "../types";
-import { TABLE_CAPACITY, createDefaultBoardState, getTableSeatCount } from "../types";
+import {
+  TABLE_CAPACITY,
+  createDefaultBoardState,
+  getDefaultTablePresetId,
+  getDerivedTableConfigFromPresetId,
+  getTableSeatCount,
+  inferTablePresetId,
+} from "../types";
 
 type AssignmentMode = "single-table" | "circle-overflow";
 type AutoAssignTargetScope = "target-only" | "target-and-adjacent";
@@ -65,6 +73,7 @@ export type SeatingAction =
     }
   | {
       type: "CREATE_TABLE";
+      presetId?: TablePresetId;
       name?: string;
       shape?: TableShape;
       gridPosition?: GridPosition;
@@ -74,6 +83,7 @@ export type SeatingAction =
       type: "UPDATE_TABLE_CONFIG";
       tableNumber: number;
       updates: {
+        presetId?: TablePresetId;
         name?: string;
         shape?: TableShape;
         gridPosition?: GridPosition;
@@ -89,21 +99,71 @@ function createEmptySeatSlots(capacity = TABLE_CAPACITY): Array<string | null> {
   return Array<string | null>(capacity).fill(null);
 }
 
-function createSeatConfigFromDefaults(
-  board: BoardState,
-  shape: TableShape = board.newTableDefaults.shape
-): TableSeatConfig {
-  if (shape === "rectangular") {
-    return {
-      shape,
-      sideCounts: { ...board.newTableDefaults.rectangularSideCounts },
-    };
+function resolveTablePresetId(options: {
+  presetId?: TablePresetId;
+  shape?: TableShape;
+  seatConfig?: TableSeatConfig;
+  fallbackPresetId: TablePresetId;
+}): TablePresetId {
+  if (options.presetId) {
+    return options.presetId;
   }
 
-  return {
-    shape,
-    seatCount: board.newTableDefaults.roundSeatCount,
-  };
+  if (options.seatConfig) {
+    return (
+      inferTablePresetId(options.shape ?? options.seatConfig.shape, options.seatConfig) ??
+      getDefaultTablePresetId(options.shape ?? options.seatConfig.shape)
+    );
+  }
+
+  if (options.shape) {
+    return getDefaultTablePresetId(options.shape);
+  }
+
+  return options.fallbackPresetId;
+}
+
+function createTableConfigFromDefaults(
+  board: BoardState,
+  presetId: TablePresetId = board.newTableDefaults.presetId
+): Pick<TableState, "presetId" | "shape" | "seatConfig"> {
+  return getDerivedTableConfigFromPresetId(presetId);
+}
+
+function resolveBoardDefaultPresetId(
+  board: BoardState,
+  newTableDefaults?: Partial<NewTableDefaults>
+): TablePresetId {
+  if (newTableDefaults?.presetId) {
+    return newTableDefaults.presetId;
+  }
+
+  const shape = newTableDefaults?.shape ?? board.newTableDefaults.shape;
+  const seatConfig: TableSeatConfig =
+    shape === "rectangular"
+      ? {
+          shape: "rectangular",
+          sideCounts: {
+            top:
+              newTableDefaults?.rectangularSideCounts?.top ??
+              board.newTableDefaults.rectangularSideCounts.top,
+            right:
+              newTableDefaults?.rectangularSideCounts?.right ??
+              board.newTableDefaults.rectangularSideCounts.right,
+            bottom:
+              newTableDefaults?.rectangularSideCounts?.bottom ??
+              board.newTableDefaults.rectangularSideCounts.bottom,
+            left:
+              newTableDefaults?.rectangularSideCounts?.left ??
+              board.newTableDefaults.rectangularSideCounts.left,
+          },
+        }
+      : {
+          shape: "round",
+          seatCount: newTableDefaults?.roundSeatCount ?? board.newTableDefaults.roundSeatCount,
+        };
+
+  return inferTablePresetId(shape, seatConfig) ?? getDefaultTablePresetId(shape);
 }
 
 function getDefaultTableName(board: BoardState, tableNumber: number): string {
@@ -164,11 +224,50 @@ function findFirstOpenGridPosition(board: BoardState, tables: TableState[]): Gri
   return null;
 }
 
+function reflowTablesOnBoardResize(
+  tables: TableState[],
+  nextBoard: BoardState
+): { tables: TableState[]; overflowTables: TableState[] } {
+  const sortedTables = sortTablesByGridPosition(tables);
+  const repacked: TableState[] = [];
+  const overflow: TableState[] = [];
+  const occupied = new Set<string>();
+
+  for (const table of sortedTables) {
+    let placed = false;
+
+    // Find the first unoccupied grid cell in row-major order (row 0→N, column 0→M)
+    for (let row = 0; row < nextBoard.rows && !placed; row += 1) {
+      for (let column = 0; column < nextBoard.columns && !placed; column += 1) {
+        const positionKey = getGridPositionKey({ row, column });
+        if (!occupied.has(positionKey)) {
+          // Assign table to this cell
+          repacked.push({
+            ...table,
+            gridPosition: { row, column },
+          });
+          occupied.add(positionKey);
+          placed = true;
+        }
+      }
+    }
+
+    if (!placed) {
+      overflow.push(table);
+    }
+  }
+
+  return { tables: repacked, overflowTables: overflow };
+}
+
 function updateBoardState(
   board: BoardState,
   updates: Partial<Pick<BoardState, "rows" | "columns">>,
   newTableDefaults?: Partial<NewTableDefaults>
 ): BoardState {
+  const presetId = resolveBoardDefaultPresetId(board, newTableDefaults);
+  const derivedDefaults = createTableConfigFromDefaults(board, presetId);
+
   return {
     rows:
       Number.isInteger(updates.rows) && (updates.rows ?? 0) > 0
@@ -184,25 +283,29 @@ function updateBoardState(
         newTableDefaults.labelPrefix.trim().length > 0
           ? newTableDefaults.labelPrefix.trim()
           : board.newTableDefaults.labelPrefix,
-      shape: newTableDefaults?.shape ?? board.newTableDefaults.shape,
+      presetId,
+      shape: derivedDefaults.shape,
       roundSeatCount:
-        Number.isInteger(newTableDefaults?.roundSeatCount) &&
-        (newTableDefaults?.roundSeatCount ?? 0) > 0
-          ? (newTableDefaults?.roundSeatCount as number)
+        derivedDefaults.seatConfig.shape === "round"
+          ? derivedDefaults.seatConfig.seatCount
           : board.newTableDefaults.roundSeatCount,
       rectangularSideCounts: {
         top:
-          newTableDefaults?.rectangularSideCounts?.top ??
-          board.newTableDefaults.rectangularSideCounts.top,
+          derivedDefaults.seatConfig.shape === "rectangular"
+            ? derivedDefaults.seatConfig.sideCounts.top
+            : board.newTableDefaults.rectangularSideCounts.top,
         right:
-          newTableDefaults?.rectangularSideCounts?.right ??
-          board.newTableDefaults.rectangularSideCounts.right,
+          derivedDefaults.seatConfig.shape === "rectangular"
+            ? derivedDefaults.seatConfig.sideCounts.right
+            : board.newTableDefaults.rectangularSideCounts.right,
         bottom:
-          newTableDefaults?.rectangularSideCounts?.bottom ??
-          board.newTableDefaults.rectangularSideCounts.bottom,
+          derivedDefaults.seatConfig.shape === "rectangular"
+            ? derivedDefaults.seatConfig.sideCounts.bottom
+            : board.newTableDefaults.rectangularSideCounts.bottom,
         left:
-          newTableDefaults?.rectangularSideCounts?.left ??
-          board.newTableDefaults.rectangularSideCounts.left,
+          derivedDefaults.seatConfig.shape === "rectangular"
+            ? derivedDefaults.seatConfig.sideCounts.left
+            : board.newTableDefaults.rectangularSideCounts.left,
       },
     },
   };
@@ -291,20 +394,27 @@ function createTableState(
   tableNumber: number,
   board: BoardState,
   options?: {
+    presetId?: TablePresetId;
     shape?: TableShape;
     seatConfig?: TableSeatConfig;
     gridPosition?: GridPosition;
     name?: string;
   }
 ): TableState {
-  const shape = options?.shape ?? board.newTableDefaults.shape;
-  const seatConfig = options?.seatConfig ?? createSeatConfigFromDefaults(board, shape);
+  const presetId = resolveTablePresetId({
+    presetId: options?.presetId,
+    shape: options?.shape,
+    seatConfig: options?.seatConfig,
+    fallbackPresetId: board.newTableDefaults.presetId,
+  });
+  const { shape, seatConfig } = createTableConfigFromDefaults(board, presetId);
   const tableIndex = tableNumber - 1;
 
   return {
     id: `table-${tableNumber}`,
     tableNumber,
     name: options?.name ?? getDefaultTableName(board, tableNumber),
+    presetId,
     shape,
     gridPosition: options?.gridPosition ?? {
       row: Math.floor(tableIndex / board.columns),
@@ -1358,16 +1468,19 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
   switch (action.type) {
     case "UPDATE_BOARD_CONFIG": {
       const nextBoard = updateBoardState(state.board, action.updates, action.newTableDefaults);
-      const allTablesFit = state.tables.every((table) =>
-        isGridPositionWithinBoard(table.gridPosition, nextBoard)
+      const { tables: nextTables, overflowTables } = reflowTablesOnBoardResize(
+        state.tables,
+        nextBoard
       );
-      if (!allTablesFit) {
-        return state;
-      }
+      const extractedGuests = overflowTables.flatMap((t) =>
+        t.guestIds.filter((id): id is string => id !== null)
+      );
 
       return {
         ...state,
         board: nextBoard,
+        tables: nextTables,
+        unassigned: [...state.unassigned, ...extractedGuests],
       };
     }
 
@@ -1387,6 +1500,7 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
           0
         ) + 1;
       const nextTable = createTableState(nextTableNumber, state.board, {
+        presetId: action.presetId,
         name: action.name,
         shape: action.shape,
         gridPosition,
@@ -1408,12 +1522,13 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       }
 
       const currentTable = state.tables[tableIndex];
-      const nextShape = action.updates.shape ?? currentTable.shape;
-      const nextSeatConfig =
-        action.updates.seatConfig ??
-        (action.updates.shape
-          ? createSeatConfigFromDefaults(state.board, nextShape)
-          : currentTable.seatConfig);
+      const nextPresetId = resolveTablePresetId({
+        presetId: action.updates.presetId,
+        shape: action.updates.shape,
+        seatConfig: action.updates.seatConfig,
+        fallbackPresetId: currentTable.presetId,
+      });
+      const nextDerivedConfig = createTableConfigFromDefaults(state.board, nextPresetId);
       const nextGridPosition = action.updates.gridPosition ?? currentTable.gridPosition;
 
       if (!isGridPositionWithinBoard(nextGridPosition, state.board)) {
@@ -1427,10 +1542,11 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
         {
           ...currentTable,
           name: action.updates.name ?? currentTable.name,
-          shape: nextShape,
+          presetId: nextPresetId,
+          shape: nextDerivedConfig.shape,
           gridPosition: nextGridPosition,
         },
-        nextSeatConfig
+        nextDerivedConfig.seatConfig
       );
       const nextTables = sortTablesByGridPosition(
         state.tables.map((table, index) => (index === tableIndex ? resizedTable.table : table))
