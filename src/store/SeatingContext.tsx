@@ -10,10 +10,11 @@ import React, {
 } from "react";
 import type { BoardState, PersistedSeatingData, SeatingState, TableState } from "../types";
 import {
-  TABLE_CAPACITY,
   createDefaultBoardState,
-  createDefaultTableSeatConfig,
+  getDerivedTableConfigFromPresetId,
   getTableSeatCount,
+  isTablePresetId,
+  resolvePersistedTablePresetId,
 } from "../types";
 import { seatingReducer, createInitialState, type SeatingAction } from "./reducer";
 import {
@@ -96,10 +97,10 @@ function isSeatValue(value: unknown): value is string | null {
   return value === null || typeof value === "string";
 }
 
-function normalizeBoardState(board: SeatingState["board"] | undefined): BoardState {
+function normalizeBoardState(board: SeatingState["board"] | undefined): BoardState | null {
   const fallback = createDefaultBoardState();
 
-  if (!board) return fallback;
+  if (!board) return null;
 
   const rows = Number.isInteger(board.rows) && board.rows > 0 ? board.rows : fallback.rows;
   const columns =
@@ -109,39 +110,85 @@ function normalizeBoardState(board: SeatingState["board"] | undefined): BoardSta
     board.newTableDefaults.labelPrefix.trim().length > 0
       ? board.newTableDefaults.labelPrefix.trim()
       : fallback.newTableDefaults.labelPrefix;
-  const shape =
-    board.newTableDefaults?.shape === "rectangular"
-      ? "rectangular"
-      : fallback.newTableDefaults.shape;
-  const roundSeatCount =
-    Number.isInteger(board.newTableDefaults?.roundSeatCount) &&
-    (board.newTableDefaults?.roundSeatCount ?? 0) > 0
-      ? (board.newTableDefaults?.roundSeatCount as number)
-      : fallback.newTableDefaults.roundSeatCount;
-  const rectangularSideCounts =
-    board.newTableDefaults?.rectangularSideCounts ??
-    fallback.newTableDefaults.rectangularSideCounts;
+  const derivedDefaults = (() => {
+    if (isTablePresetId(board.newTableDefaults?.presetId)) {
+      return getDerivedTableConfigFromPresetId(board.newTableDefaults.presetId);
+    }
+
+    const shape =
+      board.newTableDefaults?.shape === "rectangular"
+        ? "rectangular"
+        : board.newTableDefaults?.shape === "round"
+          ? "round"
+          : null;
+    if (!shape) return null;
+
+    const roundSeatCount =
+      Number.isInteger(board.newTableDefaults?.roundSeatCount) &&
+      (board.newTableDefaults?.roundSeatCount ?? 0) > 0
+        ? (board.newTableDefaults.roundSeatCount as number)
+        : null;
+    const rectangularSideCounts = board.newTableDefaults?.rectangularSideCounts;
+    const seatConfig =
+      shape === "rectangular"
+        ? rectangularSideCounts &&
+          Number.isInteger(rectangularSideCounts.top) &&
+          Number.isInteger(rectangularSideCounts.right) &&
+          Number.isInteger(rectangularSideCounts.bottom) &&
+          Number.isInteger(rectangularSideCounts.left)
+          ? {
+              shape: "rectangular" as const,
+              sideCounts: {
+                top: rectangularSideCounts.top,
+                right: rectangularSideCounts.right,
+                bottom: rectangularSideCounts.bottom,
+                left: rectangularSideCounts.left,
+              },
+            }
+          : null
+        : roundSeatCount !== null
+          ? { shape: "round" as const, seatCount: roundSeatCount }
+          : null;
+    if (!seatConfig) return null;
+
+    const presetId = resolvePersistedTablePresetId(
+      board.newTableDefaults?.presetId,
+      shape,
+      seatConfig
+    );
+    return presetId ? getDerivedTableConfigFromPresetId(presetId) : null;
+  })();
+
+  if (!derivedDefaults) return null;
 
   return {
     rows,
     columns,
     newTableDefaults: {
       labelPrefix,
-      shape,
-      roundSeatCount,
+      presetId: derivedDefaults.presetId,
+      shape: derivedDefaults.shape,
+      roundSeatCount:
+        derivedDefaults.seatConfig.shape === "round"
+          ? derivedDefaults.seatConfig.seatCount
+          : fallback.newTableDefaults.roundSeatCount,
       rectangularSideCounts: {
-        top: Number.isInteger(rectangularSideCounts.top)
-          ? rectangularSideCounts.top
-          : fallback.newTableDefaults.rectangularSideCounts.top,
-        right: Number.isInteger(rectangularSideCounts.right)
-          ? rectangularSideCounts.right
-          : fallback.newTableDefaults.rectangularSideCounts.right,
-        bottom: Number.isInteger(rectangularSideCounts.bottom)
-          ? rectangularSideCounts.bottom
-          : fallback.newTableDefaults.rectangularSideCounts.bottom,
-        left: Number.isInteger(rectangularSideCounts.left)
-          ? rectangularSideCounts.left
-          : fallback.newTableDefaults.rectangularSideCounts.left,
+        top:
+          derivedDefaults.seatConfig.shape === "rectangular"
+            ? derivedDefaults.seatConfig.sideCounts.top
+            : fallback.newTableDefaults.rectangularSideCounts.top,
+        right:
+          derivedDefaults.seatConfig.shape === "rectangular"
+            ? derivedDefaults.seatConfig.sideCounts.right
+            : fallback.newTableDefaults.rectangularSideCounts.right,
+        bottom:
+          derivedDefaults.seatConfig.shape === "rectangular"
+            ? derivedDefaults.seatConfig.sideCounts.bottom
+            : fallback.newTableDefaults.rectangularSideCounts.bottom,
+        left:
+          derivedDefaults.seatConfig.shape === "rectangular"
+            ? derivedDefaults.seatConfig.sideCounts.left
+            : fallback.newTableDefaults.rectangularSideCounts.left,
       },
     },
   };
@@ -153,46 +200,37 @@ function normalizeTableState(
   board: BoardState
 ): TableState | null {
   const shape = table.shape === "rectangular" ? "rectangular" : "round";
-  const fallbackSeatConfig = createDefaultTableSeatConfig(shape);
-  const seatConfig =
+  const rawSeatConfig =
     table.seatConfig?.shape === "rectangular"
-      ? {
-          shape: "rectangular" as const,
-          sideCounts: {
-            top: Number.isInteger(table.seatConfig.sideCounts?.top)
-              ? table.seatConfig.sideCounts.top
-              : fallbackSeatConfig.shape === "rectangular"
-                ? fallbackSeatConfig.sideCounts.top
-                : 0,
-            right: Number.isInteger(table.seatConfig.sideCounts?.right)
-              ? table.seatConfig.sideCounts.right
-              : fallbackSeatConfig.shape === "rectangular"
-                ? fallbackSeatConfig.sideCounts.right
-                : 0,
-            bottom: Number.isInteger(table.seatConfig.sideCounts?.bottom)
-              ? table.seatConfig.sideCounts.bottom
-              : fallbackSeatConfig.shape === "rectangular"
-                ? fallbackSeatConfig.sideCounts.bottom
-                : 0,
-            left: Number.isInteger(table.seatConfig.sideCounts?.left)
-              ? table.seatConfig.sideCounts.left
-              : fallbackSeatConfig.shape === "rectangular"
-                ? fallbackSeatConfig.sideCounts.left
-                : 0,
-          },
-        }
-      : {
-          shape: "round" as const,
-          seatCount:
-            Number.isInteger(
-              table.seatConfig?.shape === "round" ? table.seatConfig.seatCount : null
-            ) && (table.seatConfig?.shape === "round" ? table.seatConfig.seatCount : 0) > 0
-              ? table.seatConfig.seatCount
-              : Array.isArray(table.guestIds)
-                ? Math.max(table.guestIds.length, 1)
-                : TABLE_CAPACITY,
-        };
-  const expectedSeatCount = getTableSeatCount(seatConfig);
+      ? Number.isInteger(table.seatConfig.sideCounts?.top) &&
+        Number.isInteger(table.seatConfig.sideCounts?.right) &&
+        Number.isInteger(table.seatConfig.sideCounts?.bottom) &&
+        Number.isInteger(table.seatConfig.sideCounts?.left)
+        ? {
+            shape: "rectangular" as const,
+            sideCounts: {
+              top: table.seatConfig.sideCounts.top,
+              right: table.seatConfig.sideCounts.right,
+              bottom: table.seatConfig.sideCounts.bottom,
+              left: table.seatConfig.sideCounts.left,
+            },
+          }
+        : null
+      : Number.isInteger(table.seatConfig?.shape === "round" ? table.seatConfig.seatCount : null) &&
+          (table.seatConfig?.shape === "round" ? table.seatConfig.seatCount : 0) > 0
+        ? { shape: "round" as const, seatCount: table.seatConfig.seatCount }
+        : null;
+  if (!rawSeatConfig) {
+    return null;
+  }
+
+  const presetId = resolvePersistedTablePresetId(table.presetId, shape, rawSeatConfig);
+  if (!presetId) {
+    return null;
+  }
+
+  const derivedTableConfig = getDerivedTableConfigFromPresetId(presetId);
+  const expectedSeatCount = getTableSeatCount(derivedTableConfig.seatConfig);
 
   if (!Array.isArray(table.guestIds) || !table.guestIds.every(isSeatValue)) {
     return null;
@@ -220,9 +258,10 @@ function normalizeTableState(
       typeof table.name === "string" && table.name.length > 0
         ? table.name
         : `Table ${table.tableNumber}`,
-    shape,
+    presetId: derivedTableConfig.presetId,
+    shape: derivedTableConfig.shape,
     gridPosition: { row, column },
-    seatConfig,
+    seatConfig: derivedTableConfig.seatConfig,
     guestIds,
     disabledSeats: Array.isArray(table.disabledSeats)
       ? table.disabledSeats.filter(
@@ -240,6 +279,7 @@ function normalizeTableState(
 function normalizeSeatingState(state: SeatingState): SeatingState | null {
   if (!Array.isArray(state.tables) || !Array.isArray(state.unassigned)) return null;
   const board = normalizeBoardState(state.board);
+  if (!board) return null;
 
   const normalizedTables = state.tables.map((table, tableIndex) =>
     normalizeTableState(table, tableIndex, board)
@@ -268,6 +308,7 @@ function areSeatingStatesEqual(left: SeatingState, right: SeatingState): boolean
 
   if (
     left.board.newTableDefaults.labelPrefix !== right.board.newTableDefaults.labelPrefix ||
+    left.board.newTableDefaults.presetId !== right.board.newTableDefaults.presetId ||
     left.board.newTableDefaults.shape !== right.board.newTableDefaults.shape ||
     left.board.newTableDefaults.roundSeatCount !== right.board.newTableDefaults.roundSeatCount
   ) {
@@ -288,6 +329,7 @@ function areSeatingStatesEqual(left: SeatingState, right: SeatingState): boolean
         table.id === other.id &&
         table.tableNumber === other.tableNumber &&
         table.name === other.name &&
+        table.presetId === other.presetId &&
         table.shape === other.shape &&
         table.gridPosition.row === other.gridPosition.row &&
         table.gridPosition.column === other.gridPosition.column &&
