@@ -5,26 +5,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  MAX_ROUND_TABLE_CAPACITY,
-  MIN_ROUND_TABLE_CAPACITY,
-  type BoardState,
-  type RectangularSeatCounts,
-  type TableShape,
-} from "../types";
 import { useEffect, useId, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { TABLE_PRESETS, getTablePresetById, type BoardState, type TablePresetId } from "../types";
 
 export interface BoardSettingsFormValues {
   rows: number;
   columns: number;
   labelPrefix: string;
-  defaultShape: TableShape;
-  defaultRoundSeatCount: number;
-  defaultSideCounts: RectangularSeatCounts;
+  presetId: TablePresetId;
 }
 
 interface Props {
@@ -34,13 +33,16 @@ interface Props {
   onSubmit: (values: BoardSettingsFormValues) => void;
 }
 
-function clampInt(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, Math.round(value)));
+function formatShapeLabel(shape: "round" | "rectangular"): string {
+  return shape === "round" ? "Round" : "Rectangular";
 }
 
-function parseSideCount(raw: string): number {
-  const n = parseInt(raw, 10);
-  return isNaN(n) ? 0 : clampInt(n, 0, 16);
+function formatPresetOptionLabel(preset: (typeof TABLE_PRESETS)[number]): string {
+  return `${preset.label} · ${formatShapeLabel(preset.shape)} · ${preset.maximumSeating} seats`;
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.round(value)));
 }
 
 function boardToFormValues(board: BoardState): BoardSettingsFormValues {
@@ -48,9 +50,7 @@ function boardToFormValues(board: BoardState): BoardSettingsFormValues {
     rows: board.rows,
     columns: board.columns,
     labelPrefix: board.newTableDefaults.labelPrefix,
-    defaultShape: board.newTableDefaults.shape,
-    defaultRoundSeatCount: board.newTableDefaults.roundSeatCount,
-    defaultSideCounts: { ...board.newTableDefaults.rectangularSideCounts },
+    presetId: board.newTableDefaults.presetId,
   };
 }
 
@@ -61,19 +61,14 @@ export default function BoardSettingsDialog({ open, currentBoard, onClose, onSub
   const rowsId = useId();
   const columnsId = useId();
   const prefixId = useId();
-  const roundCountId = useId();
+  const presetFieldId = useId();
 
   useEffect(() => {
     if (!open) return;
     setValues(boardToFormValues(currentBoard));
   }, [currentBoard, open]);
 
-  const setSide = (side: keyof RectangularSeatCounts, raw: string) => {
-    setValues((v) => ({
-      ...v,
-      defaultSideCounts: { ...v.defaultSideCounts, [side]: parseSideCount(raw) },
-    }));
-  };
+  const selectedPreset = getTablePresetById(values.presetId);
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -93,7 +88,6 @@ export default function BoardSettingsDialog({ open, currentBoard, onClose, onSub
               <Input
                 id={rowsId}
                 type="number"
-                className="h-8 text-xs"
                 min={1}
                 max={20}
                 value={values.rows}
@@ -110,7 +104,6 @@ export default function BoardSettingsDialog({ open, currentBoard, onClose, onSub
               <Input
                 id={columnsId}
                 type="number"
-                className="h-8 text-xs"
                 min={1}
                 max={20}
                 value={values.columns}
@@ -128,7 +121,6 @@ export default function BoardSettingsDialog({ open, currentBoard, onClose, onSub
             <Label htmlFor={prefixId}>Default label prefix</Label>
             <Input
               id={prefixId}
-              className="h-8 text-xs"
               autoComplete="off"
               value={values.labelPrefix}
               onChange={(e) => setValues((v) => ({ ...v, labelPrefix: e.target.value }))}
@@ -137,109 +129,27 @@ export default function BoardSettingsDialog({ open, currentBoard, onClose, onSub
           </div>
 
           <div className="grid gap-2">
-            <Label>Default shape for new tables</Label>
-            <div className="flex gap-2">
-              {(["round", "rectangular"] as TableShape[]).map((shape) => (
-                <button
-                  key={shape}
-                  type="button"
-                  onClick={() => setValues((v) => ({ ...v, defaultShape: shape }))}
-                  className={
-                    values.defaultShape === shape
-                      ? "flex-1 rounded-md border border-primary bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary"
-                      : "flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"
-                  }>
-                  {shape.charAt(0).toUpperCase() + shape.slice(1)}
-                </button>
-              ))}
-            </div>
+            <Label htmlFor={presetFieldId}>Default table size</Label>
+            <Select
+              value={values.presetId}
+              onValueChange={(nextPresetId: TablePresetId) =>
+                setValues((current) => ({ ...current, presetId: nextPresetId }))
+              }>
+              <SelectTrigger id={presetFieldId} aria-label="Default table size">
+                <SelectValue>{selectedPreset.label}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {TABLE_PRESETS.map((preset) => (
+                  <SelectItem key={preset.presetId} value={preset.presetId}>
+                    {formatPresetOptionLabel(preset)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs leading-5 text-muted-foreground">
+              {selectedPreset.maximumSeating} seats max. {selectedPreset.typicalUseCase}
+            </p>
           </div>
-
-          {values.defaultShape === "round" ? (
-            <div className="grid gap-2">
-              <Label htmlFor={roundCountId}>
-                Default seat count{" "}
-                <span className="font-normal text-muted-foreground">
-                  ({MIN_ROUND_TABLE_CAPACITY}–{MAX_ROUND_TABLE_CAPACITY})
-                </span>
-              </Label>
-              <Input
-                id={roundCountId}
-                type="number"
-                className="h-8 w-24 text-xs"
-                min={MIN_ROUND_TABLE_CAPACITY}
-                max={MAX_ROUND_TABLE_CAPACITY}
-                value={values.defaultRoundSeatCount}
-                onChange={(e) =>
-                  setValues((v) => ({
-                    ...v,
-                    defaultRoundSeatCount: clampInt(
-                      parseInt(e.target.value, 10) || MIN_ROUND_TABLE_CAPACITY,
-                      MIN_ROUND_TABLE_CAPACITY,
-                      MAX_ROUND_TABLE_CAPACITY
-                    ),
-                  }))
-                }
-              />
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              <Label>Default seats per side</Label>
-              <div className="grid grid-cols-3 gap-1.5 text-center">
-                <div />
-                <div className="grid gap-1">
-                  <span className="text-2xs text-muted-foreground">Top</span>
-                  <Input
-                    type="number"
-                    className="h-8 text-center text-xs"
-                    min={0}
-                    max={16}
-                    value={values.defaultSideCounts.top}
-                    onChange={(e) => setSide("top", e.target.value)}
-                  />
-                </div>
-                <div />
-                <div className="grid gap-1">
-                  <span className="text-2xs text-muted-foreground">Left</span>
-                  <Input
-                    type="number"
-                    className="h-8 text-center text-xs"
-                    min={0}
-                    max={16}
-                    value={values.defaultSideCounts.left}
-                    onChange={(e) => setSide("left", e.target.value)}
-                  />
-                </div>
-                <div className="flex items-center justify-center rounded-md border border-dashed border-border">
-                  <span className="text-2xs text-muted-foreground">Table</span>
-                </div>
-                <div className="grid gap-1">
-                  <span className="text-2xs text-muted-foreground">Right</span>
-                  <Input
-                    type="number"
-                    className="h-8 text-center text-xs"
-                    min={0}
-                    max={16}
-                    value={values.defaultSideCounts.right}
-                    onChange={(e) => setSide("right", e.target.value)}
-                  />
-                </div>
-                <div />
-                <div className="grid gap-1">
-                  <span className="text-2xs text-muted-foreground">Bottom</span>
-                  <Input
-                    type="number"
-                    className="h-8 text-center text-xs"
-                    min={0}
-                    max={16}
-                    value={values.defaultSideCounts.bottom}
-                    onChange={(e) => setSide("bottom", e.target.value)}
-                  />
-                </div>
-                <div />
-              </div>
-            </div>
-          )}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>

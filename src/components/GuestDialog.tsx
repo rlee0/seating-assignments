@@ -102,7 +102,6 @@ export default function GuestDialog({
             <Input
               id={fullNameId}
               name="guest-full-name"
-              className="h-8 text-xs"
               autoFocus
               autoComplete="off"
               data-1p-ignore="true"
@@ -110,7 +109,7 @@ export default function GuestDialog({
               onChange={(event) =>
                 setValues((current) => ({ ...current, fullName: event.target.value }))
               }
-              placeholder="e.g. Jordan Lee"
+              placeholder="e.g. Rio Morales"
             />
           </div>
 
