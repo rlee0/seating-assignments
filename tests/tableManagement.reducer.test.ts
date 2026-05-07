@@ -122,7 +122,6 @@ describe("table management reducer", () => {
             }
           : table
       ),
-      lockedGuestIds: ["g5"],
     };
 
     const nextState = seatingReducer(seededState, {
@@ -141,7 +140,6 @@ describe("table management reducer", () => {
     expect(updatedTable?.guestIds).toEqual(["g1", "g2", "g3", "g4"]);
     expect(getTableSeatCount(updatedTable!.seatConfig)).toBe(4);
     expect(nextState.unassigned).toEqual(expect.arrayContaining(["g5", "g6"]));
-    expect(nextState.lockedGuestIds).not.toContain("g5");
   });
 
   it("applies updated king preset capacities as rectangular seat counts", () => {
@@ -174,7 +172,7 @@ describe("table management reducer", () => {
     expect(getTableSeatCount(king8Table!.seatConfig)).toBe(16);
   });
 
-  it("deleting a populated table unassigns its guests and unlocks them", () => {
+  it("deleting a populated table unassigns its guests", () => {
     const state = createInitialState([]);
     const seededState = {
       ...state,
@@ -186,7 +184,6 @@ describe("table management reducer", () => {
             }
           : table
       ),
-      lockedGuestIds: ["g1"],
     };
 
     const nextState = seatingReducer(seededState, {
@@ -196,7 +193,6 @@ describe("table management reducer", () => {
 
     expect(nextState.tables.some((table) => table.tableNumber === 2)).toBe(false);
     expect(nextState.unassigned).toEqual(expect.arrayContaining(["g1", "g2"]));
-    expect(nextState.lockedGuestIds).toEqual([]);
   });
 
   it("moves a table to an empty grid cell", () => {

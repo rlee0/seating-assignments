@@ -33,12 +33,14 @@ vi.mock("@dnd-kit/core", async () => {
       setNodeRef: () => {},
       isOver: false,
     }),
+    useDndContext: () => ({ over: null }),
     useSensor: () => ({}),
     useSensors: (...sensors: unknown[]) => sensors,
     pointerWithin: () => [],
     closestCenter: () => [],
     PointerSensor: function PointerSensor() {},
     TouchSensor: function TouchSensor() {},
+    MeasuringStrategy: { Always: 0, BeforeDragging: 1, WhileDragging: 2 },
   };
 });
 
@@ -118,11 +120,11 @@ function selectBoardPreset(dialog: HTMLElement, label: string) {
 }
 
 describe("table management dialog flows", () => {
-  it("sets faded empty-seat metadata for sparse round and rectangular tables", async () => {
+  it("renders empty seat slots for sparse round and rectangular tables", async () => {
     const { container } = render(<App />);
 
     const sparseRoundEmptySeat = container.querySelector<HTMLElement>(
-      "[data-table-number='2'] [data-seat-slot][data-guest-id=''][data-empty-seat-intensity='faded']"
+      "[data-table-number='2'] [data-seat-slot][data-guest-id='']"
     );
     expect(sparseRoundEmptySeat).not.toBeNull();
 
@@ -142,7 +144,7 @@ describe("table management dialog flows", () => {
     });
 
     const sparseRectEmptySeat = container.querySelector<HTMLElement>(
-      "[data-table-number='1'] [data-seat-slot][data-guest-id=''][data-empty-seat-intensity='faded']"
+      "[data-table-number='1'] [data-seat-slot][data-guest-id='']"
     );
     expect(sparseRectEmptySeat).not.toBeNull();
   });
@@ -155,8 +157,6 @@ describe("table management dialog flows", () => {
         `[data-table-number='${tableNumber}'] [data-table-card]`
       );
 
-    const tablesButtons = screen.getAllByRole("button", { name: /tables/i });
-    fireEvent.click(tablesButtons[0]);
     const table25Card = getTableCard(25);
     expect(table25Card).not.toBeNull();
     fireEvent.contextMenu(table25Card!);
@@ -331,38 +331,66 @@ describe("table management dialog flows", () => {
     localStorage.setItem(BOARD_ZOOM_STORAGE_KEY, "1.3");
 
     const { container } = render(<App />);
-    const zoomInButton = screen.getByRole("button", { name: /zoom in/i });
-    const zoomOutButton = screen.getByRole("button", { name: /zoom out/i });
-    const resetZoomButton = screen.getByRole("button", { name: /reset zoom/i });
+    const moreActionsButton = screen.getByRole("button", { name: /more actions/i });
 
-    expect(resetZoomButton.textContent).toContain("130%");
+    const getMenuItem = async (name: RegExp) => {
+      fireEvent.pointerDown(moreActionsButton, { button: 0, ctrlKey: false });
+      return screen.findByRole("menuitem", { name });
+    };
 
-    while (!zoomInButton.hasAttribute("disabled")) {
-      fireEvent.click(zoomInButton);
-    }
+    const closeMenu = () => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    };
 
-    expect(resetZoomButton.textContent).toContain("150%");
+    const zoomInUntilDisabled = async () => {
+      while (true) {
+        const zoomInMenuItem = await getMenuItem(/zoom in/i);
+        if (zoomInMenuItem.hasAttribute("data-disabled")) {
+          closeMenu();
+          return;
+        }
+        fireEvent.click(zoomInMenuItem);
+      }
+    };
+
+    const zoomOutUntilDisabled = async () => {
+      while (true) {
+        const zoomOutMenuItem = await getMenuItem(/zoom out/i);
+        if (zoomOutMenuItem.hasAttribute("data-disabled")) {
+          closeMenu();
+          return;
+        }
+        fireEvent.click(zoomOutMenuItem);
+      }
+    };
+
+    const resetZoomMenuItem = () => getMenuItem(/reset zoom/i);
+
+    expect((await resetZoomMenuItem()).textContent).toContain("130%");
+    closeMenu();
+
+    await zoomInUntilDisabled();
+
+    expect((await resetZoomMenuItem()).textContent).toContain("150%");
+    closeMenu();
     expect(localStorage.getItem(BOARD_ZOOM_STORAGE_KEY)).toBe("1.5");
 
-    while (!zoomOutButton.hasAttribute("disabled")) {
-      fireEvent.click(zoomOutButton);
-    }
+    await zoomOutUntilDisabled();
 
-    expect(resetZoomButton.textContent).toContain("50%");
+    expect((await resetZoomMenuItem()).textContent).toContain("50%");
+    closeMenu();
     expect(localStorage.getItem(BOARD_ZOOM_STORAGE_KEY)).toBe("0.5");
 
-    fireEvent.click(resetZoomButton);
-    expect(resetZoomButton.textContent).toContain("100%");
+    fireEvent.click(await resetZoomMenuItem());
+    expect((await resetZoomMenuItem()).textContent).toContain("100%");
+    closeMenu();
     expect(localStorage.getItem(BOARD_ZOOM_STORAGE_KEY)).toBe("1");
 
     const contentSize = container.querySelector<HTMLElement>("[data-board-content-size]");
-    const viewport = container.querySelector<HTMLElement>("[data-board-viewport]");
     expect(contentSize).not.toBeNull();
-    expect(viewport).not.toBeNull();
 
     const initialMinWidth = Number.parseFloat(contentSize?.style.minWidth ?? "0");
-    fireEvent.contextMenu(viewport!);
-    fireEvent.click(screen.getByRole("menuitem", { name: /board settings/i }));
+    fireEvent.click(await getMenuItem(/board settings/i));
 
     const dialog = screen.getByRole("dialog", { name: /board settings/i });
     fireEvent.change(within(dialog).getByLabelText(/rows/i), { target: { value: "8" } });

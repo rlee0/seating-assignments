@@ -33,12 +33,14 @@ vi.mock("@dnd-kit/core", async () => {
       setNodeRef: () => {},
       isOver: false,
     }),
+    useDndContext: () => ({ over: null }),
     useSensor: () => ({}),
     useSensors: (...sensors: unknown[]) => sensors,
     pointerWithin: () => [],
     closestCenter: () => [],
     PointerSensor: function PointerSensor() {},
     TouchSensor: function TouchSensor() {},
+    MeasuringStrategy: { Always: 0, BeforeDragging: 1, WhileDragging: 2 },
   };
 });
 
@@ -163,7 +165,7 @@ describe("guest CRUD flows", () => {
     render(<App />);
 
     const aliceChip = document.querySelector<HTMLElement>(
-      "[data-sidebar] [data-guest-chip][data-guest-id='g0']"
+      "[data-sidebar='sidebar'] [data-guest-chip][data-guest-id='g0']"
     );
     expect(aliceChip).not.toBeNull();
     fireEvent.contextMenu(aliceChip!);
@@ -226,7 +228,7 @@ describe("guest CRUD flows", () => {
     render(<App />);
 
     const aliceChip = document.querySelector<HTMLElement>(
-      "[data-sidebar] [data-guest-chip][data-guest-id='g0']"
+      "[data-sidebar='sidebar'] [data-guest-chip][data-guest-id='g0']"
     );
     expect(aliceChip).not.toBeNull();
     fireEvent.contextMenu(aliceChip!);
@@ -250,7 +252,7 @@ describe("guest CRUD flows", () => {
     render(<App />);
 
     const aliceChip = document.querySelector<HTMLElement>(
-      "[data-sidebar] [data-guest-chip][data-guest-id='g0']"
+      "[data-sidebar='sidebar'] [data-guest-chip][data-guest-id='g0']"
     );
     expect(aliceChip).not.toBeNull();
     fireEvent.contextMenu(aliceChip!);

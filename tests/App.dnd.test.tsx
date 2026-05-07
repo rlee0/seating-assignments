@@ -48,12 +48,14 @@ vi.mock("@dnd-kit/core", async () => {
       setNodeRef: () => {},
       isOver: false,
     }),
+    useDndContext: () => ({ over: null }),
     useSensor: () => ({}),
     useSensors: (...sensors: unknown[]) => sensors,
     pointerWithin: () => [],
     closestCenter: () => [],
     PointerSensor: function PointerSensor() {},
     TouchSensor: function TouchSensor() {},
+    MeasuringStrategy: { Always: 0, BeforeDragging: 1, WhileDragging: 2 },
   };
 });
 
@@ -161,7 +163,7 @@ function findTableContainingGuest(container: HTMLElement, guestName: string): nu
 }
 
 function sidebarContainsGuest(container: HTMLElement, guestName: string): boolean {
-  const sidebar = container.querySelector<HTMLElement>("[data-sidebar]");
+  const sidebar = container.querySelector<HTMLElement>("[data-sidebar='sidebar']");
   if (!sidebar) return false;
   return sidebar.textContent?.includes(guestName) ?? false;
 }
@@ -170,6 +172,33 @@ function getTableNameAtCell(container: HTMLElement, row: number, column: number)
   const cell = container.querySelector<HTMLElement>(`[data-board-cell-id='cell-${row}-${column}']`);
   if (!cell) return null;
   return cell.querySelector<HTMLElement>("[data-table-name]")?.textContent?.trim() ?? null;
+}
+
+function getBoardLayoutSnapshot(
+  container: HTMLElement
+): Array<{ cellId: string; tableName: string | null }> {
+  const cells = Array.from(container.querySelectorAll<HTMLElement>("[data-board-cell-id]"));
+  return cells
+    .map((cell) => ({
+      cellId: cell.dataset.boardCellId ?? "",
+      tableName: cell.querySelector<HTMLElement>("[data-table-name]")?.textContent?.trim() ?? null,
+    }))
+    .sort((a, b) => a.cellId.localeCompare(b.cellId));
+}
+
+function triggerDragMoveSequence(params: {
+  id: string;
+  data: unknown;
+  moves: Array<{ clientX: number; clientY: number }>;
+}): void {
+  for (const move of params.moves) {
+    triggerDragMove({
+      id: params.id,
+      data: params.data,
+      clientX: move.clientX,
+      clientY: move.clientY,
+    });
+  }
 }
 
 function triggerDragStart(params: { id: string; data: unknown }): void {
@@ -378,7 +407,7 @@ describe("Flow 1 — unassigned guest → unassigned seat", () => {
     expect(sidebarContainsGuest(container, "Alice")).toBe(false);
   });
 
-  it("keeps seat drop targets working with empty-seat intensity metadata", () => {
+  it("keeps seat drop targets working after metadata removal", () => {
     const rows = makeRows([{ name: "Alice" }]);
     seedApp(rows);
 
@@ -387,7 +416,6 @@ describe("Flow 1 — unassigned guest → unassigned seat", () => {
       "[data-seat-id='seat-1-0']"
     );
     expect(targetSeat).not.toBeNull();
-    expect(targetSeat?.getAttribute("data-empty-seat-intensity")).toBe("faded");
 
     triggerDragEnd({
       id: "guest-g0",
@@ -396,66 +424,6 @@ describe("Flow 1 — unassigned guest → unassigned seat", () => {
     });
 
     expect(getSeatGuestName(container, 1, 0)).toBe("Alice");
-  });
-
-  it("marks near-full empty seats as accented for round and rectangular layouts", () => {
-    const rows = makeRows([
-      { name: "Ava" },
-      { name: "Ben" },
-      { name: "Cara" },
-      { name: "Drew" },
-      { name: "Eli" },
-      { name: "Finn" },
-      { name: "Gia" },
-      { name: "Hugo" },
-      { name: "Ivy" },
-      { name: "Jude" },
-      { name: "Kira" },
-      { name: "Liam" },
-    ]);
-
-    let state = createInitialState(rows.map((row) => row.id));
-    state = seatingReducer(state, {
-      type: "UPDATE_TABLE_CONFIG",
-      tableNumber: 1,
-      updates: {
-        presetId: "rect-6",
-      },
-    });
-    state = seatingReducer(state, {
-      type: "UPDATE_TABLE_CONFIG",
-      tableNumber: 2,
-      updates: {
-        presetId: "round-48",
-      },
-    });
-
-    state = assignSingle(state, 1, "g0", 0);
-    state = assignSingle(state, 1, "g1", 1);
-    state = assignSingle(state, 1, "g2", 2);
-    state = assignSingle(state, 1, "g3", 3);
-    state = assignSingle(state, 1, "g4", 4);
-    state = assignSingle(state, 1, "g5", 5);
-    state = assignSingle(state, 1, "g6", 6);
-    state = assignSingle(state, 2, "g7", 0);
-    state = assignSingle(state, 2, "g8", 1);
-    state = assignSingle(state, 2, "g9", 2);
-    state = assignSingle(state, 2, "g10", 3);
-    state = assignSingle(state, 2, "g11", 4);
-
-    seedApp(rows, state);
-
-    const { container } = render(<App />);
-
-    const nearFullRectEmptySeat = container.querySelector<HTMLElement>(
-      "[data-table-number='1'] [data-seat-slot][data-guest-id=''][data-empty-seat-intensity='accented']"
-    );
-    const nearFullRoundEmptySeat = container.querySelector<HTMLElement>(
-      "[data-table-number='2'] [data-seat-slot][data-guest-id=''][data-empty-seat-intensity='accented']"
-    );
-
-    expect(nearFullRectEmptySeat).not.toBeNull();
-    expect(nearFullRoundEmptySeat).not.toBeNull();
   });
 });
 
@@ -640,6 +608,98 @@ describe("Flow 5 — assigned guest → assigned seat (swap)", () => {
     expect(getSeatGuestName(container, 2, 0)).toBe("Alice");
     expect(getSeatGuestName(container, 1, 0)).toBe("Bob");
   });
+
+  it("keeps board cell table positions stable during rapid seated-guest drag movement", () => {
+    const rows = makeRows([{ name: "Alice" }, { name: "Bob" }, { name: "Cara" }]);
+    let state = createInitialState(["g0", "g1", "g2"]);
+    state = assignSingle(state, 1, "g0", 0);
+    state = assignSingle(state, 1, "g1", 1);
+    state = assignSingle(state, 2, "g2", 0);
+    seedApp(rows, state);
+
+    const { container } = render(<App />);
+    const beforeLayout = getBoardLayoutSnapshot(container);
+
+    const table1 = getTableCard(container, 1);
+    const table2 = getTableCard(container, 2);
+    const table1Seat1 = table1.querySelectorAll<HTMLElement>("[data-seat-slot]")[1] ?? null;
+    const table2Seat0 = table2.querySelectorAll<HTMLElement>("[data-seat-slot]")[0] ?? null;
+    const seatSpy = vi.spyOn(document, "elementFromPoint").mockImplementation(() => table1Seat1);
+
+    triggerDragStart({
+      id: "guest-g0",
+      data: { kind: "guest", guestId: "g0", origin: "table", tableNumber: 1, seatIndex: 0 },
+    });
+
+    triggerDragMoveSequence({
+      id: "guest-g0",
+      data: { kind: "guest", guestId: "g0", origin: "table", tableNumber: 1, seatIndex: 0 },
+      moves: [
+        { clientX: 10, clientY: 10 },
+        { clientX: 20, clientY: 15 },
+        { clientX: 25, clientY: 22 },
+      ],
+    });
+
+    seatSpy.mockImplementation(() => table2Seat0);
+    triggerDragMoveSequence({
+      id: "guest-g0",
+      data: { kind: "guest", guestId: "g0", origin: "table", tableNumber: 1, seatIndex: 0 },
+      moves: [
+        { clientX: 180, clientY: 30 },
+        { clientX: 200, clientY: 45 },
+      ],
+    });
+
+    const duringLayout = getBoardLayoutSnapshot(container);
+
+    triggerDragCancel();
+    seatSpy.mockRestore();
+
+    expect(duringLayout).toEqual(beforeLayout);
+    expect(getTableNameAtCell(container, 0, 0)).toBe("Table 1");
+    expect(getTableNameAtCell(container, 0, 1)).toBe("Table 2");
+  });
+
+  it("does not carry stale swap-preview target into a new drag session", () => {
+    const rows = makeRows([{ name: "Alice" }, { name: "Bob" }]);
+    let state = createInitialState(["g0", "g1"]);
+    state = assignSingle(state, 1, "g0", 0);
+    state = assignSingle(state, 1, "g1", 1);
+    seedApp(rows, state);
+
+    const { container } = render(<App />);
+    const targetSeat =
+      getTableCard(container, 1).querySelectorAll<HTMLElement>("[data-seat-slot]")[1] ?? null;
+    const seatSpy = vi.spyOn(document, "elementFromPoint").mockImplementation(() => targetSeat);
+
+    triggerDragStart({
+      id: "guest-g0",
+      data: { kind: "guest", guestId: "g0", origin: "table", tableNumber: 1, seatIndex: 0 },
+    });
+    triggerDragMove({
+      id: "guest-g0",
+      data: { kind: "guest", guestId: "g0", origin: "table", tableNumber: 1, seatIndex: 0 },
+      clientX: 8,
+      clientY: 8,
+    });
+    triggerDragCancel();
+
+    seatSpy.mockRestore();
+
+    triggerDragStart({
+      id: "guest-g0",
+      data: { kind: "guest", guestId: "g0", origin: "table", tableNumber: 1, seatIndex: 0 },
+    });
+    triggerDragEnd({
+      id: "guest-g0",
+      data: { kind: "guest", guestId: "g0", origin: "table", tableNumber: 1, seatIndex: 0 },
+      overId: "seat-1-2",
+    });
+
+    expect(getSeatGuestName(container, 1, 2)).toBe("Alice");
+    expect(getSeatGuestName(container, 1, 1)).toBe("Bob");
+  });
 });
 
 describe("Flow 6 — assigned guest → table (autoseat in adjacent)", () => {
@@ -723,7 +783,7 @@ describe("File import", () => {
     const file = new File([csv], "seating-export.csv", { type: "text/csv" });
 
     const { container } = render(<App />);
-    const dndRoot = container.querySelector<HTMLElement>("[data-testid='dnd-context'] > div");
+    const dndRoot = container.querySelector<HTMLElement>("[data-testid='file-drop-root']");
     expect(dndRoot).not.toBeNull();
 
     await act(async () => {
@@ -753,7 +813,7 @@ describe("File import", () => {
     const file = new File([csv], "seating-export-blank-circle.csv", { type: "text/csv" });
 
     const { container } = render(<App />);
-    const dndRoot = container.querySelector<HTMLElement>("[data-testid='dnd-context'] > div");
+    const dndRoot = container.querySelector<HTMLElement>("[data-testid='file-drop-root']");
     expect(dndRoot).not.toBeNull();
 
     await act(async () => {
@@ -782,7 +842,7 @@ describe("File import", () => {
     const file = new File([csv], "shuffled.csv", { type: "text/csv" });
 
     const { container } = render(<App />);
-    const dndRoot = container.querySelector<HTMLElement>("[data-testid='dnd-context'] > div");
+    const dndRoot = container.querySelector<HTMLElement>("[data-testid='file-drop-root']");
     expect(dndRoot).not.toBeNull();
 
     await act(async () => {
@@ -810,7 +870,7 @@ describe("File import", () => {
     const file = new File([csv], "required-only.csv", { type: "text/csv" });
 
     const { container } = render(<App />);
-    const dndRoot = container.querySelector<HTMLElement>("[data-testid='dnd-context'] > div");
+    const dndRoot = container.querySelector<HTMLElement>("[data-testid='file-drop-root']");
     expect(dndRoot).not.toBeNull();
 
     await act(async () => {
@@ -840,7 +900,7 @@ describe("File import", () => {
     const file = new File([csv], "missing-name.csv", { type: "text/csv" });
 
     const { container } = render(<App />);
-    const dndRoot = container.querySelector<HTMLElement>("[data-testid='dnd-context'] > div");
+    const dndRoot = container.querySelector<HTMLElement>("[data-testid='file-drop-root']");
     expect(dndRoot).not.toBeNull();
 
     await act(async () => {
@@ -865,7 +925,7 @@ describe("File import", () => {
     const file = new File([csv], "duplicate-header.csv", { type: "text/csv" });
 
     const { container } = render(<App />);
-    const dndRoot = container.querySelector<HTMLElement>("[data-testid='dnd-context'] > div");
+    const dndRoot = container.querySelector<HTMLElement>("[data-testid='file-drop-root']");
     expect(dndRoot).not.toBeNull();
 
     await act(async () => {
@@ -902,7 +962,7 @@ describe("File import", () => {
 
     const firstRender = render(<App />);
     const dndRoot = firstRender.container.querySelector<HTMLElement>(
-      "[data-testid='dnd-context'] > div"
+      "[data-testid='file-drop-root']"
     );
     expect(dndRoot).not.toBeNull();
 
@@ -919,7 +979,6 @@ describe("File import", () => {
     firstRender.unmount();
 
     const secondRender = render(<App />);
-
     await act(async () => {
       fireEvent.click(within(secondRender.container).getByRole("button", { name: /export/i }));
     });

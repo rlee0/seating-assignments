@@ -33,12 +33,14 @@ vi.mock("@dnd-kit/core", async () => {
       setNodeRef: () => {},
       isOver: false,
     }),
+    useDndContext: () => ({ over: null }),
     useSensor: () => ({}),
     useSensors: (...sensors: unknown[]) => sensors,
     pointerWithin: () => [],
     closestCenter: () => [],
     PointerSensor: function PointerSensor() {},
     TouchSensor: function TouchSensor() {},
+    MeasuringStrategy: { Always: 0, BeforeDragging: 1, WhileDragging: 2 },
   };
 });
 
@@ -268,7 +270,6 @@ describe("import and persistence normalization", () => {
             },
           ],
           unassigned: [],
-          lockedGuestIds: [],
         },
         history: [],
         future: [],

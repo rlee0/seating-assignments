@@ -8,7 +8,11 @@ import {
 } from "../../src/types";
 import { getGuestSourceSignature } from "../../src/data/parseGuests";
 import { createInitialState } from "../../src/store/reducer";
-import { loadPersistedGuestData, reconcileStateToGuestIds } from "../../src/store/localStorage";
+import {
+  loadPersistedGuestData,
+  parsePersistedSeatingData,
+  reconcileStateToGuestIds,
+} from "../../src/store/localStorage";
 
 function createStorageMock() {
   const store = new Map<string, string>();
@@ -44,7 +48,6 @@ describe("reconcileStateToGuestIds", () => {
       board: baseState.board,
       tables,
       unassigned: [],
-      lockedGuestIds: [],
     };
 
     const reconciled = reconcileStateToGuestIds(state, allGuestIds);
@@ -54,6 +57,23 @@ describe("reconcileStateToGuestIds", () => {
     expect(reconciled?.tables[0].guestIds[5]).toBe("g0");
     expect(reconciled?.tables[0].disabledSeats).toEqual([7]);
     expect(reconciled?.unassigned).toEqual(["g1"]);
+  });
+
+  it("accepts legacy persisted seating payloads with lockedGuestIds", () => {
+    const baseState = createInitialState(["g0"]);
+
+    const parsed = parsePersistedSeatingData({
+      state: {
+        ...baseState,
+        lockedGuestIds: ["g0"],
+      },
+      history: [],
+      future: [],
+    });
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.state.unassigned).toEqual(["g0"]);
+    expect(parsed?.state.tables).toHaveLength(TABLE_COUNT);
   });
 });
 
