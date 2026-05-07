@@ -1,6 +1,5 @@
 import {
   DndContext,
-  DragOverlay,
   PointerSensor,
   TouchSensor,
   type DragEndEvent,
@@ -12,18 +11,29 @@ import {
 import {
   AlertTriangle,
   Download,
+  MoreHorizontal,
   Moon,
   Plus,
   RotateCcw,
+  Settings,
   Sun,
   Upload,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { SeatingProvider, useSeating } from "./store/SeatingContext";
 import { SearchProvider, useSearch } from "./store/SearchContext";
 import { Alert, AlertDescription, AlertTitle } from "./components/ui/alert";
+import { createPortal } from "react-dom";
 import {
   useCallback,
   useEffect,
@@ -697,6 +707,8 @@ type DragOverlaySnapshot = {
   node: HTMLElement;
   width: number;
   height: number;
+  left: number;
+  top: number;
 };
 
 function findGuestChipById(
@@ -795,6 +807,8 @@ function captureDragOverlaySnapshot(intent: DragIntent): DragOverlaySnapshot | n
     node: clone,
     width: rect.width,
     height: rect.height,
+    left: rect.left,
+    top: rect.top,
   };
 }
 
@@ -886,19 +900,25 @@ function SeatingApp({
     swapTargetTableNumber: null,
   });
   const [dragOverlaySnapshot, setDragOverlaySnapshot] = useState<DragOverlaySnapshot | null>(null);
+  const [activeOverId, setActiveOverId] = useState<string | null>(null);
+  const latestDropContextRef = useRef({ state, guestProfiles, parties });
   /** Tracks the latest pointer position for seat-level probe during drag-end. */
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
   const previewTargetKeyRef = useRef<string | null>(null);
   const previewLastComputedAtRef = useRef(0);
   /** Timer ID for the grace-period before clearing the swap preview. */
   const swapPreviewClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Ref to the custom drag overlay portal element for direct DOM transform updates. */
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  /** Pointer position captured on pointerdown, used to compute overlay transform delta. */
+  const dragStartPointerRef = useRef<{ x: number; y: number } | null>(null);
+  /** Cached seat slot rects for O(n) hit-testing during seated-guest drags (avoids elementsFromPoint). */
+  const seatRectCacheRef = useRef<Map<string, { rect: DOMRect; el: HTMLElement }> | null>(null);
 
   // Derived drag state passed down to child components.
   const activeDragKind: DragKind | null = activeDragIntent?.kind ?? null;
   const activeDragGuestId: string | null =
     activeDragIntent?.kind === "guest" ? activeDragIntent.guestId : null;
-  const activeDragTableNumber: number | null =
-    activeDragIntent?.kind === "table" ? activeDragIntent.tableNumber : null;
 
   // ── Other state ─────────────────────────────────────────────────────────────
   const [showWarnings, setShowWarnings] = useState(false);
@@ -939,10 +959,13 @@ function SeatingApp({
     };
   }, []);
 
-  const [mobilePanel, setMobilePanel] = useState<"sidebar" | "tables">("sidebar");
   const [boardZoom, setBoardZoom] = useState(() => loadPersistedZoom());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const fileDragDepthRef = useRef(0);
+
+  useEffect(() => {
+    latestDropContextRef.current = { state, guestProfiles, parties };
+  }, [state, guestProfiles, parties]);
 
   useEffect(() => {
     saveZoom(boardZoom);
@@ -1172,6 +1195,37 @@ function SeatingApp({
     [pendingDeleteTableNumber, state.tables]
   );
 
+  // ── Capture pointer position at drag start ──────────────────────────────────
+  useEffect(() => {
+    const capture = (e: PointerEvent) => {
+      dragStartPointerRef.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener("pointerdown", capture, { passive: true });
+    return () => window.removeEventListener("pointerdown", capture);
+  }, []);
+
+  // ── Drive overlay position via direct DOM mutation (bypasses React render cycle) ──
+  useEffect(() => {
+    if (!dragOverlaySnapshot) return;
+    const move = (clientX: number, clientY: number) => {
+      const el = overlayRef.current;
+      const p0 = dragStartPointerRef.current;
+      if (!el || !p0) return;
+      el.style.transform = `translate3d(${clientX - p0.x}px,${clientY - p0.y}px,0)`;
+    };
+    const onPointer = (e: PointerEvent) => move(e.clientX, e.clientY);
+    const onTouch = (e: TouchEvent) => {
+      const t = e.touches[0] ?? e.changedTouches[0];
+      if (t) move(t.clientX, t.clientY);
+    };
+    window.addEventListener("pointermove", onPointer, { passive: true });
+    window.addEventListener("touchmove", onTouch, { passive: true });
+    return () => {
+      window.removeEventListener("pointermove", onPointer);
+      window.removeEventListener("touchmove", onTouch);
+    };
+  }, [dragOverlaySnapshot]);
+
   // ── Pointer tracking for seat-level probe ────────────────────────────────────
   useEffect(() => {
     if (!activeDragIntent) return;
@@ -1211,6 +1265,8 @@ function SeatingApp({
     const sourceSeatIndex = activeDragIntent.seatIndex;
     const sourceGuestId = activeDragIntent.guestId;
     const CLEAR_DELAY_MS = 80;
+    let animationFrameId: number | null = null;
+    let queuedPoint: { x: number; y: number } | null = null;
 
     const cancelClearTimer = () => {
       if (swapPreviewClearTimerRef.current !== null) {
@@ -1223,57 +1279,75 @@ function SeatingApp({
       if (swapPreviewClearTimerRef.current !== null) return;
       swapPreviewClearTimerRef.current = setTimeout(() => {
         swapPreviewClearTimerRef.current = null;
+        if (guestSwapPreviewRef.current === null) return;
         guestSwapPreviewRef.current = null;
-        setGuestSwapPreview(null);
+        setGuestSwapPreview((prev) => (prev === null ? prev : null));
       }, CLEAR_DELAY_MS);
     };
 
     const updateFromPoint = (x: number, y: number) => {
-      const elements =
-        typeof document.elementsFromPoint === "function"
-          ? document.elementsFromPoint(x, y)
-          : (() => {
-              const el = document.elementFromPoint(x, y);
-              return el ? [el] : [];
-            })();
+      // Prefer cached seat rects (no forced layout) over elementsFromPoint.
+      const cache = seatRectCacheRef.current;
+      let hitSeatId: string | null = null;
+      let hitGuestId: string | null = null;
 
-      for (const el of elements) {
-        const slotEl = el.closest<HTMLElement>("[data-seat-slot]");
-        if (slotEl) {
-          const rawSeatId = slotEl.dataset.seatId ?? null;
-          const targetGuestId = slotEl.dataset.guestId || null;
-          const parsed = rawSeatId ? parseDropTargetId(rawSeatId) : null;
-
-          if (
-            parsed?.type === "seat" &&
-            targetGuestId &&
-            targetGuestId !== sourceGuestId &&
-            !(parsed.tableNumber === sourceTableNumber && parsed.seatIndex === sourceSeatIndex)
-          ) {
-            // Pointer is over an occupied non-self seat — activate swap preview.
-            cancelClearTimer();
-            const nextPreview: GuestSwapPreview = {
-              sourceTableNumber,
-              sourceSeatIndex,
-              sourceGuestId,
-              targetTableNumber: parsed.tableNumber,
-              targetSeatIndex: parsed.seatIndex,
-              targetGuestId,
-            };
-            if (
-              guestSwapPreviewRef.current?.targetTableNumber !== nextPreview.targetTableNumber ||
-              guestSwapPreviewRef.current?.targetSeatIndex !== nextPreview.targetSeatIndex
-            ) {
-              guestSwapPreviewRef.current = nextPreview;
-              setGuestSwapPreview(nextPreview);
-            }
-            return;
+      if (cache) {
+        for (const [seatId, { rect, el }] of cache) {
+          if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+            hitSeatId = seatId;
+            hitGuestId = el.dataset.guestId || null;
+            break;
           }
+        }
+      } else {
+        // Fallback: DOM hit-test (no cache available)
+        const elements =
+          typeof document.elementsFromPoint === "function"
+            ? document.elementsFromPoint(x, y)
+            : (() => {
+                const el = document.elementFromPoint(x, y);
+                return el ? [el] : [];
+              })();
+        for (const el of elements) {
+          const slotEl = el.closest<HTMLElement>("[data-seat-slot]");
+          if (slotEl) {
+            hitSeatId = slotEl.dataset.seatId ?? null;
+            hitGuestId = slotEl.dataset.guestId || null;
+            break;
+          }
+        }
+      }
 
-          // Found a seat slot but it's empty or the source — schedule preview clear.
-          scheduleClear();
+      if (hitSeatId) {
+        const parsed = parseDropTargetId(hitSeatId);
+        if (
+          parsed?.type === "seat" &&
+          hitGuestId &&
+          hitGuestId !== sourceGuestId &&
+          !(parsed.tableNumber === sourceTableNumber && parsed.seatIndex === sourceSeatIndex)
+        ) {
+          // Pointer is over an occupied non-self seat — activate swap preview.
+          cancelClearTimer();
+          const nextPreview: GuestSwapPreview = {
+            sourceTableNumber,
+            sourceSeatIndex,
+            sourceGuestId,
+            targetTableNumber: parsed.tableNumber,
+            targetSeatIndex: parsed.seatIndex,
+            targetGuestId: hitGuestId,
+          };
+          if (
+            guestSwapPreviewRef.current?.targetTableNumber !== nextPreview.targetTableNumber ||
+            guestSwapPreviewRef.current?.targetSeatIndex !== nextPreview.targetSeatIndex
+          ) {
+            guestSwapPreviewRef.current = nextPreview;
+            setGuestSwapPreview(nextPreview);
+          }
           return;
         }
+        // Found a seat slot but it's empty or the source — schedule preview clear.
+        scheduleClear();
+        return;
       }
 
       // No seat slot found (gap between tables, overlay-only hit, etc.) — let
@@ -1281,11 +1355,26 @@ function SeatingApp({
       scheduleClear();
     };
 
-    const handlePointerMove = (e: PointerEvent) => updateFromPoint(e.clientX, e.clientY);
     const handleTouchMove = (e: TouchEvent) => {
       const touch = e.touches[0] ?? e.changedTouches[0];
-      if (touch) updateFromPoint(touch.clientX, touch.clientY);
+      if (touch) queuePoint(touch.clientX, touch.clientY);
     };
+
+    const flushQueuedPoint = () => {
+      animationFrameId = null;
+      if (!queuedPoint) return;
+      const { x, y } = queuedPoint;
+      queuedPoint = null;
+      updateFromPoint(x, y);
+    };
+
+    const queuePoint = (x: number, y: number) => {
+      queuedPoint = { x, y };
+      if (animationFrameId !== null) return;
+      animationFrameId = window.requestAnimationFrame(flushQueuedPoint);
+    };
+
+    const handlePointerMove = (e: PointerEvent) => queuePoint(e.clientX, e.clientY);
 
     window.addEventListener("pointermove", handlePointerMove, { passive: true });
     window.addEventListener("touchmove", handleTouchMove, { passive: true });
@@ -1294,6 +1383,10 @@ function SeatingApp({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("touchmove", handleTouchMove);
       cancelClearTimer();
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+      queuedPoint = null;
     };
   }, [activeDragIntent]);
 
@@ -1382,6 +1475,15 @@ function SeatingApp({
     setGuestSwapPreview(null);
     setDragOverlaySnapshot(captureDragOverlaySnapshot(intent));
     setActiveDragIntent(intent);
+    // Build seat rect cache for O(n) hit-testing (avoids elementsFromPoint per frame)
+    if (intent.kind === "guest" && intent.source === "seated") {
+      const cache = new Map<string, { rect: DOMRect; el: HTMLElement }>();
+      document.querySelectorAll<HTMLElement>("[data-seat-slot][data-seat-id]").forEach((el) => {
+        const seatId = el.dataset.seatId;
+        if (seatId) cache.set(seatId, { rect: el.getBoundingClientRect(), el });
+      });
+      seatRectCacheRef.current = cache;
+    }
   }, []);
 
   const handleDragCancel = useCallback(() => {
@@ -1395,9 +1497,11 @@ function SeatingApp({
     setGuestSwapPreview(null);
     setTableSwapPreview({ draggingTableNumber: null, swapTargetTableNumber: null });
     setDragOverlaySnapshot(null);
+    setActiveOverId(null);
     pointerRef.current = null;
     previewTargetKeyRef.current = null;
     previewLastComputedAtRef.current = 0;
+    seatRectCacheRef.current = null;
   }, []);
 
   const handleDragOver = useCallback(
@@ -1415,6 +1519,7 @@ function SeatingApp({
       const intent = parseDragIntent(active.data.current) ?? activeDragIntent;
       if (!intent) {
         clearAllPreview();
+        setActiveOverId(null);
         return;
       }
 
@@ -1424,8 +1529,11 @@ function SeatingApp({
         } else {
           clearAllPreview();
         }
+        setActiveOverId(null);
         return;
       }
+
+      setActiveOverId(String(over.id));
 
       // Swap preview for seated guests is driven entirely by the pointermove
       // useEffect (DOM hit-testing), not by dnd-kit collision events.
@@ -1436,20 +1544,30 @@ function SeatingApp({
 
       // For table drags, detect swap preview
       if (intent.kind === "table") {
-        const target = resolveDropTarget(over, pointerRef.current);
-        if (target?.type === "table") {
-          // Detect table swap scenario
-          const targetTable = state.tables.find((t) => t.tableNumber === target.tableNumber);
-          if (targetTable) {
-            setTableSwapPreview({
+        const target = parseDropTargetId(over ? String(over.id) : null);
+        if (target?.type === "table" && target.tableNumber !== intent.tableNumber) {
+          setTableSwapPreview((prev) => {
+            if (
+              prev.draggingTableNumber === intent.tableNumber &&
+              prev.swapTargetTableNumber === target.tableNumber
+            ) {
+              return prev;
+            }
+
+            return {
               draggingTableNumber: intent.tableNumber,
               swapTargetTableNumber: target.tableNumber,
-            });
-            return;
-          }
+            };
+          });
+          clearAllPreview();
+          return;
         }
-        // Clear preview if not over a table
-        setTableSwapPreview({ draggingTableNumber: null, swapTargetTableNumber: null });
+
+        setTableSwapPreview((prev) =>
+          prev.draggingTableNumber === null && prev.swapTargetTableNumber === null
+            ? prev
+            : { draggingTableNumber: null, swapTargetTableNumber: null }
+        );
         clearAllPreview();
         return;
       }
@@ -1474,7 +1592,16 @@ function SeatingApp({
         return;
       }
 
-      const action = routeDrop(intent, target, { state, guestProfiles, parties });
+      const {
+        state: latestState,
+        guestProfiles: latestProfiles,
+        parties: latestParties,
+      } = latestDropContextRef.current;
+      const action = routeDrop(intent, target, {
+        state: latestState,
+        guestProfiles: latestProfiles,
+        parties: latestParties,
+      });
       if (!action) {
         clearAllPreview();
         return;
@@ -1482,13 +1609,13 @@ function SeatingApp({
 
       previewTargetKeyRef.current = targetKey;
       previewLastComputedAtRef.current = now;
-      const previewState = seatingReducer(state, action);
+      const previewState = seatingReducer(latestState, action);
       setAutoSeatPreview((prev) => {
         if (prev && arePreviewTablesEqual(previewState.tables, prev.tables)) return prev;
         return { tables: previewState.tables };
       });
     },
-    [guestProfiles, parties, state]
+    [activeDragIntent]
   );
 
   const handleDragEnd = useCallback(
@@ -1504,10 +1631,12 @@ function SeatingApp({
       setGuestSwapPreview(null);
       setTableSwapPreview({ draggingTableNumber: null, swapTargetTableNumber: null });
       setDragOverlaySnapshot(null);
+      setActiveOverId(null);
       const ptr = pointerRef.current;
       pointerRef.current = null;
       previewTargetKeyRef.current = null;
       previewLastComputedAtRef.current = 0;
+      seatRectCacheRef.current = null;
 
       const intent = parseDragIntent(active.data.current) ?? activeDragIntent;
       if (!intent) return;
@@ -1604,7 +1733,7 @@ function SeatingApp({
 
         const { allGuestIds: importedGuestIds } = parseGuestsFromRows(parsed.guests);
         const reconciledState = reconcileStateToGuestIds(
-          { board: parsed.board, tables: parsed.tables, unassigned: [], lockedGuestIds: [] },
+          { board: parsed.board, tables: parsed.tables, unassigned: [] },
           importedGuestIds
         );
 
@@ -1695,263 +1824,270 @@ function SeatingApp({
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
-  const unassignedCount = state.unassigned.length;
-
-  // ── Overlay content ───────────────────────────────────────────────────────
-  const overlayContent = dragOverlaySnapshot ? (
-    <DragOverlayClone snapshot={dragOverlaySnapshot} />
-  ) : null;
-
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <DndContext
       sensors={sensors}
+      autoScroll={false}
       collisionDetection={dndCollisionDetection}
       onDragStart={handleDragStart}
       onDragCancel={handleDragCancel}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}>
-      <div
-        className={cn(
-          "relative flex h-screen flex-col overflow-hidden",
-          activeDragKind === "guest" && "**:cursor-grabbing!"
-        )}
-        data-drag-kind={activeDragKind ?? undefined}
-        onDragEnter={handleFileDragEnter}
-        onDragOver={handleFileDragOver}
-        onDragLeave={handleFileDragLeave}
-        onDrop={handleFileDrop}>
-        <header
-          ref={headerRef}
-          className="z-10 flex shrink-0 flex-wrap items-center gap-4 border-b border-border bg-card px-4 py-2.5">
-          <h1 className="whitespace-nowrap text-lg font-semibold text-foreground">
-            Seating Assignments
-          </h1>
-          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-            <Button type="button" size="sm" onClick={handleAddTable}>
-              <Plus size={14} aria-hidden="true" />
-              <span className="max-sm:hidden">Add Table</span>
-            </Button>
-            <div className="flex items-center gap-1">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                aria-label="Zoom out"
-                onClick={handleZoomOut}
-                disabled={boardZoom <= 0.5}>
-                <ZoomOut size={14} aria-hidden="true" />
-                <span className="max-sm:hidden">Zoom Out</span>
+      <SidebarProvider>
+        <div
+          className={cn(
+            "relative flex h-screen w-full flex-1 flex-col overflow-hidden",
+            activeDragKind === "guest" && "**:cursor-grabbing!"
+          )}
+          data-testid="file-drop-root"
+          data-drag-kind={activeDragKind ?? undefined}
+          onDragEnter={handleFileDragEnter}
+          onDragOver={handleFileDragOver}
+          onDragLeave={handleFileDragLeave}
+          onDrop={handleFileDrop}>
+          <header
+            ref={headerRef}
+            className="z-10 flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-2.5">
+            <SidebarTrigger className="h-8 w-8" />
+            <h1 className="whitespace-nowrap text-lg font-semibold text-foreground">
+              Seating Assignments
+            </h1>
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+              <Button type="button" size="sm" onClick={handleAddTable}>
+                <Plus size={14} aria-hidden="true" />
+                <span className="max-sm:hidden">Add Table</span>
               </Button>
+              {warnings.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="border-warning/30 bg-warning/10 text-warning-foreground hover:border-warning/45 hover:bg-warning/15"
+                  onClick={() => setShowWarnings((v) => !v)}>
+                  <AlertTriangle size={14} aria-hidden="true" />
+                  {warnings.length} data {warnings.length === 1 ? "issue" : "issues"}
+                </Button>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="outline" size="sm" aria-label="More actions">
+                    <MoreHorizontal size={14} aria-hidden="true" />
+                    More
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem onSelect={handleZoomOut} disabled={boardZoom <= 0.5}>
+                    <ZoomOut size={14} aria-hidden="true" />
+                    Zoom Out
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleZoomReset} disabled={boardZoom === 1}>
+                    <ZoomIn size={14} aria-hidden="true" />
+                    Reset Zoom ({Math.round(boardZoom * 100)}%)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleZoomIn} disabled={boardZoom >= 1.5}>
+                    <ZoomIn size={14} aria-hidden="true" />
+                    Zoom In
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={onThemeToggle}>
+                    {theme === "dark" ? (
+                      <Sun size={14} aria-hidden="true" />
+                    ) : (
+                      <Moon size={14} aria-hidden="true" />
+                    )}
+                    {theme === "dark" ? "Switch to Light Theme" : "Switch to Dark Theme"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleBoardSettings}>
+                    <Settings size={14} aria-hidden="true" />
+                    Board Settings
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
+                    <Upload size={14} aria-hidden="true" />
+                    Import
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleExport}>
+                    <Download size={14} aria-hidden="true" />
+                    Export
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={handleReset}
+                    className="text-destructive focus:bg-destructive/10 focus:text-destructive">
+                    <RotateCcw size={14} aria-hidden="true" />
+                    Reset
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
+                className="sr-only"
                 aria-label="Reset zoom"
-                onClick={handleZoomReset}
-                disabled={boardZoom === 1}>
+                onClick={handleZoomReset}>
                 {Math.round(boardZoom * 100)}%
               </Button>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                aria-label="Zoom in"
-                onClick={handleZoomIn}
-                disabled={boardZoom >= 1.5}>
-                <ZoomIn size={14} aria-hidden="true" />
-                <span className="max-sm:hidden">Zoom In</span>
+                className="sr-only"
+                onClick={handleExport}>
+                Export
               </Button>
-            </div>
-            <Button type="button" variant="outline" size="sm" onClick={onThemeToggle}>
-              {theme === "dark" ? (
-                <Sun size={14} aria-hidden="true" />
-              ) : (
-                <Moon size={14} aria-hidden="true" />
-              )}
-              <span className="max-sm:hidden">{theme === "dark" ? "Light" : "Dark"}</span>
-            </Button>
-            {warnings.length > 0 && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="border-warning/30 bg-warning/10 text-warning-foreground hover:border-warning/45 hover:bg-warning/15"
-                onClick={() => setShowWarnings((v) => !v)}>
-                <AlertTriangle size={14} aria-hidden="true" />
-                {warnings.length} data {warnings.length === 1 ? "issue" : "issues"}
-              </Button>
-            )}
-            <Button type="button" variant="outline" size="sm" onClick={handleReset}>
-              <RotateCcw size={14} aria-hidden="true" />
-              <span className="max-sm:hidden">Reset</span>
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => fileInputRef.current?.click()}>
-              <Upload size={14} aria-hidden="true" />
-              <span className="max-sm:hidden">Import</span>
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={handleExport}>
-              <Download size={14} aria-hidden="true" />
-              <span className="max-sm:hidden">Export</span>
-            </Button>
-            <input
-              ref={fileInputRef}
-              className="hidden"
-              type="file"
-              accept="application/json,.json,text/csv,.csv"
-              aria-label="Import seating JSON or CSV file"
-              onChange={handleImportChange}
-            />
-          </div>
-        </header>
-
-        {autoAssignWarning && (
-          <div
-            className="pointer-events-none fixed inset-x-0 z-30 flex justify-center px-4"
-            style={{ top: headerOffset }}>
-            <div
-              role="alert"
-              className="auto-assign-warning pointer-events-auto grid w-full max-w-3xl grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 rounded-xl border border-warning/35 bg-[color-mix(in_oklab,var(--card)_84%,var(--warning)_16%)] px-4 py-3 text-warning-foreground shadow-lg backdrop-blur supports-backdrop-filter:bg-[color-mix(in_oklab,var(--card)_72%,var(--warning)_28%)]">
-              <AlertTriangle
-                className="auto-assign-warning__icon h-4 w-4 shrink-0 text-warning"
-                aria-hidden="true"
+              <input
+                ref={fileInputRef}
+                className="hidden"
+                type="file"
+                accept="application/json,.json,text/csv,.csv"
+                aria-label="Import seating JSON or CSV file"
+                onChange={handleImportChange}
               />
-              <div className="min-w-0">
-                <p className="auto-assign-warning__title">Auto-seat blocked</p>
-                <p className="auto-assign-warning__message">{autoAssignWarning}</p>
-              </div>
-              <button
-                type="button"
-                aria-label="Dismiss"
-                className="auto-assign-warning__dismiss"
-                onClick={() => setAutoAssignWarning(null)}>
-                <X className="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
             </div>
-          </div>
-        )}
+          </header>
 
-        {showWarnings && (
-          <div className="px-4 pb-2">
-            <Alert className="max-h-32 overflow-y-auto" variant="destructive">
-              <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-              <AlertTitle>Data issues</AlertTitle>
-              <AlertDescription>
-                <ul className="list-disc space-y-1 pl-4">
-                  {warnings.map((warning, index) => (
-                    <li key={index}>{warning}</li>
-                  ))}
-                </ul>
-              </AlertDescription>
-            </Alert>
-          </div>
-        )}
+          {autoAssignWarning && (
+            <div
+              className="pointer-events-none fixed inset-x-0 z-30 flex justify-center px-4"
+              style={{ top: headerOffset }}>
+              <div
+                role="alert"
+                className="auto-assign-warning pointer-events-auto grid w-full max-w-3xl grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 rounded-xl border border-warning/35 bg-[color-mix(in_oklab,var(--card)_84%,var(--warning)_16%)] px-4 py-3 text-warning-foreground shadow-lg backdrop-blur supports-backdrop-filter:bg-[color-mix(in_oklab,var(--card)_72%,var(--warning)_28%)]">
+                <AlertTriangle
+                  className="auto-assign-warning__icon h-4 w-4 shrink-0 text-warning"
+                  aria-hidden="true"
+                />
+                <div className="min-w-0">
+                  <p className="auto-assign-warning__title">Auto-seat blocked</p>
+                  <p className="auto-assign-warning__message">{autoAssignWarning}</p>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Dismiss"
+                  className="auto-assign-warning__dismiss"
+                  onClick={() => setAutoAssignWarning(null)}>
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          )}
 
-        <div className="flex flex-1 overflow-hidden">
-          <div className={cn("contents", mobilePanel === "tables" && "max-sm:hidden")}>
+          {showWarnings && (
+            <div className="px-4 pb-2">
+              <Alert className="max-h-32 overflow-y-auto" variant="destructive">
+                <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                <AlertTitle>Data issues</AlertTitle>
+                <AlertDescription>
+                  <ul className="list-disc space-y-1 pl-4">
+                    {warnings.map((warning, index) => (
+                      <li key={index}>{warning}</li>
+                    ))}
+                  </ul>
+                </AlertDescription>
+              </Alert>
+            </div>
+          )}
+
+          <div className="flex min-h-0 flex-1 overflow-hidden">
             <Sidebar
               onAddGuest={handleAddGuest}
               onEditGuest={handleEditGuest}
               onDeleteGuest={handleDeleteGuest}
             />
-          </div>
-          <div className={cn("contents", mobilePanel === "sidebar" && "max-sm:hidden")}>
-            <TableBoard
-              activeDragKind={activeDragKind}
-              activeDragGuestId={activeDragGuestId}
-              activeDragTableNumber={activeDragTableNumber}
-              autoSeatPreview={autoSeatPreview}
-              guestSwapPreview={guestSwapPreview}
-              tableSwapPreview={tableSwapPreview}
-              zoom={boardZoom}
-              onEditGuest={handleEditGuest}
-              onDeleteGuest={handleDeleteGuest}
-              onEditTable={handleEditTable}
-              onDeleteTable={handleDeleteTable}
-              onBoardSettings={handleBoardSettings}
-            />
+            <SidebarInset className="min-h-0 min-w-0 w-0">
+              <div className="flex min-h-0 flex-1 overflow-hidden">
+                <TableBoard
+                  activeDragKind={activeDragKind}
+                  activeDragGuestId={activeDragGuestId}
+                  autoSeatPreview={autoSeatPreview}
+                  guestSwapPreview={guestSwapPreview}
+                  tableSwapPreview={tableSwapPreview}
+                  zoom={boardZoom}
+                  activeOverId={activeOverId}
+                  onEditGuest={handleEditGuest}
+                  onDeleteGuest={handleDeleteGuest}
+                  onEditTable={handleEditTable}
+                  onDeleteTable={handleDeleteTable}
+                  onBoardSettings={handleBoardSettings}
+                />
+              </div>
+
+              <GuestDialog
+                open={guestDialogState !== null}
+                mode={guestDialogState?.mode ?? "create"}
+                initialValues={guestDialogInitialValues}
+                hostOptions={hostOptions}
+                partyOptions={partyOptions}
+                circleOptions={circleOptions}
+                onClose={() => setGuestDialogState(null)}
+                onSubmit={handleSubmitGuest}
+              />
+
+              <ConfirmDialog
+                open={pendingDeleteGuestId !== null}
+                title="Delete Guest"
+                description={
+                  deleteGuestRow
+                    ? `${deleteGuestRow.fullName} will be removed from any assigned seat and from the unassigned list. Empty parties or circles will disappear automatically when no members remain.`
+                    : "This guest will be removed from seating and the guest list."
+                }
+                confirmLabel="Delete Guest"
+                onClose={() => setPendingDeleteGuestId(null)}
+                onConfirm={handleConfirmDeleteGuest}
+              />
+
+              <TableDialog
+                open={tableDialogState !== null}
+                mode={tableDialogState?.mode ?? "create"}
+                initialValues={tableDialogInitialValues}
+                onClose={() => setTableDialogState(null)}
+                onSubmit={handleSubmitTable}
+              />
+
+              <ConfirmDialog
+                open={pendingDeleteTableNumber !== null}
+                title="Delete Table"
+                description={
+                  pendingDeleteTable
+                    ? `"${pendingDeleteTable.name}" will be removed. Any seated guests will move to the unassigned list.`
+                    : "This table will be removed and its guests will be unassigned."
+                }
+                confirmLabel="Delete Table"
+                onClose={() => setPendingDeleteTableNumber(null)}
+                onConfirm={handleConfirmDeleteTable}
+              />
+
+              <BoardSettingsDialog
+                open={boardSettingsOpen}
+                currentBoard={state.board}
+                onClose={() => setBoardSettingsOpen(false)}
+                onSubmit={handleSubmitBoardSettings}
+              />
+
+              {dragOverlaySnapshot &&
+                createPortal(
+                  <div
+                    ref={overlayRef}
+                    className="pointer-events-none"
+                    style={{
+                      position: "fixed",
+                      left: dragOverlaySnapshot.left,
+                      top: dragOverlaySnapshot.top,
+                      width: dragOverlaySnapshot.width,
+                      height: dragOverlaySnapshot.height,
+                      zIndex: 9999,
+                      willChange: "transform",
+                    }}>
+                    <DragOverlayClone snapshot={dragOverlaySnapshot} />
+                  </div>,
+                  document.body
+                )}
+            </SidebarInset>
           </div>
         </div>
-
-        <GuestDialog
-          open={guestDialogState !== null}
-          mode={guestDialogState?.mode ?? "create"}
-          initialValues={guestDialogInitialValues}
-          hostOptions={hostOptions}
-          partyOptions={partyOptions}
-          circleOptions={circleOptions}
-          onClose={() => setGuestDialogState(null)}
-          onSubmit={handleSubmitGuest}
-        />
-
-        <ConfirmDialog
-          open={pendingDeleteGuestId !== null}
-          title="Delete Guest"
-          description={
-            deleteGuestRow
-              ? `${deleteGuestRow.fullName} will be removed from any assigned seat and from the unassigned list. Empty parties or circles will disappear automatically when no members remain.`
-              : "This guest will be removed from seating and the guest list."
-          }
-          confirmLabel="Delete Guest"
-          onClose={() => setPendingDeleteGuestId(null)}
-          onConfirm={handleConfirmDeleteGuest}
-        />
-
-        <TableDialog
-          open={tableDialogState !== null}
-          mode={tableDialogState?.mode ?? "create"}
-          initialValues={tableDialogInitialValues}
-          onClose={() => setTableDialogState(null)}
-          onSubmit={handleSubmitTable}
-        />
-
-        <ConfirmDialog
-          open={pendingDeleteTableNumber !== null}
-          title="Delete Table"
-          description={
-            pendingDeleteTable
-              ? `"${pendingDeleteTable.name}" will be removed. Any seated guests will move to the unassigned list.`
-              : "This table will be removed and its guests will be unassigned."
-          }
-          confirmLabel="Delete Table"
-          onClose={() => setPendingDeleteTableNumber(null)}
-          onConfirm={handleConfirmDeleteTable}
-        />
-
-        <BoardSettingsDialog
-          open={boardSettingsOpen}
-          currentBoard={state.board}
-          onClose={() => setBoardSettingsOpen(false)}
-          onSubmit={handleSubmitBoardSettings}
-        />
-
-        <div className="fixed bottom-0 left-0 right-0 z-100 hidden h-13 border-t border-border bg-card max-sm:flex">
-          <button
-            type="button"
-            className={cn(
-              "flex flex-1 cursor-pointer items-center justify-center border-none bg-transparent px-0 text-sm font-medium text-muted-foreground transition-[color,background] duration-120 active:bg-accent",
-              mobilePanel === "sidebar" && "border-t-2 border-primary text-foreground"
-            )}
-            onClick={() => setMobilePanel("sidebar")}>
-            Unassigned{unassignedCount > 0 ? ` (${unassignedCount})` : ""}
-          </button>
-          <button
-            type="button"
-            className={cn(
-              "flex flex-1 cursor-pointer items-center justify-center border-none bg-transparent px-0 text-sm font-medium text-muted-foreground transition-[color,background] duration-120 active:bg-accent",
-              mobilePanel === "tables" && "border-t-2 border-primary text-foreground"
-            )}
-            onClick={() => setMobilePanel("tables")}>
-            Tables
-          </button>
-        </div>
-
-        <DragOverlay dropAnimation={null}>{overlayContent}</DragOverlay>
-      </div>
+      </SidebarProvider>
     </DndContext>
   );
 }

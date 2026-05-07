@@ -37,7 +37,6 @@ export type SeatingAction =
       seatIndex?: number;
       guestProfiles?: Record<string, GuestProfile>;
     }
-  | { type: "SET_GUEST_ANCHORED"; guestId: string; anchored: boolean }
   | {
       type: "AUTO_ASSIGN_GUESTS";
       guestIds: string[];
@@ -92,7 +91,6 @@ export type SeatingAction =
     }
   | { type: "DELETE_TABLE"; tableNumber: number }
   | { type: "TOGGLE_SEAT_DISABLED"; tableNumber: number; seatIndex: number }
-  | { type: "TOGGLE_TABLE_GUEST_LOCKS"; tableNumber: number }
   | { type: "TOGGLE_EMPTY_TABLE_SEATS"; tableNumber: number };
 
 function createEmptySeatSlots(capacity = TABLE_CAPACITY): Array<string | null> {
@@ -536,7 +534,6 @@ export function createInitialState(allGuestIds: string[]): SeatingState {
     board,
     tables,
     unassigned: [...allGuestIds],
-    lockedGuestIds: [],
   };
 }
 
@@ -590,13 +587,11 @@ function assignGuestsWithOverflow(
 
     if (insertionPositions.length === 0) return state;
 
-    const lockedSet = new Set(state.lockedGuestIds ?? []);
     const shiftedOccupants: string[] = [];
 
     for (const position of insertionPositions) {
       const occupantId = nextTables[position.tableIdx].guestIds[position.seatIdx];
       if (occupantId === null) continue;
-      if (lockedSet.has(occupantId)) return state;
 
       shiftedOccupants.push(occupantId);
     }
@@ -613,7 +608,6 @@ function assignGuestsWithOverflow(
       board: state.board,
       tables: nextTables,
       unassigned: state.unassigned.filter((guestId) => !incomingSet.has(guestId)),
-      lockedGuestIds: state.lockedGuestIds ?? [],
     };
   }
 
@@ -657,7 +651,6 @@ function assignGuestsWithOverflow(
     board: state.board,
     tables: nextTables,
     unassigned: state.unassigned.filter((guestId) => !incomingSet.has(guestId)),
-    lockedGuestIds: state.lockedGuestIds ?? [],
   };
 }
 
@@ -1282,8 +1275,6 @@ function assignGuestsSmart(
   const orderedGuestIds = getUniqueGuestIds(incomingGuestIds);
   if (orderedGuestIds.length === 0) return state;
 
-  const lockedSet = new Set(state.lockedGuestIds ?? []);
-
   // Already-seated guests (locked or not) are never disturbed by default.
   // Targeted table-drop auto-seat can opt-in to re-seating the incoming guests.
   const alreadySeatedSet = new Set(
@@ -1296,13 +1287,11 @@ function assignGuestsSmart(
   const targetScope = options?.targetScope;
 
   const incomingReseatSet = new Set(
-    allowReseatIncoming
-      ? orderedGuestIds.filter((id) => !lockedSet.has(id) && alreadySeatedSet.has(id))
-      : []
+    allowReseatIncoming ? orderedGuestIds.filter((id) => alreadySeatedSet.has(id)) : []
   );
 
   const toSeat = orderedGuestIds.filter(
-    (id) => !lockedSet.has(id) && (!alreadySeatedSet.has(id) || incomingReseatSet.has(id))
+    (id) => !alreadySeatedSet.has(id) || incomingReseatSet.has(id)
   );
   if (toSeat.length === 0) return state;
 
@@ -1460,7 +1449,6 @@ function assignGuestsSmart(
     board: state.board,
     tables: nextTables,
     unassigned: state.unassigned.filter((id) => !successfullyPlaced.has(id)),
-    lockedGuestIds: state.lockedGuestIds ?? [],
   };
 }
 
@@ -1556,9 +1544,6 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
         ...state,
         tables: nextTables,
         unassigned: [...new Set([...state.unassigned, ...resizedTable.displacedGuestIds])],
-        lockedGuestIds: (state.lockedGuestIds ?? []).filter(
-          (guestId) => !resizedTable.displacedGuestIds.includes(guestId)
-        ),
       };
     }
 
@@ -1576,25 +1561,6 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
         ...state,
         tables: state.tables.filter((entry) => entry.tableNumber !== action.tableNumber),
         unassigned: [...new Set([...state.unassigned, ...displacedGuestIds])],
-        lockedGuestIds: (state.lockedGuestIds ?? []).filter(
-          (guestId) => !displacedGuestIds.includes(guestId)
-        ),
-      };
-    }
-
-    case "SET_GUEST_ANCHORED": {
-      const currentlyAnchored = (state.lockedGuestIds ?? []).includes(action.guestId);
-      if (action.anchored === currentlyAnchored) {
-        return state;
-      }
-
-      const nextLockedGuestIds = action.anchored
-        ? [...new Set([...(state.lockedGuestIds ?? []), action.guestId])]
-        : (state.lockedGuestIds ?? []).filter((guestId) => guestId !== action.guestId);
-
-      return {
-        ...state,
-        lockedGuestIds: nextLockedGuestIds,
       };
     }
 
@@ -1659,11 +1625,6 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
           seatIndex >= 0 &&
           seatIndex < table.guestIds.length
         ) {
-          const lockedSet = new Set(state.lockedGuestIds ?? []);
-          if (lockedSet.has(incomingGuestId) || lockedSet.has(targetSeatGuestId)) {
-            return state;
-          }
-
           const nextTables = state.tables.map((currentTable) => ({
             ...currentTable,
             guestIds: [...currentTable.guestIds],
@@ -1691,7 +1652,6 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
             board: state.board,
             tables: nextTables,
             unassigned: state.unassigned.filter((guestId) => guestId !== incomingGuestId),
-            lockedGuestIds: state.lockedGuestIds ?? [],
           };
         }
       }
@@ -1743,7 +1703,6 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
         board: state.board,
         tables: newTables,
         unassigned: newUnassigned,
-        lockedGuestIds: state.lockedGuestIds ?? [],
       };
     }
 
@@ -1754,12 +1713,10 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
         guestIds: removeGuestsFromSeatSlots(table.guestIds, removedSet),
       }));
       const newUnassigned = [...new Set([...state.unassigned, ...action.guestIds])];
-      const newLocked = (state.lockedGuestIds ?? []).filter((id) => !removedSet.has(id));
       return {
         ...state,
         tables: newTables,
         unassigned: newUnassigned,
-        lockedGuestIds: newLocked,
       };
     }
 
@@ -1777,12 +1734,10 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
           : entry
       );
       const newUnassigned = [...new Set([...state.unassigned, ...clearedGuestIds])];
-      const newLocked = (state.lockedGuestIds ?? []).filter((id) => !clearedGuestIds.includes(id));
       return {
         ...state,
         tables: newTables,
         unassigned: newUnassigned,
-        lockedGuestIds: newLocked,
       };
     }
 
@@ -1796,7 +1751,6 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       const isCurrentlyDisabled = currentDisabled.includes(seatIndex);
 
       let nextUnassigned = state.unassigned;
-      let nextLockedGuestIds = state.lockedGuestIds ?? [];
       let nextGuestIds = table.guestIds;
 
       if (!isCurrentlyDisabled) {
@@ -1805,7 +1759,6 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
         if (evictedGuestId !== null) {
           nextGuestIds = table.guestIds.map((id, i) => (i === seatIndex ? null : id));
           nextUnassigned = [...new Set([...state.unassigned, evictedGuestId])];
-          nextLockedGuestIds = nextLockedGuestIds.filter((id) => id !== evictedGuestId);
         }
       }
 
@@ -1821,21 +1774,7 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
         ...state,
         tables: nextTables,
         unassigned: nextUnassigned,
-        lockedGuestIds: nextLockedGuestIds,
       };
-    }
-
-    case "TOGGLE_TABLE_GUEST_LOCKS": {
-      const table = state.tables.find((t) => t.tableNumber === action.tableNumber);
-      if (!table) return state;
-      const seatedGuestIds = table.guestIds.filter((id): id is string => id !== null);
-      if (seatedGuestIds.length === 0) return state;
-      const currentLocked = new Set(state.lockedGuestIds ?? []);
-      const allLocked = seatedGuestIds.every((id) => currentLocked.has(id));
-      const nextLockedGuestIds = allLocked
-        ? (state.lockedGuestIds ?? []).filter((id) => !seatedGuestIds.includes(id))
-        : [...new Set([...(state.lockedGuestIds ?? []), ...seatedGuestIds])];
-      return { ...state, lockedGuestIds: nextLockedGuestIds };
     }
 
     case "TOGGLE_EMPTY_TABLE_SEATS": {
@@ -1879,7 +1818,6 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       );
       if (activeIndex === -1 || overIndex === -1) return state;
 
-      const lockedSet = new Set(state.lockedGuestIds ?? []);
       const activeTable = state.tables[activeIndex];
       const overTable = state.tables[overIndex];
       const disabledOverSeats = new Set(overTable.disabledSeats ?? []);
@@ -1892,7 +1830,7 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
 
       for (let seatIdx = 0; seatIdx < activeTable.guestIds.length; seatIdx += 1) {
         const guestId = activeTable.guestIds[seatIdx];
-        if (!guestId || lockedSet.has(guestId)) continue;
+        if (!guestId) continue;
 
         nextActiveGuestIds[seatIdx] = null;
 
@@ -1940,7 +1878,6 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       const activeTable = state.tables[activeIndex];
       const overTable = state.tables[overIndex];
 
-      const lockedSet = new Set(state.lockedGuestIds ?? []);
       const nextTables = state.tables.map((table) => ({
         ...table,
         guestIds: [...table.guestIds],
@@ -1955,7 +1892,7 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       const transferableFromActiveIndexes: number[] = [];
       for (let seatIdx = 0; seatIdx < activeTable.guestIds.length; seatIdx += 1) {
         const guestId = activeTable.guestIds[seatIdx];
-        if (!guestId || lockedSet.has(guestId)) continue;
+        if (!guestId) continue;
         nextActiveGuestIds[seatIdx] = null;
         transferableFromActive.push(guestId);
         transferableFromActiveIndexes.push(seatIdx);
@@ -1965,7 +1902,7 @@ export function seatingReducer(state: SeatingState, action: SeatingAction): Seat
       const transferableFromOverIndexes: number[] = [];
       for (let seatIdx = 0; seatIdx < overTable.guestIds.length; seatIdx += 1) {
         const guestId = overTable.guestIds[seatIdx];
-        if (!guestId || lockedSet.has(guestId)) continue;
+        if (!guestId) continue;
         nextOverGuestIds[seatIdx] = null;
         transferableFromOver.push(guestId);
         transferableFromOverIndexes.push(seatIdx);

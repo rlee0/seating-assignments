@@ -293,9 +293,6 @@ function normalizeSeatingState(state: SeatingState): SeatingState | null {
     ...state,
     board,
     tables: normalizedTables as SeatingState["tables"],
-    lockedGuestIds: Array.isArray(state.lockedGuestIds)
-      ? (state.lockedGuestIds as unknown[]).filter((v): v is string => typeof v === "string")
-      : [],
   };
 }
 
@@ -318,32 +315,26 @@ function areSeatingStatesEqual(left: SeatingState, right: SeatingState): boolean
   if (left.tables.length !== right.tables.length) return false;
   if (!areSeatArraysEqual(left.unassigned, right.unassigned)) return false;
 
-  return (
-    left.tables.every((table, index) => {
-      const other = right.tables[index];
+  return left.tables.every((table, index) => {
+    const other = right.tables[index];
 
-      const leftDisabled = [...(table.disabledSeats ?? [])].sort((a, b) => a - b);
-      const rightDisabled = [...(other.disabledSeats ?? [])].sort((a, b) => a - b);
+    const leftDisabled = [...(table.disabledSeats ?? [])].sort((a, b) => a - b);
+    const rightDisabled = [...(other.disabledSeats ?? [])].sort((a, b) => a - b);
 
-      return (
-        table.id === other.id &&
-        table.tableNumber === other.tableNumber &&
-        table.name === other.name &&
-        table.presetId === other.presetId &&
-        table.shape === other.shape &&
-        table.gridPosition.row === other.gridPosition.row &&
-        table.gridPosition.column === other.gridPosition.column &&
-        JSON.stringify(table.seatConfig) === JSON.stringify(other.seatConfig) &&
-        areSeatArraysEqual(table.guestIds, other.guestIds) &&
-        leftDisabled.length === rightDisabled.length &&
-        leftDisabled.every((v, i) => v === rightDisabled[i])
-      );
-    }) &&
-    areSeatArraysEqual(
-      [...(left.lockedGuestIds ?? [])].sort(),
-      [...(right.lockedGuestIds ?? [])].sort()
-    )
-  );
+    return (
+      table.id === other.id &&
+      table.tableNumber === other.tableNumber &&
+      table.name === other.name &&
+      table.presetId === other.presetId &&
+      table.shape === other.shape &&
+      table.gridPosition.row === other.gridPosition.row &&
+      table.gridPosition.column === other.gridPosition.column &&
+      JSON.stringify(table.seatConfig) === JSON.stringify(other.seatConfig) &&
+      areSeatArraysEqual(table.guestIds, other.guestIds) &&
+      leftDisabled.length === rightDisabled.length &&
+      leftDisabled.every((v, i) => v === rightDisabled[i])
+    );
+  });
 }
 
 function seatingHistoryReducer(state: HistoryState, action: HistoryAction): HistoryState {

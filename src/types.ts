@@ -218,7 +218,6 @@ export interface SeatingState {
   board: BoardState;
   tables: TableState[];
   unassigned: string[]; // guest ids not yet seated
-  lockedGuestIds: string[]; // anchored guest ids; auto-seat never moves them
 }
 
 export interface PersistedSeatingData {
