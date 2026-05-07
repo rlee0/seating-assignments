@@ -14,10 +14,11 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { useDroppable } from "@dnd-kit/core";
-import { useSearch } from "../store/SearchContext";
-import { useSeating } from "../store/SeatingContext";
+import { useHighlight, useSearchQuery } from "../store/SearchContext";
+import { useSeatingData } from "../store/SeatingContext";
 
 const sidebarSortCollator = new Intl.Collator(undefined, { sensitivity: "base" });
+const EMPTY_GUEST_IDS: string[] = [];
 
 function comparePartiesForSidebar(
   a: { host: string; circle: string; party: string },
@@ -41,17 +42,16 @@ export default function Sidebar({
   onEditGuest: (guestId: string) => void;
   onDeleteGuest: (guestId: string) => void;
 }) {
-  const { state, parties, guests } = useSeating();
+  const { state, parties, guests } = useSeatingData();
+  const { searchQuery, setSearchQuery } = useSearchQuery();
   const {
-    searchQuery,
-    setSearchQuery,
     setCircleHighlightOn,
     isPartyHighlightOn,
     setPartyHighlightOn,
     isHostHighlightOn,
     setHostHighlightOn,
     partyPulseNonce,
-  } = useSearch();
+  } = useHighlight();
   const unassignedSet = useMemo(() => new Set(state.unassigned), [state.unassigned]);
   const normalizedQuery = useMemo(() => normalizeForSearch(searchQuery.trim()), [searchQuery]);
 
@@ -294,7 +294,7 @@ export default function Sidebar({
             <div key={circleName} className="mb-3.5 grid grid-cols-1 gap-2 last:mb-0">
               <CircleCard
                 circleName={circleName}
-                guestIds={circledGuestIds.get(circleName) ?? []}
+                guestIds={circledGuestIds.get(circleName) ?? EMPTY_GUEST_IDS}
                 isExpanded={!collapsedCircles.has(circleName)}
                 onToggleExpanded={() => toggleCircleExpanded(circleName)}
               />

@@ -1,11 +1,12 @@
 import { ChevronRight, House } from "lucide-react";
+import React, { useMemo } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import GuestChip from "./GuestChip";
 import type { Party } from "../types";
-import React from "react";
 import { cn } from "../lib/utils";
 import { useDraggable } from "@dnd-kit/core";
+import { lockViewportScroll } from "@/dnd/scrollLock";
 
 interface Props {
   party: Party;
@@ -32,21 +33,37 @@ const PartyCard = React.memo(function PartyCard({
     data: { kind: "party", partyId: party.id, origin: "sidebar" },
   });
 
-  const containerListeners = {
-    ...listeners,
-    onPointerDown: (event: React.PointerEvent) => {
-      if ((event.target as Element).closest("[data-guest-chip]")) return;
-      listeners?.onPointerDown?.(event);
-    },
-    onMouseDown: (event: React.MouseEvent) => {
-      if ((event.target as Element).closest("[data-guest-chip]")) return;
-      listeners?.onMouseDown?.(event);
-    },
-    onTouchStart: (event: React.TouchEvent) => {
-      if ((event.target as Element).closest("[data-guest-chip]")) return;
-      listeners?.onTouchStart?.(event);
-    },
-  };
+  const containerListeners = useMemo(
+    () => ({
+      ...listeners,
+      onPointerDown: (event: React.PointerEvent) => {
+        if ((event.target as Element).closest("[data-guest-chip]")) return;
+        const viewport = (event.currentTarget as HTMLElement).closest<HTMLElement>(
+          "[data-board-viewport]"
+        );
+        if (viewport) {
+          const release = lockViewportScroll(viewport);
+          const cleanup = () => {
+            release();
+            document.removeEventListener("pointerup", cleanup, true);
+            document.removeEventListener("pointercancel", cleanup, true);
+          };
+          document.addEventListener("pointerup", cleanup, { capture: true });
+          document.addEventListener("pointercancel", cleanup, { capture: true });
+        }
+        listeners?.onPointerDown?.(event);
+      },
+      onMouseDown: (event: React.MouseEvent) => {
+        if ((event.target as Element).closest("[data-guest-chip]")) return;
+        listeners?.onMouseDown?.(event);
+      },
+      onTouchStart: (event: React.TouchEvent) => {
+        if ((event.target as Element).closest("[data-guest-chip]")) return;
+        listeners?.onTouchStart?.(event);
+      },
+    }),
+    [listeners]
+  );
 
   return (
     <div
@@ -57,7 +74,7 @@ const PartyCard = React.memo(function PartyCard({
       {...attributes}
       className={cn(
         "cursor-grab rounded-lg border border-border bg-card transition-colors hover:bg-(--card-hover-bg) hover:border-(--card-hover-border) active:cursor-grabbing",
-        isDragging ? "opacity-0" : null
+        isDragging ? "opacity-[0.12]" : null
       )}>
       <div className="flex min-w-0 items-center gap-2 px-3 py-2.5 select-none">
         <button

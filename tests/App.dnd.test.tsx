@@ -238,7 +238,12 @@ function triggerDragMove(params: {
   });
 }
 
-function triggerDragEnd(params: { id: string; data: unknown; overId: string | null }): void {
+function triggerDragEnd(params: {
+  id: string;
+  data: unknown;
+  overId: string | null;
+  collisions?: Array<{ id: string | number }>;
+}): void {
   if (!latestDndProps?.onDragEnd) throw new Error("DndContext onDragEnd not available");
   act(() => {
     latestDndProps?.onDragEnd?.({
@@ -248,6 +253,7 @@ function triggerDragEnd(params: { id: string; data: unknown; overId: string | nu
         rect: { current: { translated: null, initial: null } },
       },
       over: params.overId ? { id: params.overId } : null,
+      collisions: params.collisions ?? null,
     });
   });
 }
@@ -1736,5 +1742,111 @@ describe("guest hovercards", () => {
 
     // After the delay, hovercard should appear
     expect(screen.queryByText("Alpha Party")).not.toBeNull();
+  });
+});
+
+// ─── Flow 13 — seated guest → unassigned (remove from seat) ──────────────────
+
+describe("Flow 13 — seated guest → unassigned (remove from seat)", () => {
+  beforeEach(() => {
+    ensureLocalStorage().clear();
+    latestDndProps = null;
+  });
+
+  it("removes a seated guest from their seat and returns them to sidebar", () => {
+    const rows = makeRows([{ name: "Alice" }]);
+    let state = createInitialState(["g0"]);
+    state = assignSingle(state, 1, "g0", 0);
+    seedApp(rows, state);
+
+    const { container } = render(<App />);
+
+    expect(getSeatGuestName(container, 1, 0)).toBe("Alice");
+    expect(sidebarContainsGuest(container, "Alice")).toBe(false);
+
+    triggerDragEnd({
+      id: "guest-g0",
+      data: { kind: "guest", guestId: "g0", origin: "table", tableNumber: 1, seatIndex: 0 },
+      overId: "unassigned",
+    });
+
+    expect(getSeatGuestName(container, 1, 0)).toBeNull();
+    expect(sidebarContainsGuest(container, "Alice")).toBe(true);
+  });
+
+  it("does nothing when an unassigned guest is dragged back to sidebar", () => {
+    const rows = makeRows([{ name: "Alice" }]);
+    seedApp(rows);
+
+    const { container } = render(<App />);
+
+    expect(sidebarContainsGuest(container, "Alice")).toBe(true);
+
+    triggerDragEnd({
+      id: "guest-g0",
+      data: { kind: "guest", guestId: "g0", origin: "sidebar" },
+      overId: "unassigned",
+    });
+
+    expect(sidebarContainsGuest(container, "Alice")).toBe(true);
+  });
+});
+
+// ─── Flow 14 — party dragged to unassigned when all seated (no-op) ────────────
+
+describe("Flow 14 — party → unassigned with all members seated (no-op)", () => {
+  beforeEach(() => {
+    ensureLocalStorage().clear();
+    latestDndProps = null;
+  });
+
+  it("does not unseat party members when the party is dropped on the sidebar", () => {
+    const rows = makeRows([
+      { name: "Alice", party: "Alpha" },
+      { name: "Bob", party: "Alpha" },
+    ]);
+    const profiles = makeProfiles(rows);
+    let state = createInitialState(["g0", "g1"]);
+    state = assignSingle(state, 1, "g0", 0, profiles);
+    state = assignSingle(state, 1, "g1", 1, profiles);
+    seedApp(rows, state);
+
+    const { container } = render(<App />);
+
+    triggerDragEnd({
+      id: "party-p0",
+      data: { kind: "party", partyId: "p0", origin: "sidebar" },
+      overId: "unassigned",
+    });
+
+    // Seated members are unchanged — the router only passes unassigned members to REMOVE_GUESTS.
+    expect(getSeatGuestName(container, 1, 0)).toBe("Alice");
+    expect(getSeatGuestName(container, 1, 1)).toBe("Bob");
+  });
+});
+
+// ─── collisions fallback ───────────────────────────────────────────────────────
+
+describe("collisions fallback — seat resolved from collisions array", () => {
+  beforeEach(() => {
+    ensureLocalStorage().clear();
+    latestDndProps = null;
+  });
+
+  it("assigns an unassigned guest to a seat identified via collisions when over is null", () => {
+    const rows = makeRows([{ name: "Alice" }]);
+    seedApp(rows);
+
+    const { container } = render(<App />);
+
+    triggerDragEnd({
+      id: "guest-g0",
+      data: { kind: "guest", guestId: "g0", origin: "sidebar" },
+      overId: null,
+      collisions: [{ id: "seat-1-0" }],
+    });
+
+    expect(getSeatGuestName(container, 1, 0)).toBe("Alice");
+    expect(sidebarContainsGuest(container, "Alice")).toBe(false);
   });
 });

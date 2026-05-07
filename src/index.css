@@ -276,3 +276,9 @@
   background: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
   border-radius: 3px;
 }
+
+/* ─── Drag overlay ────────────────────────────────────────────────────────── */
+
+.dnd-overlay {
+  filter: drop-shadow(0 6px 20px rgb(0 0 0 / 0.16));
+}

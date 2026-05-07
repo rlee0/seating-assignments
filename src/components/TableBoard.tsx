@@ -12,7 +12,7 @@ import { Settings } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useDroppable } from "@dnd-kit/core";
 import { memo, type ReactNode, useLayoutEffect, useMemo, useRef } from "react";
-import { useSeating } from "../store/SeatingContext";
+import { useSeatingData } from "../store/SeatingContext";
 
 // Tables no longer reorder on drop — disable all sortable position animations.
 function swapSortingStrategy(): Transform | null {
@@ -91,7 +91,7 @@ function BoardCell({
       data-board-cell-id={cellId}
       data-board-cell
       className={cn(
-        "relative flex items-center justify-center min-h-40 rounded-md border border-dashed border-border/70 p-0",
+        "relative flex items-center justify-center min-h-40 rounded-md border border-dashed border-border/70 p-0 transition-colors duration-150",
         compact && "self-start min-h-0",
         isOver && "border-(--table-drop-border) bg-(--table-drop-bg)"
       )}>
@@ -127,7 +127,7 @@ export default memo(function TableBoard({
   onDeleteTable,
   onBoardSettings,
 }: Props) {
-  const { state } = useSeating();
+  const { state } = useSeatingData();
   const boardRef = useRef<HTMLDivElement | null>(null);
   const currentRectsRef = useRef<Map<number, DOMRect>>(new Map());
   const useDenseGap = state.board.rows > 5 || state.board.columns > 5;

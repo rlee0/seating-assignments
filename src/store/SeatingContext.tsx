@@ -53,7 +53,7 @@ function buildGuestProfiles(
   return profiles;
 }
 
-interface SeatingContextValue {
+interface SeatingDataValue {
   state: SeatingState;
   snapshot: PersistedSeatingData;
   dispatch: React.Dispatch<SeatingAction>;
@@ -65,15 +65,21 @@ interface SeatingContextValue {
   parties: ParsedData["parties"];
   allGuestIds: string[];
   warnings: string[];
+  autoAssignGuestIds: (guestIds: string[]) => void;
+  slotAssignments: Record<HighlightDomain, Map<string, PaletteSlot>>;
+  guestProfiles: Record<string, GuestProfile>;
+}
+
+interface SeatingSelectionValue {
   selectedGuestId: string | null;
   selectGuest: (guestId: string) => void;
   clearSelectedGuest: () => void;
   relatedPartyGuestIds: Set<string>;
   relatedCircleGuestIds: Set<string>;
-  autoAssignGuestIds: (guestIds: string[]) => void;
-  slotAssignments: Record<HighlightDomain, Map<string, PaletteSlot>>;
-  guestProfiles: Record<string, GuestProfile>;
 }
+
+// Merged type kept for backward-compat (useSeating() consumers).
+type SeatingContextValue = SeatingDataValue & SeatingSelectionValue;
 
 interface HistoryState {
   present: SeatingState;
@@ -410,7 +416,8 @@ function seatingHistoryReducer(state: HistoryState, action: HistoryAction): Hist
   }
 }
 
-const SeatingContext = createContext<SeatingContextValue | null>(null);
+const SeatingDataContext = createContext<SeatingDataValue | null>(null);
+const SeatingSelectionContext = createContext<SeatingSelectionValue | null>(null);
 
 export function SeatingProvider({
   children,
@@ -613,7 +620,7 @@ export function SeatingProvider({
   const canUndo = historyState.history.length > 0;
   const canRedo = historyState.future.length > 0;
 
-  const contextValue = useMemo<SeatingContextValue>(
+  const dataValue = useMemo<SeatingDataValue>(
     () => ({
       state: historyState.present,
       snapshot,
@@ -626,11 +633,6 @@ export function SeatingProvider({
       parties,
       allGuestIds,
       warnings,
-      selectedGuestId,
-      selectGuest,
-      clearSelectedGuest,
-      relatedPartyGuestIds,
-      relatedCircleGuestIds,
       autoAssignGuestIds,
       slotAssignments,
       guestProfiles,
@@ -647,22 +649,47 @@ export function SeatingProvider({
       parties,
       allGuestIds,
       warnings,
-      selectedGuestId,
-      selectGuest,
-      clearSelectedGuest,
-      relatedPartyGuestIds,
-      relatedCircleGuestIds,
       autoAssignGuestIds,
       slotAssignments,
       guestProfiles,
     ]
   );
 
-  return <SeatingContext.Provider value={contextValue}>{children}</SeatingContext.Provider>;
+  const selectionValue = useMemo<SeatingSelectionValue>(
+    () => ({
+      selectedGuestId,
+      selectGuest,
+      clearSelectedGuest,
+      relatedPartyGuestIds,
+      relatedCircleGuestIds,
+    }),
+    [selectedGuestId, selectGuest, clearSelectedGuest, relatedPartyGuestIds, relatedCircleGuestIds]
+  );
+
+  return (
+    <SeatingDataContext.Provider value={dataValue}>
+      <SeatingSelectionContext.Provider value={selectionValue}>
+        {children}
+      </SeatingSelectionContext.Provider>
+    </SeatingDataContext.Provider>
+  );
 }
 
-export function useSeating(): SeatingContextValue {
-  const ctx = useContext(SeatingContext);
-  if (!ctx) throw new Error("useSeating must be used within SeatingProvider");
+export function useSeatingData(): SeatingDataValue {
+  const ctx = useContext(SeatingDataContext);
+  if (!ctx) throw new Error("useSeatingData must be used within SeatingProvider");
   return ctx;
+}
+
+export function useSeatingSelection(): SeatingSelectionValue {
+  const ctx = useContext(SeatingSelectionContext);
+  if (!ctx) throw new Error("useSeatingSelection must be used within SeatingProvider");
+  return ctx;
+}
+
+/** Merged hook — subscribes to both contexts. Use for components that need selection state. */
+export function useSeating(): SeatingContextValue {
+  const data = useSeatingData();
+  const selection = useSeatingSelection();
+  return { ...data, ...selection };
 }

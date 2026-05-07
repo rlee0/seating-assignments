@@ -1,12 +1,15 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 
 import type { ReactNode } from "react";
 import { normalizeForSearch } from "../lib/utils";
 
-interface SearchContextValue {
+interface SearchQueryValue {
   searchQuery: string;
   normalizedQuery: string;
   setSearchQuery: (query: string) => void;
+}
+
+interface HighlightValue {
   isCircleHighlightOn: boolean;
   setCircleHighlightOn: (isOn: boolean) => void;
   isPartyHighlightOn: boolean;
@@ -18,7 +21,11 @@ interface SearchContextValue {
   restoreHighlightModeAfterGuestDeselection: () => void;
 }
 
-const SearchContext = createContext<SearchContextValue | null>(null);
+// Merged type kept for backward-compat (useSearch() consumers).
+type SearchContextValue = SearchQueryValue & HighlightValue;
+
+const SearchQueryContext = createContext<SearchQueryValue | null>(null);
+const HighlightContext = createContext<HighlightValue | null>(null);
 
 export function SearchProvider({ children }: { children: ReactNode }) {
   const [searchQuery, setSearchQuery] = useState("");
@@ -31,11 +38,13 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     "circle" | "party" | "host" | null
   >(null);
 
-  function getActiveHighlightMode(): "circle" | "party" | "host" {
-    if (isPartyHighlightOn) return "party";
-    if (isHostHighlightOn) return "host";
-    return "circle";
-  }
+  // Refs so stable callbacks can read the latest values without stale closures.
+  const isPartyHighlightOnRef = useRef(isPartyHighlightOn);
+  const isHostHighlightOnRef = useRef(isHostHighlightOn);
+  const previousHighlightModeRef = useRef(previousHighlightMode);
+  isPartyHighlightOnRef.current = isPartyHighlightOn;
+  isHostHighlightOnRef.current = isHostHighlightOn;
+  previousHighlightModeRef.current = previousHighlightMode;
 
   function handleSetCircleHighlightOn(isOn: boolean) {
     if (isOn) {
@@ -76,46 +85,78 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     setHostHighlightOn(false);
   }
 
-  function activatePartyFocusFromGuestSelection() {
-    setPreviousHighlightMode((current) => current ?? getActiveHighlightMode());
-    setPartyPulseNonce((current) => current + 1);
+  const stableActivatePartyFocus = useCallback(() => {
+    const currentMode = isPartyHighlightOnRef.current
+      ? "party"
+      : isHostHighlightOnRef.current
+        ? "host"
+        : "circle";
+    setPreviousHighlightMode((prev) => prev ?? currentMode);
+    setPartyPulseNonce((n) => n + 1);
     setPartyHighlightOn(true);
     setCircleHighlightOn(false);
     setHostHighlightOn(false);
-  }
+  }, []);
 
-  function restoreHighlightModeAfterGuestDeselection() {
-    if (!previousHighlightMode) return;
-
-    setCircleHighlightOn(previousHighlightMode === "circle");
-    setPartyHighlightOn(previousHighlightMode === "party");
-    setHostHighlightOn(previousHighlightMode === "host");
+  const stableRestoreHighlightMode = useCallback(() => {
+    const prev = previousHighlightModeRef.current;
+    if (!prev) return;
+    setCircleHighlightOn(prev === "circle");
+    setPartyHighlightOn(prev === "party");
+    setHostHighlightOn(prev === "host");
     setPreviousHighlightMode(null);
-  }
+  }, []);
+
+  const searchQueryValue = useMemo<SearchQueryValue>(
+    () => ({ searchQuery, normalizedQuery, setSearchQuery }),
+    [searchQuery, normalizedQuery]
+  );
+
+  const highlightValue = useMemo<HighlightValue>(
+    () => ({
+      isCircleHighlightOn,
+      setCircleHighlightOn: handleSetCircleHighlightOn,
+      isPartyHighlightOn,
+      setPartyHighlightOn: handleSetPartyHighlightOn,
+      isHostHighlightOn,
+      setHostHighlightOn: handleSetHostHighlightOn,
+      partyPulseNonce,
+      activatePartyFocusFromGuestSelection: stableActivatePartyFocus,
+      restoreHighlightModeAfterGuestDeselection: stableRestoreHighlightMode,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      isCircleHighlightOn,
+      isPartyHighlightOn,
+      isHostHighlightOn,
+      partyPulseNonce,
+      stableActivatePartyFocus,
+      stableRestoreHighlightMode,
+    ]
+  );
 
   return (
-    <SearchContext.Provider
-      value={{
-        searchQuery,
-        normalizedQuery,
-        setSearchQuery,
-        isCircleHighlightOn,
-        setCircleHighlightOn: handleSetCircleHighlightOn,
-        isPartyHighlightOn,
-        setPartyHighlightOn: handleSetPartyHighlightOn,
-        isHostHighlightOn,
-        setHostHighlightOn: handleSetHostHighlightOn,
-        partyPulseNonce,
-        activatePartyFocusFromGuestSelection,
-        restoreHighlightModeAfterGuestDeselection,
-      }}>
-      {children}
-    </SearchContext.Provider>
+    <SearchQueryContext.Provider value={searchQueryValue}>
+      <HighlightContext.Provider value={highlightValue}>{children}</HighlightContext.Provider>
+    </SearchQueryContext.Provider>
   );
 }
 
-export function useSearch(): SearchContextValue {
-  const ctx = useContext(SearchContext);
-  if (!ctx) throw new Error("useSearch must be used within SearchProvider");
+export function useSearchQuery(): SearchQueryValue {
+  const ctx = useContext(SearchQueryContext);
+  if (!ctx) throw new Error("useSearchQuery must be used within SearchProvider");
   return ctx;
+}
+
+export function useHighlight(): HighlightValue {
+  const ctx = useContext(HighlightContext);
+  if (!ctx) throw new Error("useHighlight must be used within SearchProvider");
+  return ctx;
+}
+
+/** Merged hook — subscribes to both contexts. Use for components that need both. */
+export function useSearch(): SearchContextValue {
+  const query = useSearchQuery();
+  const highlight = useHighlight();
+  return { ...query, ...highlight };
 }

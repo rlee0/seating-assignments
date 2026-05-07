@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import React from "react";
 import { cn } from "../lib/utils";
 import { useDraggable } from "@dnd-kit/core";
+import { lockViewportScroll } from "@/dnd/scrollLock";
 
 interface Props {
   circleName: string;
@@ -23,12 +24,32 @@ const CircleCard = React.memo(function CircleCard({
     data: { kind: "circle", circleName, origin: "sidebar" },
   });
 
+  const mergedListeners = {
+    ...listeners,
+    onPointerDown: (event: React.PointerEvent) => {
+      const viewport = (event.currentTarget as HTMLElement).closest<HTMLElement>(
+        "[data-board-viewport]"
+      );
+      if (viewport) {
+        const release = lockViewportScroll(viewport);
+        const cleanup = () => {
+          release();
+          document.removeEventListener("pointerup", cleanup, true);
+          document.removeEventListener("pointercancel", cleanup, true);
+        };
+        document.addEventListener("pointerup", cleanup, { capture: true });
+        document.addEventListener("pointercancel", cleanup, { capture: true });
+      }
+      listeners?.onPointerDown?.(event);
+    },
+  };
+
   return (
     <div
       ref={setNodeRef}
       data-circle-card
       data-circle-name={circleName}
-      {...listeners}
+      {...mergedListeners}
       {...attributes}
       className={cn(
         "cursor-grab rounded-lg border border-border bg-card transition-colors hover:bg-(--card-hover-bg) hover:border-(--card-hover-border) active:cursor-grabbing",
@@ -39,7 +60,9 @@ const CircleCard = React.memo(function CircleCard({
           type="button"
           className="-m-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           aria-label={
-            isExpanded ? `Collapse ${circleName || "No Circle"}` : `Expand ${circleName || "No Circle"}`
+            isExpanded
+              ? `Collapse ${circleName || "No Circle"}`
+              : `Expand ${circleName || "No Circle"}`
           }
           aria-expanded={isExpanded}
           onPointerDown={(event) => {

@@ -22,8 +22,8 @@ import {
   type HighlightDomain,
   type PaletteSlot,
 } from "@/lib/palette";
-import { useSearch } from "../store/SearchContext";
-import { useSeating } from "../store/SeatingContext";
+import { useHighlight, useSearchQuery } from "../store/SearchContext";
+import { useSeatingData, useSeatingSelection } from "../store/SeatingContext";
 import { lockViewportScroll } from "@/dnd/scrollLock";
 
 const HOVERCARD_OPEN_DELAY_MS = 1200;
@@ -119,25 +119,22 @@ const GuestChipContent = memo(function GuestChipContent({
   isDragging,
   transform,
 }: ContentProps) {
+  const { guests, parties, slotAssignments } = useSeatingData();
   const {
-    guests,
-    parties,
     selectedGuestId,
     selectGuest,
     clearSelectedGuest,
     relatedPartyGuestIds,
     relatedCircleGuestIds,
-    slotAssignments,
-  } = useSeating();
+  } = useSeatingSelection();
+  const { searchQuery, normalizedQuery } = useSearchQuery();
   const {
-    searchQuery,
-    normalizedQuery,
     isCircleHighlightOn,
     isPartyHighlightOn,
     isHostHighlightOn,
     activatePartyFocusFromGuestSelection,
     restoreHighlightModeAfterGuestDeselection,
-  } = useSearch();
+  } = useHighlight();
   const guest = guests.get(guestId);
   const selectedGuest = selectedGuestId ? guests.get(selectedGuestId) : null;
   const hovercardId =
@@ -387,7 +384,7 @@ const GuestChipContent = memo(function GuestChipContent({
       style={hasInlineStyle ? style : undefined}
       className={cn(
         guestChipVariants({ state: visualState, context }),
-        isDragging && "opacity-0",
+        isDragging && "opacity-[0.12]",
         className
       )}
       title={shouldShowHovercard ? undefined : guestName}

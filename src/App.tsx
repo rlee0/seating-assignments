@@ -30,8 +30,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import { SeatingProvider, useSeating } from "./store/SeatingContext";
-import { SearchProvider, useSearch } from "./store/SearchContext";
+import { SeatingProvider, useSeatingData, useSeatingSelection } from "./store/SeatingContext";
+import { SearchProvider, useHighlight } from "./store/SearchContext";
 import { Alert, AlertDescription, AlertTitle } from "./components/ui/alert";
 import { createPortal } from "react-dom";
 import {
@@ -877,11 +877,10 @@ function SeatingApp({
     guests,
     parties,
     warnings,
-    selectedGuestId,
-    clearSelectedGuest,
     guestProfiles,
-  } = useSeating();
-  const { restoreHighlightModeAfterGuestDeselection } = useSearch();
+  } = useSeatingData();
+  const { selectedGuestId, clearSelectedGuest } = useSeatingSelection();
+  const { restoreHighlightModeAfterGuestDeselection } = useHighlight();
 
   const deselectGuest = useCallback(() => {
     restoreHighlightModeAfterGuestDeselection();
@@ -1211,7 +1210,7 @@ function SeatingApp({
       const el = overlayRef.current;
       const p0 = dragStartPointerRef.current;
       if (!el || !p0) return;
-      el.style.transform = `translate3d(${clientX - p0.x}px,${clientY - p0.y}px,0)`;
+      el.style.transform = `translate3d(${clientX - p0.x}px,${clientY - p0.y}px,0) scale(1.03)`;
     };
     const onPointer = (e: PointerEvent) => move(e.clientX, e.clientY);
     const onTouch = (e: TouchEvent) => {
@@ -1511,11 +1510,6 @@ function SeatingApp({
         setAutoSeatPreview((prev) => (prev === null ? prev : null));
       };
 
-      const clearAutoSeatPreview = () => {
-        previewTargetKeyRef.current = null;
-        setAutoSeatPreview((prev) => (prev === null ? prev : null));
-      };
-
       const intent = parseDragIntent(active.data.current) ?? activeDragIntent;
       if (!intent) {
         clearAllPreview();
@@ -1524,11 +1518,7 @@ function SeatingApp({
       }
 
       if (!over) {
-        if (intent.kind === "guest") {
-          clearAutoSeatPreview();
-        } else {
-          clearAllPreview();
-        }
+        clearAllPreview();
         setActiveOverId(null);
         return;
       }
@@ -1538,7 +1528,7 @@ function SeatingApp({
       // Swap preview for seated guests is driven entirely by the pointermove
       // useEffect (DOM hit-testing), not by dnd-kit collision events.
       if (intent.kind === "guest") {
-        clearAutoSeatPreview();
+        clearAllPreview();
         return;
       }
 
@@ -2070,7 +2060,7 @@ function SeatingApp({
                 createPortal(
                   <div
                     ref={overlayRef}
-                    className="pointer-events-none"
+                    className="pointer-events-none dnd-overlay"
                     style={{
                       position: "fixed",
                       left: dragOverlaySnapshot.left,

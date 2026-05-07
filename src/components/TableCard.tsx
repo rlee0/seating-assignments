@@ -7,15 +7,15 @@ import {
 } from "./ui/context-menu";
 import { Eraser, Pencil, ToggleLeft, ToggleRight, Trash2, UserMinus } from "lucide-react";
 import type { GuestSwapPreview, TableSwapPreviewOffset } from "./TableBoard";
+import { memo, useMemo } from "react";
 
 import { CSS } from "@dnd-kit/utilities";
 import GuestChip from "./GuestChip";
 import type { TableState } from "../types";
 import { cn } from "../lib/utils";
 import { getTableSeatCount } from "../types";
-import { memo } from "react";
 import { useDroppable } from "@dnd-kit/core";
-import { useSeating } from "../store/SeatingContext";
+import { useSeatingData } from "../store/SeatingContext";
 import { useSortable } from "@dnd-kit/sortable";
 
 interface Props {
@@ -167,6 +167,9 @@ function SeatSlot({
           }
           className={[
             "h-full w-full",
+            !isPreviewMode && !isOriginSeat && !isSwapTarget && !isSwapOriginPreview
+              ? "animate-in zoom-in-95 fade-in-0 duration-150"
+              : null,
             isOriginSeat && !isSwapOriginPreview
               ? "absolute inset-0 opacity-0 pointer-events-none"
               : null,
@@ -252,7 +255,7 @@ export default memo(function TableCard({
   hasTablePreviewChanges = false,
   activeOverId = null,
 }: Props) {
-  const { dispatch, guests } = useSeating();
+  const { dispatch, guests } = useSeatingData();
   const {
     attributes,
     listeners,
@@ -266,21 +269,24 @@ export default memo(function TableCard({
     animateLayoutChanges: () => false,
   });
 
-  const containerListeners = {
-    ...listeners,
-    onPointerDown: (event: React.PointerEvent) => {
-      if ((event.target as Element).closest("[data-guest-chip]")) return;
-      listeners?.onPointerDown?.(event);
-    },
-    onMouseDown: (event: React.MouseEvent) => {
-      if ((event.target as Element).closest("[data-guest-chip]")) return;
-      listeners?.onMouseDown?.(event);
-    },
-    onTouchStart: (event: React.TouchEvent) => {
-      if ((event.target as Element).closest("[data-guest-chip]")) return;
-      listeners?.onTouchStart?.(event);
-    },
-  };
+  const containerListeners = useMemo(
+    () => ({
+      ...listeners,
+      onPointerDown: (event: React.PointerEvent) => {
+        if ((event.target as Element).closest("[data-guest-chip]")) return;
+        listeners?.onPointerDown?.(event);
+      },
+      onMouseDown: (event: React.MouseEvent) => {
+        if ((event.target as Element).closest("[data-guest-chip]")) return;
+        listeners?.onMouseDown?.(event);
+      },
+      onTouchStart: (event: React.TouchEvent) => {
+        if ((event.target as Element).closest("[data-guest-chip]")) return;
+        listeners?.onTouchStart?.(event);
+      },
+    }),
+    [listeners]
+  );
 
   const { setNodeRef: setDroppableNodeRef, isOver } = useDroppable({
     id: `table-${table.tableNumber}`,
@@ -438,7 +444,7 @@ export default memo(function TableCard({
                             -Math.PI / 2 + (Math.PI * 2 * seatIndex) / Math.max(1, seatCount);
                           const sidePullStrength = Math.abs(Math.cos(angle));
                           const sideInwardFactor = 1 - sidePullStrength * 0.04;
-                          const radiusX = radiusPercent * 0.97 * sideInwardFactor;
+                          const radiusX = radiusPercent * 1.1 * sideInwardFactor;
                           const radiusY = radiusPercent * 0.95;
                           const x = 50 + radiusX * Math.cos(angle);
                           const y = 50 + radiusY * Math.sin(angle);
