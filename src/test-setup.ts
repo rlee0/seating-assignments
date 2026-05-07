@@ -38,3 +38,10 @@ if (!window.ResizeObserver) {
     value: ResizeObserverMock,
   });
 }
+
+if (!window.PointerEvent) {
+  Object.defineProperty(window, "PointerEvent", {
+    writable: true,
+    value: MouseEvent,
+  });
+}
