@@ -23,7 +23,7 @@ const guestChipVariants = cva(
       },
       context: {
         sidebar: "w-auto",
-        table: "w-full h-full box-border",
+        table: "h-full min-h-0 w-full box-border overflow-hidden rounded-md px-1 py-0 leading-none",
       },
     },
     defaultVariants: {

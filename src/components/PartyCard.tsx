@@ -1,5 +1,6 @@
 import { ChevronRight, House } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import GuestChip from "./GuestChip";
 import type { Party } from "../types";
 import React from "react";
@@ -82,6 +83,9 @@ const PartyCard = React.memo(function PartyCard({
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-card-foreground">
           {party.party}
         </span>
+        <Badge variant="secondary" className="h-auto rounded-sm px-1.5 py-0 text-2xs font-normal">
+          {unassignedGuestIds.length}
+        </Badge>
       </div>
       {isExpanded ? (
         <div className="flex flex-wrap gap-1 px-3 pt-1 pb-2.5">

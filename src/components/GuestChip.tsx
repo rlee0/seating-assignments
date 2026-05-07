@@ -7,13 +7,15 @@ import {
 } from "@/components/ui/context-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Crown, House, Layers3, Pencil, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { CSS } from "@dnd-kit/utilities";
 import type { CSSProperties } from "react";
 import { cn, normalizeForSearch } from "../lib/utils";
 import { guestChipVariants } from "@/components/ui/chip";
-import { useDraggable } from "@dnd-kit/core";
+import { useDraggable, type DraggableAttributes } from "@dnd-kit/core";
+import type { SyntheticListenerMap } from "@dnd-kit/core/dist/hooks/utilities";
+import type { Transform } from "@dnd-kit/utilities";
 import {
   buildHighlightColor,
   getDomainFromToken,
@@ -22,6 +24,7 @@ import {
 } from "@/lib/palette";
 import { useSearch } from "../store/SearchContext";
 import { useSeating } from "../store/SeatingContext";
+import { lockViewportScroll } from "@/dnd/scrollLock";
 
 const HOVERCARD_OPEN_DELAY_MS = 1200;
 const HOVERCARD_CLOSE_DELAY_MS = 80;
@@ -87,7 +90,19 @@ interface Props {
   onDeleteGuest?: (guestId: string) => void;
 }
 
-export default function GuestChip({
+// ─── Inner (memoized) ─────────────────────────────────────────────────────────
+// All expensive semantic work lives here. React.memo ensures it only re-renders
+// when its own props/context subscriptions change — NOT on every dnd-kit DRAG_MOVE.
+
+interface ContentProps extends Props {
+  setNodeRef: (el: HTMLElement | null) => void;
+  listeners: SyntheticListenerMap | undefined;
+  attributes: DraggableAttributes;
+  isDragging: boolean;
+  transform: Transform | null;
+}
+
+const GuestChipContent = memo(function GuestChipContent({
   guestId,
   context,
   tableNumber,
@@ -95,13 +110,16 @@ export default function GuestChip({
   className,
   suppressStateStyles = false,
   suppressInteraction = false,
-  draggableDisabled = false,
   fallbackName,
   onEditGuest,
   onDeleteGuest,
-}: Props) {
+  setNodeRef,
+  listeners,
+  attributes,
+  isDragging,
+  transform,
+}: ContentProps) {
   const {
-    state,
     guests,
     parties,
     selectedGuestId,
@@ -122,7 +140,6 @@ export default function GuestChip({
   } = useSearch();
   const guest = guests.get(guestId);
   const selectedGuest = selectedGuestId ? guests.get(selectedGuestId) : null;
-  const isAnchored = (state.lockedGuestIds ?? []).includes(guestId);
   const hovercardId =
     context === "table" && typeof tableNumber === "number" && typeof seatIndex === "number"
       ? `table-${tableNumber}-seat-${seatIndex}-guest-${guestId}`
@@ -132,32 +149,12 @@ export default function GuestChip({
   const closeTimerRef = useRef<number | null>(null);
   const selectTimerRef = useRef<number | null>(null);
 
-  const draggableId =
-    draggableDisabled &&
-    context === "table" &&
-    typeof tableNumber === "number" &&
-    typeof seatIndex === "number"
-      ? `guest-preview-${guestId}-${tableNumber}-${seatIndex}`
-      : `guest-${guestId}`;
-
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: draggableId,
-    disabled: draggableDisabled,
-    data:
-      context === "table" && typeof tableNumber === "number" && typeof seatIndex === "number"
-        ? { kind: "guest", guestId, origin: context, tableNumber, seatIndex }
-        : { kind: "guest", guestId, origin: context },
-  });
-
   const guestName = guest?.fullName ?? fallbackName ?? "";
   const normalizedGuestName = useMemo(() => normalizeForSearch(guestName), [guestName]);
 
-  const partyName = guest
-    ? parties.get(guest.partyId)?.party?.trim() || "Unknown party"
-    : "";
+  const partyName = guest ? parties.get(guest.partyId)?.party?.trim() || "Unknown party" : "";
   const circleName = guest ? guest.circle.trim() || "No circle" : "";
   const hostName = guest ? guest.host.trim() || "Unknown host" : "";
-  const lockedStatusLabel = isAnchored ? "Locked" : "Not locked";
   const shouldShowHovercard = context === "table" && !isDragging;
 
   function clearHovercardTimers() {
@@ -250,6 +247,11 @@ export default function GuestChip({
   if (!isDragging && transform) {
     style.transform = CSS.Translate.toString(transform);
   }
+  // Prevent the browser from treating the initial pointer movement as a pan/scroll
+  // gesture on the overflow-auto board viewport before dnd-kit's activation threshold fires.
+  if (!suppressInteraction) {
+    style.touchAction = "none";
+  }
 
   const highlightToken = useMemo(() => {
     if (!guest) return null;
@@ -297,10 +299,6 @@ export default function GuestChip({
     } else {
       style["--guest-chip-selected-color"] = "var(--primary)";
     }
-  }
-
-  if (isAnchored) {
-    style.borderColor = "var(--destructive)";
   }
 
   const hasInlineStyle = Object.keys(style).length > 0;
@@ -359,6 +357,28 @@ export default function GuestChip({
 
   if (!guest && !fallbackName) return null;
 
+  const mergedListeners = suppressInteraction
+    ? undefined
+    : {
+        ...listeners,
+        onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
+          const viewport = (event.currentTarget as HTMLElement).closest<HTMLElement>(
+            "[data-board-viewport]"
+          );
+          if (viewport) {
+            const release = lockViewportScroll(viewport);
+            const cleanup = () => {
+              release();
+              document.removeEventListener("pointerup", cleanup, true);
+              document.removeEventListener("pointercancel", cleanup, true);
+            };
+            document.addEventListener("pointerup", cleanup, { capture: true });
+            document.addEventListener("pointercancel", cleanup, { capture: true });
+          }
+          listeners?.onPointerDown?.(event);
+        },
+      };
+
   const chip = (
     <div
       ref={setNodeRef}
@@ -376,7 +396,7 @@ export default function GuestChip({
       onPointerEnter={shouldShowHovercard ? handleHovercardPointerEnter : undefined}
       onPointerLeave={shouldShowHovercard ? handleHovercardPointerLeave : undefined}
       onBlur={shouldShowHovercard ? handleHovercardBlur : undefined}
-      {...(suppressInteraction ? undefined : listeners)}
+      {...mergedListeners}
       {...(suppressInteraction ? undefined : attributes)}>
       <span
         data-guest-name
@@ -448,12 +468,64 @@ export default function GuestChip({
             </dt>
             <dd className="min-w-0 font-medium text-foreground">{hostName}</dd>
           </div>
-          <div className="grid grid-cols-[72px_1fr] items-start gap-x-2 gap-y-0.5">
-            <dt className="text-muted-foreground">Status</dt>
-            <dd className="min-w-0 font-medium text-foreground">{lockedStatusLabel}</dd>
-          </div>
         </dl>
       </HoverCardContent>
     </HoverCard>
+  );
+});
+
+// ─── Outer wrapper (thin) ─────────────────────────────────────────────────────
+// Only responsibility: call useDraggable and forward the four DnD props down.
+// This component re-renders on every dnd-kit DRAG_MOVE but is trivially cheap.
+
+export default function GuestChip({
+  guestId,
+  context,
+  tableNumber,
+  seatIndex,
+  className,
+  suppressStateStyles = false,
+  suppressInteraction = false,
+  draggableDisabled = false,
+  fallbackName,
+  onEditGuest,
+  onDeleteGuest,
+}: Props) {
+  const draggableId =
+    draggableDisabled &&
+    context === "table" &&
+    typeof tableNumber === "number" &&
+    typeof seatIndex === "number"
+      ? `guest-preview-${guestId}-${tableNumber}-${seatIndex}`
+      : `guest-${guestId}`;
+
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: draggableId,
+    disabled: draggableDisabled,
+    data:
+      context === "table" && typeof tableNumber === "number" && typeof seatIndex === "number"
+        ? { kind: "guest", guestId, origin: context, tableNumber, seatIndex }
+        : { kind: "guest", guestId, origin: context },
+  });
+
+  return (
+    <GuestChipContent
+      guestId={guestId}
+      context={context}
+      tableNumber={tableNumber}
+      seatIndex={seatIndex}
+      className={className}
+      suppressStateStyles={suppressStateStyles}
+      suppressInteraction={suppressInteraction}
+      draggableDisabled={draggableDisabled}
+      fallbackName={fallbackName}
+      onEditGuest={onEditGuest}
+      onDeleteGuest={onDeleteGuest}
+      setNodeRef={setNodeRef}
+      listeners={listeners}
+      attributes={attributes}
+      isDragging={isDragging}
+      transform={transform}
+    />
   );
 }

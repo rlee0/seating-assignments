@@ -11,7 +11,7 @@ import {
 import { Settings } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useDroppable } from "@dnd-kit/core";
-import { type ReactNode, useMemo } from "react";
+import { memo, type ReactNode, useLayoutEffect, useMemo, useRef } from "react";
 import { useSeating } from "../store/SeatingContext";
 
 // Tables no longer reorder on drop — disable all sortable position animations.
@@ -37,14 +37,19 @@ export interface TableSwapPreview {
   swapTargetTableNumber: number | null;
 }
 
+export interface TableSwapPreviewOffset {
+  xPx: number;
+  yPx: number;
+}
+
 interface Props {
   activeDragKind: "party" | "guest" | "circle" | "table" | null;
   activeDragGuestId: string | null;
-  activeDragTableNumber: number | null;
   autoSeatPreview: AutoSeatPreview | null;
   guestSwapPreview: GuestSwapPreview | null;
   tableSwapPreview: TableSwapPreview;
   zoom: number;
+  activeOverId: string | null;
   onEditGuest: (guestId: string) => void;
   onDeleteGuest: (guestId: string) => void;
   onEditTable: (tableNumber: number) => void;
@@ -52,8 +57,8 @@ interface Props {
   onBoardSettings: () => void;
 }
 
-const BASE_BOARD_CELL_WIDTH_REM = 26;
-const BASE_BOARD_CELL_HEIGHT_REM = 10;
+const BASE_BOARD_CELL_WIDTH_REM = 22;
+const BASE_BOARD_CELL_HEIGHT_REM = 8;
 const DEFAULT_GRID_GAP_REM = 0.625;
 const DENSE_GRID_GAP_REM = 0.375;
 
@@ -108,14 +113,14 @@ function computePreviewSeatKinds(
   });
 }
 
-export default function TableBoard({
+export default memo(function TableBoard({
   activeDragKind,
   activeDragGuestId,
-  activeDragTableNumber,
   autoSeatPreview,
   guestSwapPreview,
   tableSwapPreview,
   zoom,
+  activeOverId,
   onEditGuest,
   onDeleteGuest,
   onEditTable,
@@ -123,6 +128,74 @@ export default function TableBoard({
   onBoardSettings,
 }: Props) {
   const { state } = useSeating();
+  const boardRef = useRef<HTMLDivElement | null>(null);
+  const currentRectsRef = useRef<Map<number, DOMRect>>(new Map());
+  const useDenseGap = state.board.rows > 5 || state.board.columns > 5;
+  const gridGapRem = useDenseGap ? DENSE_GRID_GAP_REM : DEFAULT_GRID_GAP_REM;
+
+  const tableSwapPreviewOffsets = useMemo(() => {
+    const offsets = new Map<number, TableSwapPreviewOffset>();
+
+    if (
+      activeDragKind !== "table" ||
+      tableSwapPreview.draggingTableNumber === null ||
+      tableSwapPreview.swapTargetTableNumber === null
+    ) {
+      return offsets;
+    }
+
+    const draggingTable = state.tables.find(
+      (table) => table.tableNumber === tableSwapPreview.draggingTableNumber
+    );
+    const targetTable = state.tables.find(
+      (table) => table.tableNumber === tableSwapPreview.swapTargetTableNumber
+    );
+
+    if (!draggingTable || !targetTable) {
+      return offsets;
+    }
+
+    const draggingRect = currentRectsRef.current.get(draggingTable.tableNumber);
+    const targetRect = currentRectsRef.current.get(targetTable.tableNumber);
+
+    if (draggingRect && targetRect) {
+      offsets.set(targetTable.tableNumber, {
+        xPx: (draggingRect.left - targetRect.left) / zoom,
+        yPx: (draggingRect.top - targetRect.top) / zoom,
+      });
+      return offsets;
+    }
+
+    offsets.set(targetTable.tableNumber, {
+      xPx:
+        (draggingTable.gridPosition.column - targetTable.gridPosition.column) *
+        (BASE_BOARD_CELL_WIDTH_REM + gridGapRem) *
+        16,
+      yPx:
+        (draggingTable.gridPosition.row - targetTable.gridPosition.row) *
+        (BASE_BOARD_CELL_HEIGHT_REM + gridGapRem) *
+        16,
+    });
+    return offsets;
+  }, [activeDragKind, gridGapRem, state.tables, tableSwapPreview, zoom]);
+
+  useLayoutEffect(() => {
+    const board = boardRef.current;
+    if (!board) return;
+
+    const nodes = Array.from(
+      board.querySelectorAll<HTMLElement>("[data-table-motion-root][data-table-number]")
+    );
+    const nextRects = new Map<number, DOMRect>();
+
+    for (const node of nodes) {
+      const tableNumber = Number(node.dataset.tableNumber);
+      if (!Number.isFinite(tableNumber)) continue;
+      nextRects.set(tableNumber, node.getBoundingClientRect());
+    }
+
+    currentRectsRef.current = nextRects;
+  }, [state.tables]);
 
   const tableIds = state.tables.map((table) => `sortable-table-${table.tableNumber}`);
   const showPreview = autoSeatPreview !== null;
@@ -150,8 +223,6 @@ export default function TableBoard({
     () => Array.from({ length: state.board.columns }, (_, i) => i),
     [state.board.columns]
   );
-  const useDenseGap = state.board.rows > 5 || state.board.columns > 5;
-  const gridGapRem = useDenseGap ? DENSE_GRID_GAP_REM : DEFAULT_GRID_GAP_REM;
   const boardWidthRem =
     state.board.columns * BASE_BOARD_CELL_WIDTH_REM +
     Math.max(0, state.board.columns - 1) * gridGapRem;
@@ -173,6 +244,7 @@ export default function TableBoard({
                   minHeight: `${scaledBoardHeightRem}rem`,
                 }}>
                 <div
+                  ref={boardRef}
                   data-board-scale
                   style={{
                     width: `${boardWidthRem}rem`,
@@ -221,9 +293,11 @@ export default function TableBoard({
                               table={table}
                               activeDragKind={activeDragKind}
                               activeDragGuestId={activeDragGuestId}
-                              activeDragTableNumber={activeDragTableNumber}
                               guestSwapPreview={guestSwapPreview}
-                              tableSwapPreview={tableSwapPreview}
+                              tableSwapPreviewOffset={
+                                tableSwapPreviewOffsets.get(table.tableNumber) ?? null
+                              }
+                              activeOverId={activeOverId}
                               onEditGuest={onEditGuest}
                               onDeleteGuest={onDeleteGuest}
                               onEditTable={onEditTable}
@@ -252,4 +326,4 @@ export default function TableBoard({
       </ContextMenu>
     </SortableContext>
   );
-}
+});
