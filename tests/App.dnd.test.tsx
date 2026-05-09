@@ -995,9 +995,9 @@ describe("File import", () => {
 
     const exportedText = await exportedBlob!.text();
     const lines = exportedText.split("\n");
-    expect(lines[0]).toBe("Full Name,Host,Party,Circle,Table,Seat");
-    expect(lines[1]).toBe("Alice,Ryan,Party 1,Family,1,1");
-    expect(lines[2]).toBe("Bob,Ryan,Party 2,Friends,,");
+    expect(lines[0]).toBe("Full Name,Host,Party,Circle,Table,Seat,Table Type");
+    expect(lines[1]).toBe("Alice,Ryan,Party 1,Family,1,1,round-60");
+    expect(lines[2]).toBe("Bob,Ryan,Party 2,Friends,,,");
 
     secondRender.unmount();
     alertSpy.mockRestore();

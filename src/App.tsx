@@ -83,8 +83,6 @@ import {
   isTablePresetId,
   MAX_ROUND_TABLE_CAPACITY,
   MIN_ROUND_TABLE_CAPACITY,
-  TABLE_CAPACITY,
-  TABLE_COUNT,
   getTableSeatCount,
   resolvePersistedTablePresetId,
   type BoardState,
@@ -500,7 +498,15 @@ function parseCsvLines(text: string): string[][] | null {
   return records;
 }
 
-const CSV_EXPORT_HEADERS = ["Full Name", "Host", "Party", "Circle", "Table", "Seat"] as const;
+const CSV_EXPORT_HEADERS = [
+  "Full Name",
+  "Host",
+  "Party",
+  "Circle",
+  "Table",
+  "Seat",
+  "Table Type",
+] as const;
 
 function normalizeCsvHeader(value: string): string {
   return value.trim().toLowerCase();
@@ -538,6 +544,7 @@ function parseCsvImportPayload(text: string): {
   const circleIndex = lookupIndex("Circle");
   const tableColumnIndex = lookupIndex("Table");
   const seatColumnIndex = lookupIndex("Seat");
+  const tableTypeColumnIndex = lookupIndex("Table Type");
 
   if (
     fullNameIndex === null ||
@@ -551,6 +558,35 @@ function parseCsvImportPayload(text: string): {
 
   const guests: GuestInputRow[] = [];
   const nextState = createInitialState([]);
+
+  // First pass: collect per-table presets from the Table Type column and apply them.
+  if (tableTypeColumnIndex !== null && tableColumnIndex !== null) {
+    const seenTableNumbers = new Set<number>();
+    for (const record of records) {
+      if (record.length !== header.length) continue;
+      const tableValue = record[tableColumnIndex] ?? "";
+      const tableTypeValue = (record[tableTypeColumnIndex] ?? "").trim();
+      const tableNumber = Number.parseInt(tableValue, 10);
+      if (
+        Number.isInteger(tableNumber) &&
+        tableNumber >= 1 &&
+        tableNumber <= nextState.tables.length &&
+        !seenTableNumbers.has(tableNumber) &&
+        isTablePresetId(tableTypeValue)
+      ) {
+        seenTableNumbers.add(tableNumber);
+        const derived = getDerivedTableConfigFromPresetId(tableTypeValue);
+        const seatCount = getTableSeatCount(derived.seatConfig);
+        nextState.tables[tableNumber - 1] = {
+          ...nextState.tables[tableNumber - 1],
+          presetId: derived.presetId,
+          shape: derived.shape,
+          seatConfig: derived.seatConfig,
+          guestIds: Array<string | null>(seatCount).fill(null),
+        };
+      }
+    }
+  }
 
   for (let index = 0; index < records.length; index += 1) {
     const record = records[index];
@@ -596,17 +632,23 @@ function parseCsvImportPayload(text: string): {
     if (
       !Number.isInteger(tableNumber) ||
       tableNumber < 1 ||
-      tableNumber > TABLE_COUNT ||
+      tableNumber > nextState.tables.length ||
       !Number.isInteger(seatNumber) ||
-      seatNumber < 1 ||
-      seatNumber > TABLE_CAPACITY
+      seatNumber < 1
     ) {
       nextState.unassigned.push(guestId);
       continue;
     }
 
-    const assignedSeatIndex = seatNumber - 1;
     const table = nextState.tables[tableNumber - 1];
+    const tableSeatCount = getTableSeatCount(table.seatConfig);
+
+    if (seatNumber > tableSeatCount) {
+      nextState.unassigned.push(guestId);
+      continue;
+    }
+
+    const assignedSeatIndex = seatNumber - 1;
     if (table.guestIds[assignedSeatIndex] !== null) {
       nextState.unassigned.push(guestId);
       continue;
@@ -625,12 +667,16 @@ function parseCsvImportPayload(text: string): {
 function buildCsvContent(guests: GuestInputRow[], seating: PersistedSeatingData): string {
   const { tables } = seating.state;
 
-  // Build seat assignment map: guestId -> { tableNumber, seatIndex }
-  const seatMap = new Map<string, { tableNumber: number; seatIndex: number }>();
+  // Build seat assignment map: guestId -> { tableNumber, seatIndex, presetId }
+  const seatMap = new Map<string, { tableNumber: number; seatIndex: number; presetId: string }>();
   for (const table of tables) {
     table.guestIds.forEach((guestId, seatIndex) => {
       if (guestId !== null) {
-        seatMap.set(guestId, { tableNumber: table.tableNumber, seatIndex: seatIndex + 1 });
+        seatMap.set(guestId, {
+          tableNumber: table.tableNumber,
+          seatIndex: seatIndex + 1,
+          presetId: table.presetId,
+        });
       }
     });
   }
@@ -651,6 +697,7 @@ function buildCsvContent(guests: GuestInputRow[], seating: PersistedSeatingData)
       row.circle,
       seat ? String(seat.tableNumber) : "",
       seat ? String(seat.seatIndex) : "",
+      seat ? seat.presetId : "",
     ]
       .map(escapeCsv)
       .join(",");
