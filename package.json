@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "deploy": "npm run build && npx gh-pages -d dist",
+    "deploy": "pnpm run build && npx gh-pages -d dist",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
     "test": "vitest run",
@@ -58,6 +58,7 @@
     "vite": "^8.0.10",
     "vitest": "^4.1.4"
   },
+  "packageManager": "pnpm@11.0.9",
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild", "sharp"]
   }
