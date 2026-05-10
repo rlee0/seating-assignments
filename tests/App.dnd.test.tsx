@@ -782,7 +782,7 @@ describe("File import", () => {
   it("imports export-structured csv via drag and drop", async () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
     const csv = [
-      "Full Name,Host,Party,Circle,Table,Seat",
+      "Full Name,Host,Party,Circle,Table ID,Seat",
       "Alice,Ryan,Party 1,Family,1,1",
       "Bob,Ryan,Party 2,Friends,,",
     ].join("\n");
@@ -812,7 +812,7 @@ describe("File import", () => {
   it("imports export-structured csv when circle is blank", async () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
     const csv = [
-      "Full Name,Host,Party,Circle,Table,Seat",
+      "Full Name,Host,Party,Circle,Table ID,Seat",
       "Alice,Ryan,Party 1,,1,1",
       "Bob,Ryan,Party 2,,,",
     ].join("\n");
@@ -841,7 +841,7 @@ describe("File import", () => {
   it("imports shuffled csv columns and ignores extra fields", async () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
     const csv = [
-      "circle,host,party,full name,notes,seat,table",
+      "circle,host,party,full name,notes,seat,table id",
       "Family,Ryan,Party 1,Alice,VIP,1,1",
       "Friends,Ryan,Party 2,Bob,Wheelchair,not-a-seat,1",
     ].join("\n");
@@ -897,7 +897,7 @@ describe("File import", () => {
   it("ignores rows without full name", async () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
     const csv = [
-      "Full Name,Host,Party,Circle,Table,Seat",
+      "Full Name,Host,Party,Circle,Table ID,Seat",
       "Alice,Ryan,Party 1,Family,1,1",
       ",Ryan,Party 2,Friends,1,2",
       "   ,Ryan,Party 3,Friends,,",
@@ -949,7 +949,7 @@ describe("File import", () => {
     alertSpy.mockRestore();
   });
 
-  it("exports canonical columns only", async () => {
+  it("preserves extra columns through export", async () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
     let exportedBlob: Blob | null = null;
     const createObjectURLSpy = vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
@@ -960,7 +960,7 @@ describe("File import", () => {
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
     const csv = [
-      "Full Name,Party,Email/Phone Number,Status,Host,Circle,Table,Seat",
+      "Full Name,Party,Email/Phone Number,Status,Host,Circle,Table ID,Seat",
       "Alice,Party 1,alice@example.com,Attending,Ryan,Family,1,1",
       "Bob,Party 2,bob@example.com,Attending,Ryan,Friends,,",
     ].join("\n");
@@ -995,9 +995,11 @@ describe("File import", () => {
 
     const exportedText = await exportedBlob!.text();
     const lines = exportedText.split("\n");
-    expect(lines[0]).toBe("Full Name,Host,Party,Circle,Table,Seat,Table Type");
-    expect(lines[1]).toBe("Alice,Ryan,Party 1,Family,1,1,round-60");
-    expect(lines[2]).toBe("Bob,Ryan,Party 2,Friends,,,");
+    expect(lines[0]).toBe(
+      "Full Name,Host,Circle,Party,Table ID,Table Name,Table Type,Table Row,Table Column,Seat,Email/Phone Number,Status"
+    );
+    expect(lines[1]).toBe("Alice,Ryan,Family,Party 1,1,Table 1,round-60,0,0,1,alice@example.com,Attending");
+    expect(lines[2]).toBe("Bob,Ryan,Friends,Party 2,,,,,,,bob@example.com,Attending");
 
     secondRender.unmount();
     alertSpy.mockRestore();
