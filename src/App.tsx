@@ -501,11 +501,14 @@ function parseCsvLines(text: string): string[][] | null {
 const CSV_EXPORT_HEADERS = [
   "Full Name",
   "Host",
-  "Party",
   "Circle",
-  "Table",
-  "Seat",
+  "Party",
+  "Table ID",
+  "Table Name",
   "Table Type",
+  "Table Row",
+  "Table Column",
+  "Seat",
 ] as const;
 
 function normalizeCsvHeader(value: string): string {
@@ -542,9 +545,12 @@ function parseCsvImportPayload(text: string): {
   const hostIndex = lookupIndex("Host");
   const partyIndex = lookupIndex("Party");
   const circleIndex = lookupIndex("Circle");
-  const tableColumnIndex = lookupIndex("Table");
+  const tableColumnIndex = lookupIndex("Table ID");
   const seatColumnIndex = lookupIndex("Seat");
   const tableTypeColumnIndex = lookupIndex("Table Type");
+  const tableNameColumnIndex = lookupIndex("Table Name");
+  const tableRowColumnIndex = lookupIndex("Table Row");
+  const tableColColumnIndex = lookupIndex("Table Column");
 
   if (
     fullNameIndex === null ||
@@ -556,35 +562,96 @@ function parseCsvImportPayload(text: string): {
     return null;
   }
 
+  // Collect indices + original labels for columns that are not part of the standard schema.
+  const knownNormalizedLabels = new Set(
+    ["Full Name", "Host", "Party", "Circle", "Table ID", "Seat", "Table Type", "Table Name", "Table Row", "Table Column"]
+      .map(normalizeCsvHeader)
+  );
+  const extraColumns: Array<{ index: number; label: string }> = [];
+  for (let i = 0; i < header.length; i += 1) {
+    const trimmed = header[i].trim();
+    if (!knownNormalizedLabels.has(normalizeCsvHeader(trimmed))) {
+      extraColumns.push({ index: i, label: trimmed });
+    }
+  }
+
   const guests: GuestInputRow[] = [];
   const nextState = createInitialState([]);
 
-  // First pass: collect per-table presets from the Table Type column and apply them.
-  if (tableTypeColumnIndex !== null && tableColumnIndex !== null) {
+  // First pass: collect per-table metadata (preset, name, grid position) and apply preset updates.
+  if (tableColumnIndex !== null) {
     const seenTableNumbers = new Set<number>();
+    const tableMetadata = new Map<number, { name?: string; row?: number; col?: number }>();
+
     for (const record of records) {
       if (record.length !== header.length) continue;
       const tableValue = record[tableColumnIndex] ?? "";
-      const tableTypeValue = (record[tableTypeColumnIndex] ?? "").trim();
       const tableNumber = Number.parseInt(tableValue, 10);
       if (
-        Number.isInteger(tableNumber) &&
-        tableNumber >= 1 &&
-        tableNumber <= nextState.tables.length &&
-        !seenTableNumbers.has(tableNumber) &&
-        isTablePresetId(tableTypeValue)
+        !Number.isInteger(tableNumber) ||
+        tableNumber < 1 ||
+        tableNumber > nextState.tables.length
       ) {
-        seenTableNumbers.add(tableNumber);
-        const derived = getDerivedTableConfigFromPresetId(tableTypeValue);
-        const seatCount = getTableSeatCount(derived.seatConfig);
-        nextState.tables[tableNumber - 1] = {
-          ...nextState.tables[tableNumber - 1],
-          presetId: derived.presetId,
-          shape: derived.shape,
-          seatConfig: derived.seatConfig,
-          guestIds: Array<string | null>(seatCount).fill(null),
-        };
+        continue;
       }
+
+      if (!seenTableNumbers.has(tableNumber)) {
+        seenTableNumbers.add(tableNumber);
+
+        if (tableTypeColumnIndex !== null) {
+          const tableTypeValue = (record[tableTypeColumnIndex] ?? "").trim();
+          if (isTablePresetId(tableTypeValue)) {
+            const derived = getDerivedTableConfigFromPresetId(tableTypeValue);
+            const seatCount = getTableSeatCount(derived.seatConfig);
+            nextState.tables[tableNumber - 1] = {
+              ...nextState.tables[tableNumber - 1],
+              presetId: derived.presetId,
+              shape: derived.shape,
+              seatConfig: derived.seatConfig,
+              guestIds: Array<string | null>(seatCount).fill(null),
+            };
+          }
+        }
+
+        const meta: { name?: string; row?: number; col?: number } = {};
+        if (tableNameColumnIndex !== null) {
+          const name = (record[tableNameColumnIndex] ?? "").trim();
+          if (name) meta.name = name;
+        }
+        if (tableRowColumnIndex !== null) {
+          const rawRow = Number.parseInt(record[tableRowColumnIndex] ?? "", 10);
+          if (Number.isInteger(rawRow) && rawRow >= 0) meta.row = rawRow;
+        }
+        if (tableColColumnIndex !== null) {
+          const rawCol = Number.parseInt(record[tableColColumnIndex] ?? "", 10);
+          if (Number.isInteger(rawCol) && rawCol >= 0) meta.col = rawCol;
+        }
+        tableMetadata.set(tableNumber, meta);
+      }
+    }
+
+    // Expand board if any imported position exceeds current bounds.
+    let boardRows = nextState.board.rows;
+    let boardCols = nextState.board.columns;
+    for (const meta of tableMetadata.values()) {
+      if (meta.row !== undefined) boardRows = Math.max(boardRows, meta.row + 1);
+      if (meta.col !== undefined) boardCols = Math.max(boardCols, meta.col + 1);
+    }
+    if (boardRows !== nextState.board.rows || boardCols !== nextState.board.columns) {
+      nextState.board = { ...nextState.board, rows: boardRows, columns: boardCols };
+    }
+
+    // Apply name and grid position to tables.
+    for (const [tableNumber, meta] of tableMetadata) {
+      const tableIndex = tableNumber - 1;
+      if (meta.name === undefined && (meta.row === undefined || meta.col === undefined)) continue;
+      nextState.tables[tableIndex] = {
+        ...nextState.tables[tableIndex],
+        ...(meta.name !== undefined ? { name: meta.name } : {}),
+        ...(meta.row !== undefined && meta.col !== undefined
+          ? { gridPosition: { row: meta.row, column: meta.col } }
+          : {}),
+      };
     }
   }
 
@@ -606,12 +673,18 @@ function parseCsvImportPayload(text: string): {
 
     const guestId = createGuestRowId(guests);
 
+    const extraFields: Record<string, string> | undefined =
+      extraColumns.length > 0
+        ? Object.fromEntries(extraColumns.map(({ index, label }) => [label, record[index] ?? ""]))
+        : undefined;
+
     guests.push({
       id: guestId,
       fullName,
       host,
       party,
       circle,
+      ...(extraFields !== undefined ? { extraFields } : {}),
     });
     const hasTableValue = tableValue.trim().length > 0;
     const hasSeatValue = seatValue.trim().length > 0;
@@ -667,6 +740,11 @@ function parseCsvImportPayload(text: string): {
 function buildCsvContent(guests: GuestInputRow[], seating: PersistedSeatingData): string {
   const { tables } = seating.state;
 
+  const tableByNumber = new Map<number, TableState>();
+  for (const table of tables) {
+    tableByNumber.set(table.tableNumber, table);
+  }
+
   // Build seat assignment map: guestId -> { tableNumber, seatIndex, presetId }
   const seatMap = new Map<string, { tableNumber: number; seatIndex: number; presetId: string }>();
   for (const table of tables) {
@@ -688,22 +766,40 @@ function buildCsvContent(guests: GuestInputRow[], seating: PersistedSeatingData)
     return value;
   }
 
+  // Collect extra column keys in first-appearance order across all guests.
+  const extraKeys: string[] = [];
+  const seenExtraKeys = new Set<string>();
+  for (const row of guests) {
+    if (!row.extraFields) continue;
+    for (const key of Object.keys(row.extraFields)) {
+      if (!seenExtraKeys.has(key)) {
+        seenExtraKeys.add(key);
+        extraKeys.push(key);
+      }
+    }
+  }
+
   const rows = guests.map((row) => {
     const seat = seatMap.get(row.id);
-    return [
+    const table = seat ? tableByNumber.get(seat.tableNumber) : undefined;
+    const standardCells = [
       row.fullName,
       row.host,
-      row.party,
       row.circle,
+      row.party,
       seat ? String(seat.tableNumber) : "",
-      seat ? String(seat.seatIndex) : "",
+      table ? table.name : "",
       seat ? seat.presetId : "",
-    ]
-      .map(escapeCsv)
-      .join(",");
+      table ? String(table.gridPosition.row) : "",
+      table ? String(table.gridPosition.column) : "",
+      seat ? String(seat.seatIndex) : "",
+    ];
+    const extraCells = extraKeys.map((key) => row.extraFields?.[key] ?? "");
+    return [...standardCells, ...extraCells].map(escapeCsv).join(",");
   });
 
-  return [CSV_EXPORT_HEADERS.map(escapeCsv).join(","), ...rows].join("\n");
+  const header = [...CSV_EXPORT_HEADERS, ...extraKeys].map(escapeCsv).join(",");
+  return [header, ...rows].join("\n");
 }
 
 function getImportFileKind(file: File): "json" | "csv" | null {
@@ -1883,108 +1979,6 @@ function SeatingApp({
           onDragOver={handleFileDragOver}
           onDragLeave={handleFileDragLeave}
           onDrop={handleFileDrop}>
-          <header
-            ref={headerRef}
-            className="z-10 flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-2.5">
-            <SidebarTrigger className="h-8 w-8" />
-            <h1 className="whitespace-nowrap text-lg font-semibold text-foreground">
-              Seating Assignments
-            </h1>
-            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-              <Button type="button" size="sm" onClick={handleAddTable}>
-                <Plus size={14} aria-hidden="true" />
-                <span className="max-sm:hidden">Add Table</span>
-              </Button>
-              {warnings.length > 0 && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="border-warning/30 bg-warning/10 text-warning-foreground hover:border-warning/45 hover:bg-warning/15"
-                  onClick={() => setShowWarnings((v) => !v)}>
-                  <AlertTriangle size={14} aria-hidden="true" />
-                  {warnings.length} data {warnings.length === 1 ? "issue" : "issues"}
-                </Button>
-              )}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button type="button" variant="outline" size="sm" aria-label="More actions">
-                    <MoreHorizontal size={14} aria-hidden="true" />
-                    More
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem onSelect={handleZoomOut} disabled={boardZoom <= 0.5}>
-                    <ZoomOut size={14} aria-hidden="true" />
-                    Zoom Out
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleZoomReset} disabled={boardZoom === 1}>
-                    <ZoomIn size={14} aria-hidden="true" />
-                    Reset Zoom ({Math.round(boardZoom * 100)}%)
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleZoomIn} disabled={boardZoom >= 1.5}>
-                    <ZoomIn size={14} aria-hidden="true" />
-                    Zoom In
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={onThemeToggle}>
-                    {theme === "dark" ? (
-                      <Sun size={14} aria-hidden="true" />
-                    ) : (
-                      <Moon size={14} aria-hidden="true" />
-                    )}
-                    {theme === "dark" ? "Switch to Light Theme" : "Switch to Dark Theme"}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleBoardSettings}>
-                    <Settings size={14} aria-hidden="true" />
-                    Board Settings
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
-                    <Upload size={14} aria-hidden="true" />
-                    Import
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleExport}>
-                    <Download size={14} aria-hidden="true" />
-                    Export
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onSelect={handleReset}
-                    className="text-destructive focus:bg-destructive/10 focus:text-destructive">
-                    <RotateCcw size={14} aria-hidden="true" />
-                    Reset
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="sr-only"
-                aria-label="Reset zoom"
-                onClick={handleZoomReset}>
-                {Math.round(boardZoom * 100)}%
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="sr-only"
-                onClick={handleExport}>
-                Export
-              </Button>
-              <input
-                ref={fileInputRef}
-                className="hidden"
-                type="file"
-                accept="application/json,.json,text/csv,.csv"
-                aria-label="Import seating JSON or CSV file"
-                onChange={handleImportChange}
-              />
-            </div>
-          </header>
-
           {autoAssignWarning && (
             <div
               className="pointer-events-none fixed inset-x-0 z-30 flex justify-center px-4"
@@ -2011,22 +2005,6 @@ function SeatingApp({
             </div>
           )}
 
-          {showWarnings && (
-            <div className="px-4 pb-2">
-              <Alert className="max-h-32 overflow-y-auto" variant="destructive">
-                <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-                <AlertTitle>Data issues</AlertTitle>
-                <AlertDescription>
-                  <ul className="list-disc space-y-1 pl-4">
-                    {warnings.map((warning, index) => (
-                      <li key={index}>{warning}</li>
-                    ))}
-                  </ul>
-                </AlertDescription>
-              </Alert>
-            </div>
-          )}
-
           <div className="flex min-h-0 flex-1 overflow-hidden">
             <Sidebar
               onAddGuest={handleAddGuest}
@@ -2034,6 +2012,124 @@ function SeatingApp({
               onDeleteGuest={handleDeleteGuest}
             />
             <SidebarInset className="min-h-0 min-w-0 w-0">
+              <header
+                ref={headerRef}
+                className="z-10 flex shrink-0 items-center gap-3 border-b border-border bg-card px-4 py-2.5">
+                <SidebarTrigger className="h-8 w-8" />
+                <h1 className="min-w-0 truncate text-lg font-semibold text-foreground">
+                  Seating Assignments
+                </h1>
+                <div className="ml-auto flex shrink-0 items-center gap-2">
+                  <Button type="button" size="sm" onClick={handleAddTable}>
+                    <Plus size={14} aria-hidden="true" />
+                    <span className="max-sm:hidden">Add Table</span>
+                  </Button>
+                  {warnings.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="border-warning/30 bg-warning/10 text-warning-foreground hover:border-warning/45 hover:bg-warning/15"
+                      onClick={() => setShowWarnings((v) => !v)}>
+                      <AlertTriangle size={14} aria-hidden="true" />
+                      {warnings.length} data {warnings.length === 1 ? "issue" : "issues"}
+                    </Button>
+                  )}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button type="button" variant="outline" size="sm" aria-label="More actions">
+                        <MoreHorizontal size={14} aria-hidden="true" />
+                        More
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuItem onSelect={handleZoomOut} disabled={boardZoom <= 0.5}>
+                        <ZoomOut size={14} aria-hidden="true" />
+                        Zoom Out
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={handleZoomReset} disabled={boardZoom === 1}>
+                        <ZoomIn size={14} aria-hidden="true" />
+                        Reset Zoom ({Math.round(boardZoom * 100)}%)
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={handleZoomIn} disabled={boardZoom >= 1.5}>
+                        <ZoomIn size={14} aria-hidden="true" />
+                        Zoom In
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={onThemeToggle}>
+                        {theme === "dark" ? (
+                          <Sun size={14} aria-hidden="true" />
+                        ) : (
+                          <Moon size={14} aria-hidden="true" />
+                        )}
+                        {theme === "dark" ? "Switch to Light Theme" : "Switch to Dark Theme"}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={handleBoardSettings}>
+                        <Settings size={14} aria-hidden="true" />
+                        Board Settings
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
+                        <Upload size={14} aria-hidden="true" />
+                        Import
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={handleExport}>
+                        <Download size={14} aria-hidden="true" />
+                        Export
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={handleReset}
+                        className="text-destructive focus:bg-destructive/10 focus:text-destructive">
+                        <RotateCcw size={14} aria-hidden="true" />
+                        Reset
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="sr-only"
+                    aria-label="Reset zoom"
+                    onClick={handleZoomReset}>
+                    {Math.round(boardZoom * 100)}%
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="sr-only"
+                    onClick={handleExport}>
+                    Export
+                  </Button>
+                  <input
+                    ref={fileInputRef}
+                    className="hidden"
+                    type="file"
+                    accept="application/json,.json,text/csv,.csv"
+                    aria-label="Import seating JSON or CSV file"
+                    onChange={handleImportChange}
+                  />
+                </div>
+              </header>
+
+              {showWarnings && (
+                <div className="px-4 pb-2">
+                  <Alert className="max-h-32 overflow-y-auto" variant="destructive">
+                    <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                    <AlertTitle>Data issues</AlertTitle>
+                    <AlertDescription>
+                      <ul className="list-disc space-y-1 pl-4">
+                        {warnings.map((warning, index) => (
+                          <li key={index}>{warning}</li>
+                        ))}
+                      </ul>
+                    </AlertDescription>
+                  </Alert>
+                </div>
+              )}
+
               <div className="flex min-h-0 flex-1 overflow-hidden">
                 <TableBoard
                   activeDragKind={activeDragKind}

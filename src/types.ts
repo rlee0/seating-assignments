@@ -8,6 +8,7 @@ export interface GuestInputRow {
   party: string;
   circle: string;
   fullName: string;
+  extraFields?: Record<string, string>;
 }
 
 export interface PersistedGuestData {
